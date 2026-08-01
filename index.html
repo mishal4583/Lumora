@@ -150,6 +150,10 @@ function startPad(){ // layer 1, score>=5
     o.connect(g); g.connect(master); o.start(); padOsc.push(o);
   });
 }
+function stopPad(){ // unlike arp/bass/bells (gated live on S.score, so they naturally re-trigger each round), the pad's one-shot padStarted flag needs an explicit reset so it re-earns itself each round too
+  padOsc.forEach(o=>{ try{ o.stop(); }catch(e){} });
+  padOsc=[]; padStarted=false;
+}
 const ARP=MOTIF.map(f=>f*0.5);
 let arpI=0;
 function playArp(){ tone(ARP[arpI%ARP.length],1.2,0.035,'triangle'); arpI++; } // layer 2, >=15
@@ -238,6 +242,7 @@ let villageHintShown=false, refillHintShown=false, missHintShown=false;
 let screen='title'; // 'title' | 'play'
 let S=null;
 function reset(){
+  stopPad();
   S={
     score:0, misses:0, caughtN:0, deliveredN:0, over:false, overT:0,
     flies:[], moths:[], magnet:null, parts:[], sparks:[], fireworks:[], balloons:[],
@@ -246,7 +251,7 @@ function reset(){
     t:0, spawnT:0.4, mothT:0, magT:rand(12,18), lockCd:0, magnetT:0,
     hitch:0, cricketT:rand(0.5,2), owlT:rand(9,20), batT:rand(12,24),
     bloomT:rand(24,34), bloomBanner:0, deliverT:0, deliverN:0,
-    lightAnim:{}, hintFade:1, shootT:rand(4,8), shots:[], aurora:0, constA:0, deliverHint:0, mothFlash:0, mothHint:0, seenMoth:false, seenShy:false, shyHint:0,
+    lightAnim:{}, hintFade:(hintStage===0?1:0), shootT:rand(4,8), shots:[], aurora:0, constA:0, deliverHint:0, mothFlash:0, mothHint:0, seenMoth:false, seenShy:false, shyHint:0,
     deliverExplainT:0, missHintT:0,
     milestoneFlash:0, villageGlow:0, villageGlowTarget:0,
     smoke:[], catT:0, mill:0, arpT:0, bassT:0, bellT:0, fwT:0, balT:0,
@@ -448,7 +453,8 @@ function update(dt){
   if(S.score+S.carried.length>=8){
     S.bloomT-=dt;
     if(S.bloomT<=0){
-      for(let i=0;i<7;i++)setTimeout(()=>{ if(S&&!S.over)spawnFly('y'); },i*180);
+      const roundS=S; // guard against a reset() happening mid-flight and reassigning S to a new round
+      for(let i=0;i<7;i++)setTimeout(()=>{ if(roundS===S&&!roundS.over)spawnFly('y'); },i*180);
       S.bloomBanner=3; S.bloomT=rand(30,45);
       sMagnet();
     }
@@ -962,7 +968,7 @@ function drawHUD(){
   else if(S.shyHint>0)banner('a shy firefly — approach slowly…',96,'#cfeecb',S.shyHint);
   else if(S.capMsgT>0)banner(S.capMsg,96,'#ffe9b8',Math.min(1,S.capMsgT));
   else if(S.carried.length>S.cap)banner('your glow is loud — the moths can see you!',96,'#f2b98e',0.9);
-  else if(S.deliverHint>0&&S.deliverHint<7)banner('bring your glow down to the village ↓',96,'#ffe9b8',0.6+0.3*Math.sin(S.t*2.5));
+  else if(S.deliverHint>0)banner('bring your glow down to the village ↓',96,'#ffe9b8',0.6+0.3*Math.sin(S.t*2.5));
   // pause button (same geometry as its hitbox)
   if(!S.over){
     ctx.globalAlpha=0.55;
@@ -973,7 +979,7 @@ function drawHUD(){
     ctx.fillRect(PAUSE_BTN.x+2,PAUSE_BTN.y-8,4.5,16);
     ctx.globalAlpha=1;
   }
-  if(hintStage===0&&S.hintFade>0&&!S.over){
+  if(S.hintFade>0&&!S.over){
     ctx.globalAlpha=S.hintFade*(0.6+0.3*Math.sin(S.t*2.5));
     ctx.fillStyle='#e9e4d2'; ctx.font='italic 24px Georgia,serif'; ctx.textAlign='center';
     ctx.fillText('drag to catch fireflies',S.jar.x,S.jar.y+58);
