@@ -793,8 +793,10 @@ function drawVillage(){
     g.addColorStop(0,'rgba(255,214,110,0)');
     g.addColorStop(1,'rgba(255,214,110,'+p+')');
     ctx.fillStyle=g; ctx.fillRect(0,H-260,W,200);
-    // explicit boundary + label so the drop-off line reads clearly even when the village art is small on tall phone screens
-    ctx.globalAlpha=0.4+0.15*Math.sin(S.t*2.2);
+  }
+  // explicit boundary + label — only while the "bring your glow to the village" hint is active (jar-full, first round only)
+  if(S.deliverHint>0&&!S.over){
+    ctx.globalAlpha=Math.min(1,S.deliverHint)*(0.4+0.15*Math.sin(S.t*2.2));
     ctx.strokeStyle='#ffe9b8'; ctx.lineWidth=1.5; ctx.setLineDash([7,10]);
     ctx.beginPath(); ctx.moveTo(26,DELIVER_Y); ctx.lineTo(W-26,DELIVER_Y); ctx.stroke();
     ctx.setLineDash([]);
