@@ -29,7 +29,7 @@ function resize(){
 window.addEventListener('resize',resize); resize();
 // ---- YouTube Playables SDK bridge (no-ops when running standalone) ----
 const YT=(typeof ytgame!=='undefined'&&ytgame.IN_PLAYABLES_ENV)?ytgame:null;
-let paused=false, pauseReason=null, audioEnabled=true, readySent=false;
+let paused=false, pauseReason=null, audioEnabled=true, firstFrameSent=false, gameReadySent=false;
 let pointer={down:false};
 function pauseGame(reason){
   if(paused)return;
@@ -1121,10 +1121,19 @@ function loop(now){
   if(cv.width===0||Math.abs(Math.round(W*scale*dpr)-cv.width)>2)resize();
   let dt=Math.min(0.033,(now-lastT)/1000); lastT=now;
   if(!paused)update(dt);
-  draw();
-  if(!readySent&&cv.width>0){
-    readySent=true;
-    if(YT&&YT.game){ try{ if(YT.game.firstFrameReady)YT.game.firstFrameReady(); if(YT.game.gameReady)YT.game.gameReady(); }catch(e){} }
+  draw(); // renders the title screen (our splash/main-menu) on the very first call
+
+  // Lifecycle Hook 1: the first visual frame is now on screen.
+  if(!firstFrameSent&&cv.width>0){
+    firstFrameSent=true;
+    if(YT&&YT.game&&YT.game.firstFrameReady){ try{ YT.game.firstFrameReady(); }catch(e){} }
+  }
+  // Lifecycle Hook 2: the title screen is our main menu and is interactive
+  // (its "begin" button is hit-testable) as soon as it's drawn — signal
+  // gameReady the moment that screen is actually showing.
+  if(!gameReadySent&&cv.width>0&&screen==='title'){
+    gameReadySent=true;
+    if(YT&&YT.game&&YT.game.gameReady){ try{ YT.game.gameReady(); }catch(e){} }
   }
   requestAnimationFrame(loop);
 }
