@@ -17,7 +17,7 @@
 'use strict';
 // ===== Lumora — a glowkeeper story (Solotov Studios) =====
 const W=540, H=960;
-const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const cv=document.getElementById('c'), ctx=cv.getContext('2d',{alpha:false}); // canvas is always fully opaque; skip alpha compositing for cheaper mobile rasterization
 let scale=1, dpr=Math.min(window.devicePixelRatio||1,2);
 function resize(){
   const vw=window.innerWidth, vh=window.innerHeight;
@@ -71,6 +71,7 @@ const dist=(x1,y1,x2,y2)=>Math.hypot(x2-x1,y2-y1);
 // ---------- glow sprites ----------
 const glowCache={};
 function glowSprite(color,r){
+  r=Math.max(1,Math.round(r)); // quantize so pulsing radii (sin-driven) hit the cache instead of allocating a new canvas every frame
   const key=color+'|'+r;
   if(glowCache[key])return glowCache[key];
   const s=document.createElement('canvas'); s.width=s.height=Math.ceil(r*2);
@@ -231,7 +232,9 @@ if(YT&&YT.game&&YT.game.loadData){
   YT.game.loadData().then(s=>{ try{ const d=JSON.parse(s||'{}'); if(d.best>best)best=d.best; }catch(e){} }).catch(()=>{})
     .then(()=>{ loadDone=true; if(pendingSave){ pendingSave=false; saveProgress(); } });
 }
-let hintStage=0; // 0=drag hint, 1=deliver hint shown
+let hintStage=0; // 0=drag hint, 1=caught at least once
+// one-time onboarding hints — persist across replays (not reset by reset()) since they're only needed the first round ever
+let villageHintShown=false, refillHintShown=false, missHintShown=false;
 let screen='title'; // 'title' | 'play'
 let S=null;
 function reset(){
@@ -244,6 +247,7 @@ function reset(){
     hitch:0, cricketT:rand(0.5,2), owlT:rand(9,20), batT:rand(12,24),
     bloomT:rand(24,34), bloomBanner:0, deliverT:0, deliverN:0,
     lightAnim:{}, hintFade:1, shootT:rand(4,8), shots:[], aurora:0, constA:0, deliverHint:0, mothFlash:0, mothHint:0, seenMoth:false, seenShy:false, shyHint:0,
+    deliverExplainT:0, missHintT:0,
     milestoneFlash:0, villageGlow:0, villageGlowTarget:0,
     smoke:[], catT:0, mill:0, arpT:0, bassT:0, bellT:0, fwT:0, balT:0,
     bats:[]
@@ -367,6 +371,8 @@ function update(dt){
   if(S.shyHint>0)S.shyHint=Math.max(0,S.shyHint-dt);
   if(S.bloomBanner>0)S.bloomBanner=Math.max(0,S.bloomBanner-dt);
   if(S.capMsgT>0)S.capMsgT=Math.max(0,S.capMsgT-dt);
+  if(S.deliverExplainT>0)S.deliverExplainT=Math.max(0,S.deliverExplainT-dt);
+  if(S.missHintT>0)S.missHintT=Math.max(0,S.missHintT-dt);
   if(S.villageGlowTarget)S.villageGlow=Math.min(1,S.villageGlow+dt*0.5);
   // sky evolution (the universe celebrates after 35)
   if(S.score>=50){ S.shootT-=dt; if(S.shootT<=0){ S.shots.push({x:rand(60,W-60),y:rand(40,H*0.3),vx:rand(-260,-160),vy:rand(70,130),life:0.9}); S.shootT=rand(5,11); } }
@@ -521,6 +527,7 @@ function update(dt){
       if(f.patience<=0){
         f.state='leaving'; f.vy=-30;
         S.misses++; sMiss(); puff(f.x,f.y,GLOW_M,5,26,0.9);
+        if(!missHintShown){ missHintShown=true; S.missHintT=4; } // one-time reminder: fireflies drift off if kept waiting too long — first round only
         if(S.misses>=5){
           S.over=true; S.overT=0; sOver(); saveProgress();
           if(YT&&YT.engagement&&YT.engagement.sendScore){ try{ YT.engagement.sendScore({value:S.score}); }catch(e){} }
@@ -557,7 +564,7 @@ function update(dt){
         S.jar.pulse=1; sCatch(S.caughtN);
         puff(jx,jy,TYPES[f.type].glow,10,70,0.7);
         if(hintStage===0)hintStage=1;
-        if(S.carried.length>=5&&S.deliverHint<8)S.deliverHint=8;
+        if(!villageHintShown&&S.carried.length>=S.cap){ villageHintShown=true; S.deliverHint=8; } // guide to the village once the jar is actually full — first round only
         S.flies.splice(i,1); continue;
       }
     } else if(f.state==='leaving'){
@@ -590,6 +597,7 @@ function update(dt){
     S.wasDelivering=false;
     if(S.batchPerfect)gainCap(1,'perfect delivery!');
     S.batchPerfect=false;
+    if(!refillHintShown){ refillHintShown=true; S.deliverExplainT=4; } // one-time reminder: jar's empty, go catch more — first round only
   }
 
   // delivery sparks (bezier flight to houses)
@@ -752,7 +760,7 @@ function drawVillage(){
     const a=S.lightAnim[i]; if(a<=0)return;
     const flick=0.85+0.15*Math.sin(S.t*7+i*2.1);
     ctx.globalAlpha=a*flick;
-    const gr=L.lantern?22:26;
+    const gr=L.lantern?27:32;
     ctx.drawImage(glowSprite(GLOW_Y,gr),L.x-gr,L.y-gr,gr*2,gr*2);
     ctx.fillStyle=L.lantern?'#ffd987':'#ffca6e';
     if(L.lantern){ ctx.beginPath(); ctx.arc(L.x,L.y,3.4,0,6.28); ctx.fill(); }
@@ -785,6 +793,14 @@ function drawVillage(){
     g.addColorStop(0,'rgba(255,214,110,0)');
     g.addColorStop(1,'rgba(255,214,110,'+p+')');
     ctx.fillStyle=g; ctx.fillRect(0,H-260,W,200);
+    // explicit boundary + label so the drop-off line reads clearly even when the village art is small on tall phone screens
+    ctx.globalAlpha=0.4+0.15*Math.sin(S.t*2.2);
+    ctx.strokeStyle='#ffe9b8'; ctx.lineWidth=1.5; ctx.setLineDash([7,10]);
+    ctx.beginPath(); ctx.moveTo(26,DELIVER_Y); ctx.lineTo(W-26,DELIVER_Y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#ffe9b8'; ctx.font='italic 15px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+    ctx.fillText('▽ the village',W/2,DELIVER_Y-6);
+    ctx.globalAlpha=1;
   }
 }
 function drawFly(f){
@@ -936,7 +952,9 @@ function drawHUD(){
   ctx.fillStyle='#8992ba'; ctx.textAlign='right';
   ctx.fillText('best '+best,W-22,32);
   if(S.magnetT>0)banner('✨ glow magnet '+Math.ceil(S.magnetT)+'s',148,'#fff3cf',0.85);
-  if(S.bloomBanner>0)banner('a firefly bloom!',96,'#ffe9b8',S.bloomBanner);
+  if(S.deliverExplainT>0)banner('jar\'s empty — go catch more fireflies!',96,'#ffe9b8',Math.min(1,S.deliverExplainT));
+  else if(S.missHintT>0)banner('a firefly drifted away — don\'t keep them waiting',96,'#f2b98e',Math.min(1,S.missHintT));
+  else if(S.bloomBanner>0)banner('a firefly bloom!',96,'#ffe9b8',S.bloomBanner);
   else if(S.mothFlash>0)banner('a moth startled your firefly!',96,'#dcb0d0',S.mothFlash);
   else if(S.mothHint>0)banner('a moth! it startles fireflies near your jar',96,'#dcb0d0',S.mothHint);
   else if(S.shyHint>0)banner('a shy firefly — approach slowly…',96,'#cfeecb',S.shyHint);
@@ -956,7 +974,7 @@ function drawHUD(){
   if(hintStage===0&&S.hintFade>0&&!S.over){
     ctx.globalAlpha=S.hintFade*(0.6+0.3*Math.sin(S.t*2.5));
     ctx.fillStyle='#e9e4d2'; ctx.font='italic 24px Georgia,serif'; ctx.textAlign='center';
-    ctx.fillText('drag to glow',S.jar.x,S.jar.y+58);
+    ctx.fillText('drag to catch fireflies',S.jar.x,S.jar.y+58);
     ctx.globalAlpha=1;
   }
 }
