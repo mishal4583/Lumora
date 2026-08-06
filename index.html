@@ -19,8 +19,10 @@
 const W=540, H=960;
 const cv=document.getElementById('c'), ctx=cv.getContext('2d',{alpha:false}); // canvas is always fully opaque; skip alpha compositing for cheaper mobile rasterization
 let scale=1, dpr=Math.min(window.devicePixelRatio||1,2);
+let lastVW=0, lastVH=0; // last viewport size we actually sized for — lets the render loop notice changes even when a 'resize' event never fires (e.g. some fullscreen enter/exit paths)
 function resize(){
   const vw=window.innerWidth, vh=window.innerHeight;
+  lastVW=vw; lastVH=vh;
   scale=Math.min(vw/W, vh/H);
   cv.style.width=(W*scale)+'px'; cv.style.height=(H*scale)+'px';
   cv.width=Math.round(W*scale*dpr); cv.height=Math.round(H*scale*dpr);
@@ -231,7 +233,9 @@ const mists=[]; for(let i=0;i<4;i++)mists.push({x:rand(0,W),y:H-rand(160,300),w:
 const titleFlies=[]; for(let i=0;i<14;i++)titleFlies.push({x:rand(30,W-30),y:rand(H*0.08,H*0.62),ax:rand(14,34),ay:rand(10,26),fx:rand(0.15,0.4),fy:rand(0.12,0.35),px:rand(0,6.28),py:rand(0,6.28),tw:rand(0.6,1.6),pt:rand(0,6.28),r:rand(10,20),color:Math.random()<0.6?GLOW_Y:GLOW_B});
 
 // ---------- state ----------
-let best=0; try{ best=parseInt(localStorage.getItem('gk2_best')||'0',10)||0; }catch(e){}
+// localStorage is ONLY a fallback for standalone/non-Playables testing — the platform forbids
+// any save mechanism besides saveData/loadData while actually running in the Playables env.
+let best=0; if(!YT){ try{ best=parseInt(localStorage.getItem('gk2_best')||'0',10)||0; }catch(e){} }
 if(YT&&YT.game&&YT.game.loadData){
   YT.game.loadData().then(s=>{ try{ const d=JSON.parse(s||'{}'); if(d.best>best)best=d.best; }catch(e){} }).catch(()=>{})
     .then(()=>{ loadDone=true; if(pendingSave){ pendingSave=false; saveProgress(); } });
@@ -366,6 +370,37 @@ cv.addEventListener('pointermove',e=>{
 });
 window.addEventListener('pointerup',()=>{ pointer.down=false; }); // release is state-safe: it only clears the flag
 
+// ---- keyboard input (SHOULD: directional input + Esc to close modals) ----
+const KEYS={up:0,down:0,left:0,right:0};
+function keyDir(k){
+  switch(k){
+    case 'ArrowUp': case 'w': case 'W': return 'up';
+    case 'ArrowDown': case 's': case 'S': return 'down';
+    case 'ArrowLeft': case 'a': case 'A': return 'left';
+    case 'ArrowRight': case 'd': case 'D': return 'right';
+    default: return null;
+  }
+}
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ // MUST NOT preventDefault on Esc — Safari fullscreen relies on it reaching the browser
+    if(paused&&pauseReason==='user')resumeGame();
+    return;
+  }
+  if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){
+    initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
+    if(!paused&&screen==='title'){ screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8); }
+    else if(!paused&&S&&S.over&&S.overT>0.35){ reset(); }
+    else if(paused&&pauseReason==='user'){ resumeGame(); }
+    e.preventDefault(); return;
+  }
+  const dir=keyDir(e.key);
+  if(dir){
+    initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
+    KEYS[dir]=1; e.preventDefault();
+  }
+});
+window.addEventListener('keyup',e=>{ const dir=keyDir(e.key); if(dir)KEYS[dir]=0; });
+
 // ---------- update ----------
 function update(dt){
   S.t+=dt;
@@ -422,6 +457,12 @@ function update(dt){
   if(S.over){ S.overT+=dt; return; }
 
   const d=diff();
+  // keyboard jar movement (SHOULD: directional input) — nudges the same target the pointer drags
+  if(screen==='play'&&(KEYS.up||KEYS.down||KEYS.left||KEYS.right)){
+    const kspd=320, kx=(KEYS.right?1:0)-(KEYS.left?1:0), ky=(KEYS.down?1:0)-(KEYS.up?1:0);
+    S.jar.tx=clamp(S.jar.tx+kx*kspd*dt,30,W-30);
+    S.jar.ty=clamp(S.jar.ty+ky*kspd*dt,H*0.13,H-170);
+  }
   // jar motion + speed tracking (for shy fireflies)
   S.jar.px=S.jar.x; S.jar.py=S.jar.y;
   S.jar.x=lerp(S.jar.x,S.jar.tx,1-Math.pow(0.0008,dt));
@@ -536,7 +577,8 @@ function update(dt){
         if(!missHintShown){ missHintShown=true; S.missHintT=4; } // one-time reminder: fireflies drift off if kept waiting too long — first round only
         if(S.misses>=5){
           S.over=true; S.overT=0; sOver(); saveProgress();
-          if(YT&&YT.engagement&&YT.engagement.sendScore){ try{ YT.engagement.sendScore({value:S.score}); }catch(e){} }
+          // send the all-time best, not this round's score — must match what's in the cloud save
+          if(YT&&YT.engagement&&YT.engagement.sendScore){ try{ YT.engagement.sendScore({value:best}); }catch(e){} }
           if(humGain)humGain.gain.setTargetAtTime(0.0001,AC.currentTime,0.3);
           S.flies.forEach(o=>{ if(o.state==='drift'){o.state='leaving';o.vy=-30;} });
         }
@@ -615,7 +657,7 @@ function update(dt){
       S.score+=TYPES[s.type].pts; S.deliveredN++;
       sDeliver(S.deliveredN);
       puff(s.tx,s.ty,TYPES[s.type].glow,8,45,0.6);
-      if(S.score>best){ best=S.score; try{localStorage.setItem('gk2_best',''+best);}catch(e){} }
+      if(S.score>best){ best=S.score; if(!YT){ try{localStorage.setItem('gk2_best',''+best);}catch(e){} } }
       milestoneCheck(prev);
       S.sparks.splice(i,1);
     }
@@ -1144,7 +1186,7 @@ function draw(){
 // ---------- loop ----------
 let lastT=performance.now();
 function loop(now){
-  if(cv.width===0||Math.abs(Math.round(W*scale*dpr)-cv.width)>2)resize();
+  if(cv.width===0||window.innerWidth!==lastVW||window.innerHeight!==lastVH)resize(); // catches viewport changes even without a 'resize' event (e.g. fullscreen exit in some hosts)
   let dt=Math.min(0.033,(now-lastT)/1000); lastT=now;
   if(!paused)update(dt);
   draw(); // renders the title screen (our splash/main-menu) on the very first call
