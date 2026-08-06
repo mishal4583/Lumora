@@ -33,6 +33,7 @@ window.addEventListener('resize',resize); resize();
 const YT=(typeof ytgame!=='undefined'&&ytgame.IN_PLAYABLES_ENV)?ytgame:null;
 let paused=false, pauseReason=null, audioEnabled=true, firstFrameSent=false, gameReadySent=false;
 let pointer={down:false};
+const KEYS={up:0,down:0,left:0,right:0}; // declared early: reset() below clears it, and reset() is also called at top-level before the keyboard listeners are registered
 function pauseGame(reason){
   if(paused)return;
   paused=true; pauseReason=reason;
@@ -263,6 +264,7 @@ function reset(){
   };
   LIGHTS.forEach((L,i)=>S.lightAnim[i]=0);
   pointer.down=false;
+  KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
 }
 reset();
 
@@ -371,7 +373,6 @@ cv.addEventListener('pointermove',e=>{
 window.addEventListener('pointerup',()=>{ pointer.down=false; }); // release is state-safe: it only clears the flag
 
 // ---- keyboard input (SHOULD: directional input + Esc to close modals) ----
-const KEYS={up:0,down:0,left:0,right:0};
 function keyDir(k){
   switch(k){
     case 'ArrowUp': case 'w': case 'W': return 'up';
@@ -386,11 +387,14 @@ window.addEventListener('keydown',e=>{
     if(paused&&pauseReason==='user')resumeGame();
     return;
   }
+  if(paused){ // pause overlay swallows ALL input here too, same guard as pointerdown — no audio/state leaks through a pause
+    if((e.key==='Enter'||e.key===' '||e.key==='Spacebar')&&pauseReason==='user'){ resumeGame(); e.preventDefault(); }
+    return;
+  }
   if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){
     initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
-    if(!paused&&screen==='title'){ screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8); }
-    else if(!paused&&S&&S.over&&S.overT>0.35){ reset(); }
-    else if(paused&&pauseReason==='user'){ resumeGame(); }
+    if(screen==='title'){ screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8); }
+    else if(S&&S.over&&S.overT>0.35){ reset(); }
     e.preventDefault(); return;
   }
   const dir=keyDir(e.key);
