@@ -20,10 +20,37 @@ const W=540, H=960;
 const cv=document.getElementById('c'), ctx=cv.getContext('2d',{alpha:false}); // canvas is always fully opaque; skip alpha compositing for cheaper mobile rasterization
 let scale=1, dpr=Math.min(window.devicePixelRatio||1,2);
 let lastVW=0, lastVH=0; // last viewport size we actually sized for — lets the render loop notice changes even when a 'resize' event never fires (e.g. some fullscreen enter/exit paths)
+// Zero-viewport init fix: YouTube's own Playables docs document that the
+// game may initially load inside a hidden WebView whose viewport starts at
+// 0x0, and game code MUST initialize/render regardless. The old
+// scale=Math.min(vw/W,vh/H) went straight to 0 whenever vw/vh were 0,
+// zeroing cv.width/cv.height and making ctx.setTransform degenerate (a
+// 0-scale matrix) -- draw() kept being called every frame, but painted
+// nothing into a zero-area buffer, and firstFrameReady()/gameReady() (both
+// gated on cv.width>0 in loop(), intentionally, so they never fire before a
+// real frame exists) then had no real frame to ever detect, so they never
+// fired at all. That's the exact loading-spinner symptom: the Test Suite
+// waits on gameReady(), which was permanently blocked. It's also exactly
+// why entering fullscreen "fixed" it -- fullscreen forces the host to
+// finally give the page a real, non-zero viewport, which drove vw/vh
+// non-zero, which let this same function compute a real scale for the
+// first time, which finally made cv.width>0 true on the very next frame.
+// Fix: fall back to scale=1 (the virtual resolution's own 1:1 pixel size)
+// whenever the real viewport isn't available yet, so the canvas's INTERNAL
+// drawing resolution (cv.width/cv.height) and the transform are always
+// valid and non-zero from the very first call -- draw() actually paints a
+// real frame immediately, independent of any external viewport event, and
+// firstFrameReady()/gameReady() can fire on their normal schedule. This is
+// a presentation-layer fallback only: the virtual resolution (W/H=540/960)
+// and every gameplay coordinate are completely unchanged. Once a real
+// viewport does arrive, this same function (already re-invoked by loop()'s
+// per-frame poll below on any innerWidth/innerHeight change) recomputes the
+// real scale/letterboxing exactly as before -- this just stops "no real
+// viewport yet" from meaning "never initialize."
 function resize(){
   const vw=window.innerWidth, vh=window.innerHeight;
   lastVW=vw; lastVH=vh;
-  scale=Math.min(vw/W, vh/H);
+  scale=(vw>0&&vh>0)?Math.min(vw/W, vh/H):1;
   cv.style.width=(W*scale)+'px'; cv.style.height=(H*scale)+'px';
   cv.width=Math.round(W*scale*dpr); cv.height=Math.round(H*scale*dpr);
   ctx.setTransform(scale*dpr,0,0,scale*dpr,0,0);
@@ -117,20 +144,19 @@ const GLOW_Y='rgba(255,214,110,1)', GLOW_B='rgba(140,190,255,1)', GLOW_G='rgba(1
 // catch" check, shared by every site that decides whether a firefly gets
 // accepted into the jar. CARRY_OVERFLOW_HEADROOM is zero -- ZERO TOLERANCE.
 // A first pass at this fix set it to 3, deliberately preserving an existing
-// "carry past capacity, moths notice you" risk mechanic (the `overloaded`
-// flag and moth-homing block in update()) that used to silently ride on the
-// same bug this fix closes. Reported live as a jar reading "9/6" -- correctly
-// bounded per that design, but a jar visibly holding more than its own
-// stated max reads as broken regardless of the reasoning behind it, so the
-// call was made to drop it: S.carried.length can now never exceed S.cap,
-// full stop. Direct, unavoidable consequence: `overloaded` (S.carried.length
-// >S.cap) can never be true any more, so the moth-attraction mechanic and
-// its "your glow is loud" banner are now permanently dead code, not just
-// quieter -- left in place, not removed, since removing a named mechanic
-// wasn't what was asked; flagging it plainly here instead of leaving it
-// silently orphaned. This function is still the ONE place that decides
-// "room for one more," called identically at lock-acquisition, at the
-// locked->caught transition, and at the final push itself.
+// "carry past capacity, moths notice you" risk mechanic that used to
+// silently ride on the same bug this fix closes. Reported live as a jar
+// reading "9/6" -- correctly bounded per that design, but a jar visibly
+// holding more than its own stated max reads as broken regardless of the
+// reasoning behind it, so the call was made to drop it: S.carried.length can
+// now never exceed S.cap, full stop. Direct, unavoidable consequence: the
+// overloaded-jar moth-attraction mechanic (and its "your glow is loud"
+// banner) could never trigger again -- dead code for a while, since removed
+// entirely (see update()'s moth loop and drawMoth()); moths are now purely
+// ambient/decorative, same as before this mechanic could ever fire in
+// practice. This function is still the ONE place that decides "room for one
+// more," called identically at lock-acquisition, at the locked->caught
+// transition, and at the final push itself.
 const CARRY_OVERFLOW_HEADROOM=0;
 function jarCanAcceptCatch(){ return S.carried.length<S.cap+CARRY_OVERFLOW_HEADROOM; }
 // coins/rarity/desc are Stage 2 Part A additions (Journal + coin economy);
@@ -1223,11 +1249,39 @@ function questProgress(kind,type){
   });
   if(changed)persistQuests();
 }
+// Minimal quest-object validation at the save-load boundary. The array-level
+// check below (Array.isArray/length) already existed, but nothing validated
+// each quest's OWN shape -- a malformed/tampered save (e.g. a quest entry
+// missing `reward`) could crash questRewardLabel()/grantQuestReward(),
+// which read q.reward.kind/q.reward.val unconditionally, since those never
+// expected anything other than what rollQuests() itself produces. Purely
+// defensive: doesn't change what a valid quest looks like, doesn't touch
+// rollQuests()/questProgress()/reward granting/generation at all -- just
+// checks a loaded entry has the same shape every quest this game has ever
+// actually produced already has.
+function isValidQuestObject(q){
+  return !!q&&typeof q==='object'
+    &&typeof q.id==='string'
+    &&typeof q.desc==='string'
+    &&typeof q.kind==='string'
+    &&typeof q.target==='number'&&q.target>0
+    &&typeof q.progress==='number'
+    &&typeof q.done==='boolean'
+    &&!!q.reward&&typeof q.reward==='object'
+    &&typeof q.reward.kind==='string'
+    &&typeof q.reward.val==='number';
+}
 // decides fresh-quests-vs-keep-existing; called once prevLastPlayed/loadedQuests
 // are both actually known (immediately below for !YT, inside loadData().then() for YT)
 function resolveQuests(loadedQuests){
   if(prevLastPlayed<=0||localDayKey(prevLastPlayed)!==localDayKey(lastPlayed)){ rollQuests(); } // new day, or first-ever session -> fresh
-  else if(Array.isArray(loadedQuests)&&loadedQuests.length){ quests=loadedQuests; } // same day -> keep whatever was already active
+  else if(Array.isArray(loadedQuests)&&loadedQuests.length){
+    // keep only the entries that actually pass validation -- a single
+    // malformed entry in an otherwise-valid array shouldn't cost the player
+    // their other two legitimate quests
+    const validQuests=loadedQuests.filter(isValidQuestObject);
+    if(validQuests.length)quests=validQuests; else rollQuests(); // every entry was malformed -- same fallback as "nothing usable was persisted"
+  }
   else{ rollQuests(); } // same day but nothing usable was persisted -- fall back rather than leave quests empty
 }
 if(!YT){
@@ -1981,10 +2035,16 @@ const SHOP_ITEMS={
   // price increase is the whole change here.
   deco: {vendor:'decor',    name:'Garden Lanterns',  price:150, desc:'A few extra lanterns strung along the garden path.',                     field:'deco'},
   // Village Fountain — the Decor shop's 2nd item, not a new Construction subsystem.
-  // Dry/cracked by default, flowing once owned (see drawFountain()) — thin by
-  // design, same effort level as Garden Lanterns, not Village Heart's.
+  // Renders nothing at all pre-purchase (see drawFountain()'s own "draws
+  // NOTHING when unowned" comment) -- thin by design, same effort level as
+  // Garden Lanterns, not Village Heart's.
   // Upgrade Cost Escalation pass: 35->300, same flat-increase treatment as Garden Lanterns.
-  fountain:{vendor:'decor', name:'Village Fountain', price:300, desc:'A cracked stone basin, dry and waiting. Once repaired, it never stops.', field:'fountain'},
+  // Copy fix: the old desc ("A cracked stone basin, dry and waiting...")
+  // described a dry/cracked fountain as visibly present before purchase --
+  // it isn't (nothing renders pre-purchase, see above), so the wording
+  // implied a placeholder that was never actually there. Fixed to describe
+  // the locked decoration itself, not a physical state of the plaza.
+  fountain:{vendor:'decor', name:'Village Fountain', price:300, desc:'A fountain waiting to bring a little light to the village.', field:'fountain'},
   // Master Glowkeeper Statue -- the Decor shop's 3rd item, and the first one
   // gated behind a progression requirement rather than coins alone (see
   // `locked` below, checked generically by tryPurchase()). Still a one-shot
@@ -2197,12 +2257,15 @@ cv.addEventListener('pointerdown',e=>{
       // purchase, not just on subsequent ones.
       const wasStatueOwned=upgrades.statueOwned;
       itemsForVendor('decor').forEach((item,i)=>{ if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(i))))tryPurchase(item.key); });
-      // Same rect (cardButtonRect(upgradeCardRect(2)), index 2 = the
-      // statue's own itemsForVendor('decor') position) drives both
-      // drawStatueCard()'s button and this hit-test, single source of
-      // truth as usual -- but only fires "Equip" on a tap where the
-      // statue was ALREADY owned before this tap happened.
-      if(wasStatueOwned&&inRect(p.x,p.y,cardButtonRect(upgradeCardRect(2))))tryEquipStatue();
+      // Same rects drawStatueCard() itself draws from, single source of
+      // truth as usual -- the "Equip" button uses the standard
+      // cardButtonRect() (index 2 = the statue's own itemsForVendor('decor')
+      // position), the equipped "tap to unequip" control uses the wider
+      // statueEquippedRect() its own label needs (see that function's
+      // comment). Only fires on a tap where the statue was ALREADY owned
+      // before this tap happened (see wasStatueOwned above).
+      const statueActionRect=upgrades.statueEquipped?statueEquippedRect(upgradeCardRect(2)):cardButtonRect(upgradeCardRect(2));
+      if(wasStatueOwned&&inRect(p.x,p.y,statueActionRect))tryEquipStatue();
     } else { // trails
       // whole-card tap target, same discipline as jarCardRects() above --
       // the Aurora Trail card is deliberately NOT hit-tested here at all
@@ -2684,15 +2747,6 @@ function update(dt){
     }
   }
 
-  // overcrowded jar: your light gets loud — moths notice you from farther away
-  // Capacity Enforcement Bug: CARRY_OVERFLOW_HEADROOM is 0 now (zero
-  // tolerance, per direct instruction after a jar was seen reading "9/6"
-  // live) -- S.carried.length can never exceed S.cap any more, so this flag
-  // can never be true and everything gated on it below (moth homing, the
-  // "your glow is loud" banner) is permanently dead code. Left in place
-  // rather than deleted -- say so plainly, not quietly.
-  const overloaded=S.carried.length>S.cap;
-
   // delivery: jar in village zone releases carried fireflies
   if(S.carried.length>0&&S.jar.y>DELIVER_Y){
     if(!S.wasDelivering){
@@ -2780,18 +2834,12 @@ function update(dt){
   if(S.deliverHint>0)S.deliverHint-=dt;
   if(S.statuePulse>0)S.statuePulse-=dt;
 
-  // moths (overloaded jar draws them in — visible homing)
+  // moths: purely ambient/decorative (see the Capacity Enforcement Bug
+  // comment above CARRY_OVERFLOW_HEADROOM -- the overloaded-jar homing
+  // mechanic that used to live here was removed, not just dead-coded)
   for(let i=S.moths.length-1;i>=0;i--){
     const m=S.moths[i];
     m.wob+=dt*1.4; m.flap+=dt*22;
-    if(overloaded){
-      const dd=dist(m.x,m.y,jx,jy);
-      if(dd<340&&dd>40){
-        const a=Math.atan2(jy-m.y,jx-m.x);
-        m.x+=Math.cos(a)*46*dt; m.y+=Math.sin(a)*46*dt;
-        m.homing=true;
-      } else m.homing=false;
-    } else m.homing=false;
     m.x+=m.vx*dt; m.y+=Math.sin(m.wob)*36*dt;
     if(m.x<-40||m.x>W+40)S.moths.splice(i,1);
   }
@@ -3326,7 +3374,9 @@ function drawFly(f){
   }
 }
 function drawMoth(m){
-  const nearJar=m.homing||dist(m.x,m.y,S.jar.x,S.jar.y-14)<140;
+  // ambient-only proximity glow -- unrelated to the (removed) overloaded-jar
+  // homing mechanic, this is just "does a moth happen to be near the jar"
+  const nearJar=dist(m.x,m.y,S.jar.x,S.jar.y-14)<140;
   ctx.globalAlpha=0.92;
   if(nearJar){
     ctx.globalAlpha=0.6+0.4*Math.sin(S.t*10);
@@ -3541,7 +3591,6 @@ function drawHUD(){
   else if(S.mothHint>0)banner('a moth! it startles fireflies near your jar',96,'#dcb0d0',S.mothHint);
   else if(S.shyHint>0)banner('a shy firefly — approach slowly…',96,'#cfeecb',S.shyHint);
   else if(S.capMsgT>0)banner(S.capMsg,96,'#ffe9b8',Math.min(1,S.capMsgT));
-  else if(S.carried.length>S.cap)banner('your glow is loud — the moths can see you!',96,'#f2b98e',0.9);
   else if(S.deliverHint>0)banner('bring your glow down to the village ↓',96,'#ffe9b8',0.6+0.3*Math.sin(S.t*2.5));
   else if(S.weatherBannerT>0)banner(S.weatherMsg,96,'#cfd6ee',Math.min(1,S.weatherBannerT)); // lowest priority — atmospheric flavor, never competes with an actual gameplay hint above it
   // pause button (same geometry as its hitbox)
@@ -3594,10 +3643,9 @@ function drawFullJarAlert(){
 // Night Complete tips: one shown per round-end, picked at random (see the
 // S.tip assignment beside S.misses>=5 in update()). Each line is checked
 // against the actual mechanic it describes, not guessed -- e.g. "avoid
-// moths" was deliberately left OUT: moths only ever homed in on an
-// `overloaded` jar (S.carried.length>S.cap), and CARRY_OVERFLOW_HEADROOM
-// is permanently 0 now (see the Capacity Enforcement pass), so that state
-// can never occur any more and moths are purely decorative -- a tip
+// moths" was deliberately left OUT: moths are purely ambient/decorative (the
+// overloaded-jar homing mechanic they used to have was removed, see the
+// Capacity Enforcement Bug comment above CARRY_OVERFLOW_HEADROOM) -- a tip
 // warning about them would just be wrong. A miss is caused ONLY by a
 // firefly's own patience running out (f.patience<=0), never by a moth.
 const NIGHT_TIPS=[
@@ -4917,6 +4965,15 @@ function drawDecorCard(item,rect,accent){
 // reuses lumGlassPanel/lumEdgeAccent/cardButtonRect/lumButton -- a
 // restrained gold+violet double edge accent to read as "prestige", per
 // direct instruction not to make it excessively glowing.
+// Equipped-state control: wider than the standard cardButtonRect() (150px)
+// because its label ("Equipped · Tap to Unequip") needs room to stay
+// legible -- the Buy/Equip states keep the standard shared cardButtonRect()
+// completely unchanged (still used by the generic decor buy loop). Single
+// source of truth for both drawStatueCard()'s pill and the pointerdown
+// hit-test below, same "one rect drives both draw and hit-test" discipline
+// as every other button in the file. Right edge anchored at the same
+// rect.x+rect.w-18 padding every other card button uses, just wider.
+function statueEquippedRect(rect){ return {x:rect.x+rect.w-18-115,y:rect.y+rect.h-32,w:230,h:36,fontSize:11}; }
 function drawStatueCard(item,rect){
   const locked=item.locked&&item.locked(), owned=shopItemOwned(item), equipped=owned&&upgrades.statueEquipped, afford=coins>=item.price;
   lumGlassPanel(rect.x,rect.y,rect.w,rect.h,18);
@@ -4942,8 +4999,12 @@ function drawStatueCard(item,rect){
     ctx.fillStyle='rgba(174,184,203,0.6)'; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right'; ctx.textBaseline='middle';
     ctx.fillText('LOCKED',rect.x+rect.w-pad,rect.y+rect.h-26);
   } else if(equipped){
-    ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right'; ctx.textBaseline='middle';
-    ctx.fillText('EQUIPPED ✓',rect.x+rect.w-pad,rect.y+rect.h-26);
+    // Visual affordance fix: was a bare status label with no button
+    // treatment at all -- reads as a real premium toggle control now,
+    // matching the existing gold/glass button language, while the
+    // equip/unequip behavior itself (tryEquipStatue(), a toggle) is
+    // completely unchanged.
+    lumButton(statueEquippedRect(rect),'Equipped · Tap to Unequip','glass');
   } else if(owned){
     lumButton(cardButtonRect(rect),'Equip','glass');
   } else {
