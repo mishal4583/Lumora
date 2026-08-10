@@ -1104,7 +1104,14 @@ function migrateSharedStatTier(statKey,oldTierCount,dstUpgrades){
 // item that needs a real owned-vs-equipped distinction (deco/fountain are
 // "always active once owned", the statue's Glowkeeper's Blessing should be
 // toggleable per direct spec).
-let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}};
+// First-Night Tutorial: tutorialDone follows the exact same flat-boolean
+// convention as every field above -- the ONE piece of tutorial state that
+// needs to survive a reload (so a returning player is never shown it
+// again). The tutorial's own in-progress step (tutorialStep/
+// tutorialPanelOpen, see below) is deliberately NOT persisted here or
+// anywhere else -- it's session-only, same precedent as
+// villageHintShown/refillHintShown.
+let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}};
 if(!YT){
   try{
     const u=JSON.parse(localStorage.getItem('gk2_upgrades')||'{}');
@@ -1127,6 +1134,7 @@ if(!YT){
     if(u.fountain===true)upgrades.fountain=true;
     if(u.statueOwned===true)upgrades.statueOwned=true;
     if(u.statueEquipped===true)upgrades.statueEquipped=true;
+    if(u.tutorialDone===true)upgrades.tutorialDone=true;
     if(u.ownedJars&&typeof u.ownedJars==='object'){ Object.keys(u.ownedJars).forEach(k=>{ if(u.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
     if(typeof u.equippedJar==='string')upgrades.equippedJar=u.equippedJar;
     // legacy: a save from before the Jar Collection port only has ownedSkins/
@@ -1544,6 +1552,7 @@ if(YT&&YT.game&&YT.game.loadData){
         if(d.upgrades.fountain===true)upgrades.fountain=true;
         if(d.upgrades.statueOwned===true)upgrades.statueOwned=true;
         if(d.upgrades.statueEquipped===true)upgrades.statueEquipped=true;
+        if(d.upgrades.tutorialDone===true)upgrades.tutorialDone=true;
         if(d.upgrades.ownedJars&&typeof d.upgrades.ownedJars==='object'){ Object.keys(d.upgrades.ownedJars).forEach(k=>{ if(d.upgrades.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
         if(typeof d.upgrades.equippedJar==='string')upgrades.equippedJar=d.upgrades.equippedJar;
         if(d.upgrades.ownedSkins&&typeof d.upgrades.ownedSkins==='object'){ Object.keys(d.upgrades.ownedSkins).forEach(k=>{ if(d.upgrades.ownedSkins[k]===true)upgrades.ownedJars[k==='classic'?'simple':k]=true; }); }
@@ -1583,6 +1592,98 @@ if(YT&&YT.game&&YT.game.loadData){
 let hintStage=0; // 0=drag hint, 1=caught at least once
 // one-time onboarding hints — persist across replays (not reset by reset()) since they're only needed the first round ever
 let villageHintShown=false, refillHintShown=false, missHintShown=false;
+
+// ---------- first-night tutorial ----------
+// Isolated state machine (kept separate from every other onboarding flag
+// above on purpose -- this is the one interactive, gameplay-pausing piece,
+// not a passive fading label). tutorialStep is which step is CURRENT (its
+// trigger condition is still pending, or its panel is actually showing);
+// tutorialPanelOpen is whether that step's panel is on screen RIGHT NOW --
+// this is what actually gates simulation (see loop()'s update(dt) call,
+// same spot `paused` already gates on). Neither is part of S and neither is
+// persisted -- like villageHintShown/refillHintShown above, this must
+// survive reset() calls within the same session (a game-over mid-tutorial
+// must not restart it), and a fresh page load always starts a genuinely new
+// player back at their current step rather than replaying steps already
+// seen this session. The one thing that DOES persist is upgrades.tutorialDone
+// (see its own comment by the upgrades initializer) -- the sole signal for
+// "has this player ever seen or skipped this."
+let tutorialStep='NONE', tutorialPanelOpen=false; // NONE|INTRO|CATCH|DELIVER|MOTH|MAGNET|COMPLETE
+// Contextual hints (distinct from the main tutorial's own panels): fire at
+// most once each, and only AFTER the main tutorial has concluded --
+// completed or skipped, tutorialStep==='COMPLETE' either way -- so they can
+// never double up with that flow's own MOTH/MAGNET panels for a player who
+// went through it. Session-only, same precedent as the flags above.
+let tutFirstCarryHinted=false, tutFirstMothHinted=false, tutFirstMagnetHinted=false;
+// Copy per direct spec. `action` is the short imperative line under the
+// body text (INTRO only); `highlight` names which live gameplay object
+// drawTutorialHighlight() should draw an animated cue toward (see below) --
+// 'village' is the delivery zone itself, not a single object.
+const TUTORIAL_STEPS={
+  INTRO:{heading:'Welcome, Glowkeeper',body:'Your task is simple: catch the fireflies and carry their light to the sleeping village.',action:'DRAG YOUR JAR TO CATCH FIREFLIES',highlight:null,warn:false},
+  CATCH:{heading:'Catch a Firefly',body:'Drag your jar toward the glowing firefly.',action:null,highlight:'firefly',warn:false},
+  DELIVER:{heading:'Bring the Light Home',body:'Carry the firefly to the village below. Release it in the village to deliver its light.',action:null,highlight:'village',warn:false},
+  // Added per direct feedback: DELIVER teaches the ACT of delivering (fires
+  // after just one catch), but says nothing about what happens once the jar
+  // actually fills up -- a new player who keeps catching past that point
+  // had no instruction telling them to stop and go deliver. Same
+  // highlight/copy family as DELIVER, just the "jar is full" moment
+  // specifically.
+  FULL:{heading:'Jar is Full',body:'Your jar can\'t hold any more fireflies. Carry it down to the village to deliver your catch.',action:null,highlight:'village',warn:false},
+  MOTH:{heading:'Watch Out — Moth',body:'Moths are dangerous. Avoid touching them with your jar.',action:null,highlight:'moth',warn:true},
+  MAGNET:{heading:'Magnet',body:'The magnet pulls nearby fireflies toward your jar. Catch it to activate the effect.',action:null,highlight:'magnet',warn:false}
+};
+const TUTORIAL_STEP_ORDER=['INTRO','CATCH','DELIVER','FULL','MOTH','MAGNET'];
+// Round begins from the title screen (see beginPlay()) -- only ever ARMS
+// the tutorial for a genuinely new player (tutorialDone still false) who
+// hasn't already started one this session (tutorialStep still NONE, so a
+// player who went Title -> Play -> Go Home -> Play again mid-tutorial
+// resumes their current step instead of restarting at INTRO).
+function beginTutorialIfNew(){
+  if(!upgrades.tutorialDone&&tutorialStep==='NONE'){ tutorialStep='INTRO'; tutorialPanelOpen=true; }
+}
+// Called once per "Got It" acknowledgment -- closes the current panel and
+// moves to the NEXT step's waiting phase (simulation resumes, watching for
+// that step's own trigger condition in tutorialCheckAdvance() below).
+function tutorialAdvance(){
+  const idx=TUTORIAL_STEP_ORDER.indexOf(tutorialStep);
+  if(idx===-1||idx===TUTORIAL_STEP_ORDER.length-1){ completeTutorial(); return; }
+  tutorialStep=TUTORIAL_STEP_ORDER[idx+1]; tutorialPanelOpen=false;
+}
+// Shared by both "finished the MAGNET step" and "tapped Skip Tutorial" --
+// one place decides completion and persists it, matching every other
+// deliberate one-shot player action in this file (a purchase, a quest
+// completion): save immediately, not deferred to the next autosave point.
+function completeTutorial(){
+  tutorialStep='COMPLETE'; tutorialPanelOpen=false;
+  if(!upgrades.tutorialDone){ upgrades.tutorialDone=true; persistUpgradesLocal(); saveProgress(); }
+}
+// Checked once per frame from the tail of update() -- only ever does
+// anything while the current step is in its WAITING phase (panel closed).
+// Reuses the exact existing detection state (S.flies/S.caughtN/S.moths/
+// S.magnet/S.carried) that catching/delivery/moth/magnet already maintain
+// -- no duplicated spawn/catch/collision logic of its own, per direct
+// instruction.
+function tutorialCheckAdvance(){
+  if(tutorialPanelOpen)return;
+  if(tutorialStep==='CATCH'){ if(S.flies.length>0)tutorialPanelOpen=true; }
+  else if(tutorialStep==='DELIVER'){ if(S.caughtN>=1)tutorialPanelOpen=true; }
+  // Escape hatch: a player who delivers promptly every time (S.deliveredN,
+  // the existing per-round delivery counter) may never actually fill the
+  // jar in this round at all -- without this OR, they'd be stuck waiting on
+  // FULL forever and never reach the MOTH/MAGNET steps. Either the jar
+  // genuinely fills (S.cap, the same canonical comparison drawFullJarAlert()
+  // already uses) or they've already shown they understand delivery.
+  else if(tutorialStep==='FULL'){ if(S.carried.length>=S.cap||S.deliveredN>=2)tutorialPanelOpen=true; }
+  else if(tutorialStep==='MOTH'){ if(S.moths.length>0)tutorialPanelOpen=true; }
+  else if(tutorialStep==='MAGNET'){ if(S.magnet)tutorialPanelOpen=true; }
+  else if(tutorialStep==='COMPLETE'){
+    // contextual hints (item 9) -- each fires at most once, ever
+    if(!tutFirstCarryHinted&&S.carried.length>=1){ tutFirstCarryHinted=true; S.tutCarryHintT=3; }
+    if(!tutFirstMothHinted&&S.moths.length>0){ tutFirstMothHinted=true; S.tutMothHintT=3; }
+    if(!tutFirstMagnetHinted&&S.magnet){ tutFirstMagnetHinted=true; S.tutMagnetHintT=3; }
+  }
+}
 let screen='title'; // 'title' | 'play' | 'shop' | 'village' | 'journal'
 // Stage 2 Part B: the shop is only ever entered from title or a game-over
 // screen (never mid-round — see the pointerdown handler below, which only
@@ -1624,6 +1725,11 @@ function reset(){
     bloomT:rand(24,34), bloomBanner:0, deliverT:0, deliverN:0,
     lightAnim:{}, hintFade:(hintStage===0?1:0), shootT:rand(4,8), shots:[], aurora:0, constA:0, deliverHint:0, statuePulse:0, mothFlash:0, mothHint:0, seenMoth:false, seenShy:false, shyHint:0,
     deliverExplainT:0, missHintT:0,
+    // moth-collision warning flash (always-on gameplay feedback, not
+    // tutorial-gated -- see the "moth interrupt" block in update()) and the
+    // three contextual tutorial hints (item 9) -- all simple decrementing
+    // timers, same pattern as deliverHint/missHintT above.
+    mothWarnT:0, tutCarryHintT:0, tutMothHintT:0, tutMagnetHintT:0,
     milestoneFlash:0, villageGlow:0, villageGlowTarget:0,
     smoke:[], catT:0, mill:0, arpT:0, bassT:0, bellT:0, fwT:0, balT:0,
     bats:[],
@@ -1643,6 +1749,15 @@ function reset(){
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
 }
 reset();
+// Shared "start a fresh round from the title screen" sequence -- was
+// duplicated verbatim at both call sites (BEGIN_BTN's pointerdown and its
+// Enter/Space keyboard equivalent); factored out here so the one new line
+// this adds (arming the tutorial for a genuinely new player) lives in
+// exactly one place instead of needing to be kept in sync at two.
+function beginPlay(){
+  screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
+  beginTutorialIfNew();
+}
 
 // Depth Pass Part 1 retune: maxFlies/patience/speed/mothRate used to sit
 // FLAT for the entire s<10 stretch, then jump at 10, then sit flat again
@@ -1821,6 +1936,12 @@ function toGame(e){ const r=cv.getBoundingClientRect(); return { x:(e.clientX-r.
 // below the guideline (PAUSE_BTN and the three close buttons); every other
 // button already meets or exceeds 48dp.
 function hitR(btn){ return Math.max(btn.r,24/scale); }
+// Rect analog of hitR() above, same reasoning -- widens a short rect
+// button's HIT-TEST height only (never its drawn size) to the 48dp
+// guideline. Full-game audit finding: TUTORIAL_SKIP_BTN is 32 virtual px
+// tall, which undershoots 48dp at typical mobile scale (~0.7-0.8), same
+// class of gap PAUSE_BTN/the close buttons had before hitR() existed.
+function hitRectH(rect){ const minH=48/scale; return rect.h>=minH?rect:{x:rect.x,y:rect.y,w:rect.w,h:minH}; }
 // Lumora UI port: RunSummary's stat panel needs real vertical space above
 // the Continue button, so playBtn/SHOP_BTN_OVER moved down from H*0.62 --
 // nothing else in the file depends on their old exact position (the
@@ -1865,6 +1986,24 @@ const WELCOME_CLOSE_BTN={x:W/2,y:H*0.62,r:56}; // "tap to continue" — a big, g
 const SHOP_CLOSE_BTN={x:W-38,y:56,r:20}; // echoes PAUSE_BTN's corner, one screen up
 const VILLAGE_CLOSE_BTN={x:W-38,y:56,r:20};
 const JOURNAL_CLOSE_BTN={x:W-38,y:56,r:20};
+// First-Night Tutorial panel geometry -- one fixed size/position for every
+// step (INTRO through MAGNET) rather than varying per step, so these rects
+// (single source of truth for both drawTutorialPanel() and the
+// pointerdown/keydown hit-tests) never need to move under the text. A real
+// rect for Skip Tutorial, not bare text -- learned from the earlier "Visit
+// the Workshop" bug this same session (a text-only link with a hit-test
+// narrower than its own visible label).
+// Full-game audit fix: Skip Tutorial used to sit BELOW the panel (+28px),
+// which crowded/overlapped "the village" boundary marker line and the
+// full-jar "N / cap" readout underneath it when the DELIVER/FULL steps'
+// highlight was also active (confirmed visually in-browser) -- panel grown
+// slightly and Skip Tutorial moved fully INSIDE it, same self-contained
+// convention drawConfirmModal()'s own Cancel/Confirm buttons already use,
+// so it can never depend on -- or crowd -- whatever happens to be drawn
+// underneath the panel.
+const TUTORIAL_PANEL_X=W/2-230, TUTORIAL_PANEL_Y=H*0.5-155, TUTORIAL_PANEL_W=460, TUTORIAL_PANEL_H=310;
+const TUTORIAL_GOT_IT_BTN={x:W/2,y:TUTORIAL_PANEL_Y+TUTORIAL_PANEL_H-72,w:200,h:52,fontSize:14};
+const TUTORIAL_SKIP_BTN={x:W/2,y:TUTORIAL_PANEL_Y+TUTORIAL_PANEL_H-26,w:180,h:32};
 // Tracker toggle relocated here from the old Collector shop tab -- it's
 // genuinely about firefly discovery, not a purchase, so it lives on the
 // Journal screen now. Same trackerOn/toggleTracker() source of truth as before.
@@ -2183,6 +2322,14 @@ cv.addEventListener('pointerdown',e=>{
     if(dist(p.x,p.y,WELCOME_CLOSE_BTN.x,WELCOME_CLOSE_BTN.y)<=WELCOME_CLOSE_BTN.r+14)showWelcomeBack=false;
     return;
   }
+  // First-Night Tutorial overlay swallows ALL input too, same guard as
+  // pause/welcome-back above -- only its own Got It/Skip actions respond
+  // (item 11: "only the tutorial interaction should be active").
+  if(tutorialPanelOpen){
+    if(inRect(p.x,p.y,TUTORIAL_GOT_IT_BTN))tutorialAdvance();
+    else if(inRect(p.x,p.y,hitRectH(TUTORIAL_SKIP_BTN)))completeTutorial();
+    return;
+  }
   initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
   if(screen==='village'){
     if(dist(p.x,p.y,VILLAGE_CLOSE_BTN.x,VILLAGE_CLOSE_BTN.y)<=hitR(VILLAGE_CLOSE_BTN)){ screen='title'; return; }
@@ -2277,7 +2424,7 @@ cv.addEventListener('pointerdown',e=>{
   }
   if(screen==='title'){
     if(dist(p.x,p.y,BEGIN_BTN.x,BEGIN_BTN.y)<=BEGIN_BTN.r+14){
-      screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
+      beginPlay();
       return;
     }
     for(const btn of titleNavRects()){
@@ -2349,9 +2496,13 @@ window.addEventListener('keydown',e=>{
     if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){ showWelcomeBack=false; e.preventDefault(); }
     return;
   }
+  if(tutorialPanelOpen){ // same swallow-all-input guard as pointerdown above -- only Got It has a keyboard equivalent, matching every other modal's "no shortcut for the secondary/destructive action" precedent
+    if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){ tutorialAdvance(); e.preventDefault(); }
+    return;
+  }
   if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){
     initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
-    if(screen==='title'){ screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8); }
+    if(screen==='title'){ beginPlay(); }
     else if(S&&S.over&&S.overT>0.35){ reset(); }
     e.preventDefault(); return;
   }
@@ -2621,6 +2772,14 @@ function update(dt){
           puff(f.x,f.y,GLOW_M,6,55,0.5);
         });
         sScatter(); S.lockCd=1.2; S.mothFlash=2.2;
+        // Immediate cause-and-effect feedback (a real gameplay improvement,
+        // not tutorial-gated -- every player benefits, not just new ones):
+        // a short (~0.65s) red flash, decoupled from S.mothFlash's own
+        // longer-lived banner above so neither one's duration constrains
+        // the other. Same trigger, same "actually scared a locked firefly"
+        // condition -- not merely brushing past a moth with nothing to
+        // scare, per direct instruction not to fire on mere proximity.
+        S.mothWarnT=0.65;
       }
     }
   }
@@ -2833,6 +2992,10 @@ function update(dt){
   }
   if(S.deliverHint>0)S.deliverHint-=dt;
   if(S.statuePulse>0)S.statuePulse-=dt;
+  if(S.mothWarnT>0)S.mothWarnT-=dt;
+  if(S.tutCarryHintT>0)S.tutCarryHintT-=dt;
+  if(S.tutMothHintT>0)S.tutMothHintT-=dt;
+  if(S.tutMagnetHintT>0)S.tutMagnetHintT-=dt;
 
   // moths: purely ambient/decorative (see the Capacity Enforcement Bug
   // comment above CARRY_OVERFLOW_HEADROOM -- the overloaded-jar homing
@@ -2866,6 +3029,7 @@ function update(dt){
     w.cy=lerp(w.cy0,H-90,w.p);
     w.r=lerp(10,220,w.p);
   }
+  tutorialCheckAdvance(); // tail of update() -- runs after every other mutation above, so it always sees this frame's freshest S.flies/S.caughtN/S.moths/S.magnet/S.carried
 }
 
 // ---------- drawing ----------
@@ -3377,8 +3541,17 @@ function drawMoth(m){
   // ambient-only proximity glow -- unrelated to the (removed) overloaded-jar
   // homing mechanic, this is just "does a moth happen to be near the jar"
   const nearJar=dist(m.x,m.y,S.jar.x,S.jar.y-14)<140;
+  // Moth-collision feedback (item 5): brief red flash on the moth itself
+  // while S.mothWarnT is active AND this specific moth is still within the
+  // actual collision distance (the same 72px "moth interrupt" reach in
+  // update()) -- not just anywhere nearby, and not every moth on screen.
+  const colliding=S.mothWarnT>0&&dist(m.x,m.y,S.jar.x,S.jar.y-14)<72;
   ctx.globalAlpha=0.92;
-  if(nearJar){
+  if(colliding){
+    ctx.globalAlpha=0.7+0.3*Math.sin(S.t*18);
+    ctx.drawImage(glowSprite('rgba(214,70,70,1)',26),m.x-26,m.y-26,52,52);
+    ctx.globalAlpha=0.92;
+  } else if(nearJar){
     ctx.globalAlpha=0.6+0.4*Math.sin(S.t*10);
     ctx.drawImage(glowSprite('rgba(216,140,190,1)',24),m.x-24,m.y-24,48,48);
     ctx.globalAlpha=0.92;
@@ -3564,6 +3737,15 @@ function banner(txt,y,color,alpha){
   ctx.fillText(txt,W/2,y);
   ctx.globalAlpha=1;
 }
+// Always-on gameplay feedback (not tutorial-gated -- every player benefits):
+// "near moth = warning, touch moth = mistake" (item 13's own framing). This
+// is the "near" half -- drawMothWarningFlash()/S.mothWarnT is the "touch"
+// half. Reuses the EXACT same 140px/jar-anchor proximity check drawMoth()
+// already computes for its own ambient pink glow (nearJar), just promoted
+// to a real HUD alert instead of a subtle color shift alone that's easy to
+// miss. Derived live from existing positions every frame -- no new state,
+// no duplicated collision logic.
+function jarNearAnyMoth(){ return S.moths.some(m=>dist(m.x,m.y,S.jar.x,S.jar.y-14)<140); }
 function drawHUD(){
   ctx.textBaseline='top';
   ctx.font='600 30px Georgia,serif';
@@ -3588,10 +3770,18 @@ function drawHUD(){
   else if(S.missHintT>0)banner('a firefly drifted away — don\'t keep them waiting',96,'#f2b98e',Math.min(1,S.missHintT));
   else if(S.bloomBanner>0)banner('a firefly bloom!',96,'#ffe9b8',S.bloomBanner);
   else if(S.mothFlash>0)banner('a moth startled your firefly!',96,'#dcb0d0',S.mothFlash);
+  else if(jarNearAnyMoth())banner('⚠ moth nearby — keep your jar away',96,'#f2c199',0.75+0.2*Math.sin(S.t*3));
   else if(S.mothHint>0)banner('a moth! it startles fireflies near your jar',96,'#dcb0d0',S.mothHint);
   else if(S.shyHint>0)banner('a shy firefly — approach slowly…',96,'#cfeecb',S.shyHint);
   else if(S.capMsgT>0)banner(S.capMsg,96,'#ffe9b8',Math.min(1,S.capMsgT));
   else if(S.deliverHint>0)banner('bring your glow down to the village ↓',96,'#ffe9b8',0.6+0.3*Math.sin(S.t*2.5));
+  // First-Night Tutorial contextual hints (item 9) -- brief, one-time-ever
+  // reinforcement after the main tutorial has concluded (see
+  // tutorialCheckAdvance()'s COMPLETE branch); sit below every other actual
+  // gameplay hint above, above only the pure-atmosphere weather line below.
+  else if(S.tutCarryHintT>0)banner('↓ deliver to village',96,'#ffe9b8',Math.min(1,S.tutCarryHintT));
+  else if(S.tutMothHintT>0)banner('⚠ avoid moths',96,'#f2b0b0',Math.min(1,S.tutMothHintT));
+  else if(S.tutMagnetHintT>0)banner('✦ magnet — pulls nearby fireflies',96,'#fff3cf',Math.min(1,S.tutMagnetHintT));
   else if(S.weatherBannerT>0)banner(S.weatherMsg,96,'#cfd6ee',Math.min(1,S.weatherBannerT)); // lowest priority — atmospheric flavor, never competes with an actual gameplay hint above it
   // pause button (same geometry as its hitbox)
   if(!S.over){
@@ -4060,6 +4250,121 @@ function drawConfirmModal(heading,body,actionLabel){
   lumButton(CONFIRM_CANCEL_BTN,'Cancel','quiet');
   lumButton(CONFIRM_ACTION_BTN,actionLabel,'primary');
   ctx.textBaseline='top';
+}
+// ---------- first-night tutorial ----------
+// Resolves which live gameplay object (if any) the current step should
+// highlight -- reads the exact same state the trigger conditions in
+// tutorialCheckAdvance() already watch, nothing duplicated. 'village' has
+// no single object (it's the delivery zone itself), handled separately in
+// drawTutorialHighlight() below.
+function tutorialHighlightTarget(kind){
+  if(kind==='firefly')return S.flies.length?{x:S.flies[0].x,y:S.flies[0].y}:null;
+  if(kind==='moth')return S.moths.length?{x:S.moths[0].x,y:S.moths[0].y}:null;
+  if(kind==='magnet')return S.magnet?{x:S.magnet.x,y:S.magnet.y}:null;
+  return null;
+}
+// A subtle animated cue from the jar toward the target -- a few small
+// traveling glow dots along the straight line between them, plus a soft
+// pulsing ring around the target itself (or, for 'village', a dashed line
+// at the actual delivery boundary, echoing the existing "the village"
+// marker's own visual language rather than inventing a new one). Purely
+// derived from S.t and existing live positions -- no new per-frame state.
+function drawTutorialHighlight(kind){
+  if(!kind)return;
+  const jx=S.jar.x, jy=S.jar.y;
+  const pulse=0.5+0.5*Math.sin(S.t*4);
+  if(kind==='village'){
+    ctx.save();
+    ctx.globalAlpha=0.4+0.3*pulse;
+    ctx.strokeStyle='rgba(255,214,110,0.85)'; ctx.lineWidth=2;
+    ctx.setLineDash([8,8]);
+    ctx.beginPath(); ctx.moveTo(26,DELIVER_Y); ctx.lineTo(W-26,DELIVER_Y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    for(let i=0;i<3;i++){
+      const t=(S.t*0.5+i/3)%1;
+      const cy=lerp(jy,DELIVER_Y,t);
+      ctx.globalAlpha=(1-t)*0.7;
+      ctx.drawImage(glowSprite(GLOW_Y,7),jx-7,cy-7,14,14);
+    }
+    ctx.globalAlpha=1;
+    return;
+  }
+  const tgt=tutorialHighlightTarget(kind);
+  if(!tgt)return;
+  for(let i=0;i<3;i++){
+    const t=(S.t*0.6+i/3)%1;
+    const cx=lerp(jx,tgt.x,t), cy=lerp(jy,tgt.y,t);
+    ctx.globalAlpha=(1-t)*0.7;
+    ctx.drawImage(glowSprite(kind==='moth'?'rgba(214,90,90,1)':GLOW_Y,6),cx-6,cy-6,12,12);
+  }
+  ctx.globalAlpha=1;
+  ctx.save();
+  ctx.globalAlpha=0.5+0.4*pulse;
+  ctx.strokeStyle=kind==='moth'?'rgba(214,90,90,1)':'rgba(255,214,110,1)'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.arc(tgt.x,tgt.y,22+pulse*6,0,6.28); ctx.stroke();
+  ctx.restore();
+}
+// The tutorial panel itself -- one shared function driven by
+// TUTORIAL_STEPS[tutorialStep], not a per-step draw function, so every
+// step's look/behavior stays identical by construction. Same glass-panel/
+// gold-typography language as drawConfirmModal() above; the one MOTH step
+// swaps in a restrained red accent (item 10: "restrained red warning
+// accent", not a full red redesign).
+function drawTutorialPanel(){
+  const step=TUTORIAL_STEPS[tutorialStep];
+  if(!step)return;
+  // dim the (frozen) gameplay behind the panel -- subtler than the confirm
+  // modal's own scrim since the highlight cue underneath needs to stay
+  // legible, per item 10's "subtle dimming", not a heavy blackout
+  ctx.fillStyle='rgba(5,7,27,0.45)'; ctx.fillRect(0,0,W,H);
+  drawTutorialHighlight(step.highlight);
+  const x=TUTORIAL_PANEL_X, y=TUTORIAL_PANEL_Y, w=TUTORIAL_PANEL_W, h=TUTORIAL_PANEL_H;
+  lumPanel(x,y,w,h,20);
+  if(step.warn)lumEdgeAccent({x,y,w,h},'rgba(214,90,90,1)');
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  const glyph=step.warn?'⚠':'✦';
+  lumGlow(glyph+' '+step.heading.toUpperCase()+(step.warn?'':' '+glyph),W/2,y+46,19,'center',step.warn?'#e8b0b0':undefined,step.warn?'rgba(214,90,90,0.55)':undefined);
+  ctx.fillStyle='rgba(174,184,203,0.92)'; ctx.font='14px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+  let ly=wrapText(step.body,W/2,y+76,w-72,20,'center');
+  if(step.action){
+    ly+=14;
+    ctx.fillStyle=WS_GOLD_HEADER; ctx.font='600 13px Georgia,serif'; ctx.textAlign='center';
+    try{ ctx.letterSpacing='1px'; }catch(e){}
+    ctx.fillText(step.action,W/2,ly);
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+  }
+  lumButton(TUTORIAL_GOT_IT_BTN,'Got It','primary');
+  ctx.fillStyle='rgba(174,184,203,0.55)'; ctx.font='italic 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('Skip Tutorial',TUTORIAL_SKIP_BTN.x,TUTORIAL_SKIP_BTN.y);
+  ctx.textAlign='left'; ctx.textBaseline='top';
+}
+// Moth-collision feedback -- always-on gameplay polish, NOT tutorial-gated
+// (every player benefits, not just new ones during the MOTH step). Fires
+// from S.mothWarnT, set in update()'s existing "moth interrupt" block at
+// the exact moment a moth actually scares a locked-in firefly -- the real
+// existing consequence, not mere proximity. ~0.65s one-shot decay, same
+// layered-gradient edge technique as drawFullJarAlert() but red and much
+// briefer, per direct instruction against a huge/permanent overlay.
+function drawMothWarningFlash(){
+  if(S.mothWarnT<=0)return;
+  const a=Math.max(0,Math.min(1,S.mothWarnT/0.65));
+  ctx.save();
+  const bandW=20;
+  const mkGrad=(x0,y0,x1,y1)=>{ const g=ctx.createLinearGradient(x0,y0,x1,y1); g.addColorStop(0,'rgba(214,70,70,'+(0.5*a)+')'); g.addColorStop(1,'rgba(214,70,70,0)'); return g; };
+  ctx.fillStyle=mkGrad(0,0,0,bandW); ctx.fillRect(0,0,W,bandW);
+  ctx.fillStyle=mkGrad(0,H,0,H-bandW); ctx.fillRect(0,H-bandW,W,bandW);
+  ctx.fillStyle=mkGrad(0,0,bandW,0); ctx.fillRect(0,0,bandW,H);
+  ctx.fillStyle=mkGrad(W,0,W-bandW,0); ctx.fillRect(W-bandW,0,bandW,H);
+  ctx.globalAlpha=a*0.85;
+  ctx.strokeStyle='rgba(214,70,70,1)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(S.jar.x,S.jar.y,34+(1-a)*16,0,6.28); ctx.stroke();
+  ctx.globalAlpha=Math.min(1,a*1.6);
+  ctx.fillStyle='#f2a0a0'; ctx.font='700 18px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillText('⚠ MOTH!',S.jar.x,S.jar.y-58);
+  ctx.globalAlpha=1;
+  ctx.restore();
+  ctx.textAlign='left'; ctx.textBaseline='top';
 }
 // ---------- shared title/pause chrome ----------
 // Golden Typography Color Refinement: optional `color`/`echoColor` (NEW,
@@ -5679,8 +5984,10 @@ function draw(){
     ctx.globalAlpha=1;
     drawHUD();
     if(S.carried.length>=S.cap&&!S.over)drawFullJarAlert();
+    drawMothWarningFlash(); // always-on gameplay feedback, independent of the tutorial
     if(S.over)drawOver();
     if(paused)drawPaused();
+    if(tutorialPanelOpen)drawTutorialPanel(); // topmost overlay, same precedent as drawPaused()/drawOver() above
   } else if(screen==='shop'){
     drawShop();
   } else if(screen==='village'){
@@ -5701,7 +6008,12 @@ let lastT=performance.now();
 function loop(now){
   if(cv.width===0||window.innerWidth!==lastVW||window.innerHeight!==lastVH)resize(); // catches viewport changes even without a 'resize' event (e.g. fullscreen exit in some hosts)
   let dt=Math.min(0.033,(now-lastT)/1000); lastT=now;
-  if(!paused)update(dt);
+  // First-Night Tutorial: an open tutorial panel gates simulation the exact
+  // same way `paused` already does -- fireflies/moths/timers all freeze,
+  // draw() still runs every frame so the frozen scene + panel actually
+  // render. Does not touch paused/pauseReason at all, per direct
+  // instruction not to interfere with the existing pause/resume system.
+  if(!paused&&!tutorialPanelOpen)update(dt);
   draw(); // renders the title screen (our splash/main-menu) on the very first call
 
   // Lifecycle Hook 1: the first visual frame is now on screen.
