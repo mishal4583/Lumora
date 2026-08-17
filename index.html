@@ -2583,7 +2583,7 @@ cv.addEventListener('pointerdown',e=>{
     // satisfied (finalizeNight() never reassigns S), so a LATE successful
     // resolution would silently flip extraLifeAvailable/extraLifeUsed after
     // the round has already ended, for no actual benefit to the player.
-    else if(!S.extraLifePending&&inRect(p.x,p.y,EXTRA_LIFE_END_BTN))declineExtraLife();
+    else if(!S.extraLifePending&&inRect(p.x,p.y,hitRectH(EXTRA_LIFE_END_BTN)))declineExtraLife(); // EXTRA_LIFE_END_BTN is drawn at 36px tall; hitRectH() widens the HIT-TEST only to the 48dp minimum, same pattern as TUTORIAL_SKIP_BTN
     return;
   }
   initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
@@ -2628,7 +2628,7 @@ cv.addEventListener('pointerdown',e=>{
     // render at all, so this is a no-op there.
     if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!workshopFavorClaimedThisNight){
       const favorCard=workshopFavorCardRect();
-      if(favorCard&&inRect(p.x,p.y,workshopFavorBtnRect(favorCard))){ requestWorkshopCoins(); return; }
+      if(favorCard&&inRect(p.x,p.y,hitRectH(workshopFavorBtnRect(favorCard)))){ requestWorkshopCoins(); return; } // drawn at 34px tall (fits the compact card); hitRectH() widens the HIT-TEST only to the 48dp minimum
     }
     if(shopTab==='jars'){
       // Aurora shop-presentation pass: the ONLY trigger for the comparison
