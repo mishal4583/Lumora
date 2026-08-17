@@ -795,49 +795,159 @@ if(!(coinFraction>=0&&coinFraction<1))coinFraction=0; // defensive: corrupted/ou
 // total. Declared above reset()'s first top-level call, reassigned inside
 // reset() itself.
 let coinsAtRoundStart=coins;
-// ---------- Mediacube revision: rewarded + interstitial ads ----------
+// ---------- rewarded + interstitial ads ----------
 // Official YouTube Playables SDK only (ytgame.ads.requestRewardedAd/
 // requestInterstitialAd) -- no third-party ad SDK, gated behind YT exactly
 // like every other SDK call in this file. Availability is re-checked live,
-// never cached, so the rewarded button/interstitial opportunity just quietly
-// stop existing if the host doesn't support ads rather than throwing.
+// never cached, so every rewarded offer/interstitial opportunity just
+// quietly stops existing if the host doesn't support ads, rather than
+// throwing.
 function rewardedAdsAvailable(){ return !!(YT&&YT.ads&&typeof YT.ads.requestRewardedAd==='function'); }
 function interstitialAdsAvailable(){ return !!(YT&&YT.ads&&typeof YT.ads.requestInterstitialAd==='function'); }
-// Static, non-identifying reward id per spec -- reused for every rewarded
-// request, never randomized/timestamped/player-tagged.
-const REWARD_ID_100_COINS='lumora-100-coins';
+// Rework: rewarded-ad reward IDs, one canonical table. Each is static,
+// reused for every request of that reward TYPE, and contains no player
+// data/timestamp/session ID, per the Playables SDK requirement. The old
+// flat "lumora-100-coins" Night Complete reward is gone completely --
+// replaced by DOUBLE_NIGHT_COINS below. WORKSHOP_SMALL_UPGRADE is defined
+// here for completeness but deliberately NOT wired to any UI/claim path in
+// this pass -- see the Workshop section further down for why.
+const REWARDED_AD_IDS={
+  DOUBLE_NIGHT_COINS:'lumora-double-night-coins',
+  EXTRA_LIFE:'lumora-extra-life',
+  WORKSHOP_COINS:'lumora-workshop-75-coins',
+  WORKSHOP_SMALL_UPGRADE:'lumora-workshop-small-upgrade'
+};
 // Session-level counter for the interstitial frequency rule (one request
 // opportunity every 3 completed nights) -- deliberately NOT persisted to
 // saveData; a fresh session starting the count over is fine, and the spec
 // itself prefers session-level tracking when it's sufficient. Only nights
 // that count toward this ever increment it -- see continueFromOver().
+// UNCHANGED by this rework -- interstitial frequency/behavior stays exactly
+// as it was.
 let nightsCompletedThisSession=0;
-// The Night Complete "Watch a short ad" button grants coins exactly once,
-// only after requestRewardedAd() resolves strictly true -- never on request
-// start, never on false/rejection/exception, never twice from a double tap.
-// Pending/claimed state lives on S.rewardAdPending/S.rewardAdClaimed (see
-// reset()) so it's per-round like every other over-screen flag in this file
-// -- a fresh round always gets a fresh opportunity, and a stale callback
-// landing after the round has already moved on (roundS!==S) is a no-op.
-function requestRewardedCoins(){
-  if(!S.over||S.rewardAdPending||S.rewardAdClaimed)return;
+// "Double the Glow" -- Night Complete screen. Doubles ONLY the coins earned
+// during the completed night (coins-coinsAtRoundStart, the same
+// authoritative value the existing stat row already displays), never the
+// player's running balance, never quest/other rewards. Granted exactly
+// once, only after requestRewardedAd() resolves strictly true. Pending/
+// claimed state lives on S.rewardedDoubleCoinsPending/
+// ...Claimed (see reset()) so it's per-round like every other over-screen
+// flag here -- a fresh round always gets a fresh opportunity, and a stale
+// callback landing after the round has already moved on (roundS!==S) is a
+// no-op.
+function requestDoubleNightCoins(){
+  if(!S.over||S.rewardedDoubleCoinsPending||S.rewardedDoubleCoinsClaimed)return;
   if(!upgrades.tutorialDone)return; // first-night tutorial stays completely ad-free
   if(!rewardedAdsAvailable())return;
-  S.rewardAdPending=true;
+  // S.coinsEarnedThisNight (snapshotted once in finalizeNight(), see below) --
+  // NOT a live coins-coinsAtRoundStart recompute. Deep-check finding: the
+  // Night Complete screen lets a player visit the Workshop and claim its
+  // own +75 favor, then return here, WITHOUT this round ever resetting --
+  // a live recompute would silently fold that +75 into "tonight's
+  // earnings" and double it too, directly violating "do NOT double other
+  // rewarded-ad rewards." The frozen snapshot is the actual, authoritative
+  // gameplay-earned amount, taken at the exact moment the night ended,
+  // before any post-round reward could touch `coins`.
+  const earned=S.coinsEarnedThisNight;
+  if(earned<=0)return; // nothing meaningful to double -- caller (drawOver/pointerdown) already hides the button for this case too
+  S.rewardedDoubleCoinsPending=true;
   const roundS=S;
   let result;
-  try{ result=YT.ads.requestRewardedAd(REWARD_ID_100_COINS); }
-  catch(e){ roundS.rewardAdPending=false; return; }
+  try{ result=YT.ads.requestRewardedAd(REWARDED_AD_IDS.DOUBLE_NIGHT_COINS); }
+  catch(e){ roundS.rewardedDoubleCoinsPending=false; return; }
   Promise.resolve(result).then(res=>{
     if(roundS!==S)return; // round already moved on -- discard
-    roundS.rewardAdPending=false;
+    roundS.rewardedDoubleCoinsPending=false;
     if(res===true){
-      roundS.rewardAdClaimed=true;
-      coins+=100;
+      roundS.rewardedDoubleCoinsClaimed=true;
+      roundS.rewardedDoubleCoinsAmount=earned; // snapshotted for the confirmation text -- coins-coinsAtRoundStart would silently grow to include the reward itself once granted
+      coins+=earned; // exactly the night's earnings, duplicated once -- never the running balance
       if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
       saveProgress();
     }
-  },()=>{ if(roundS===S)roundS.rewardAdPending=false; });
+  },()=>{ if(roundS===S)roundS.rewardedDoubleCoinsPending=false; });
+}
+// "One More Chance" / Extra Life -- offered exactly once, the instant the
+// player would otherwise hit the normal 5-miss ending (see the
+// S.misses>=missLimit check in update() below). Declining, a false/
+// rejected/thrown ad request, or an unavailable SDK all fall through to
+// the exact same finalizeNight() the normal ending already used -- never a
+// frozen/half-paused state. S.extraLifeAvailable is the mechanical gate
+// (bumps the miss LIMIT from 5 to 6 for the rest of this round, never
+// touches S.misses itself); S.extraLifeUsed is the one-shot "already
+// offered/claimed" gate that prevents a second offer on the next miss.
+// Both are per-round (see reset()) and are NEVER persisted -- this is not
+// permanent progression.
+function finalizeNight(){
+  // Frozen once, right here -- the one authoritative "gameplay earned this
+  // night" figure Double the Glow reads (see requestDoubleNightCoins()).
+  // Taken before S.over flips true, so nothing reachable from the Night
+  // Complete screen (Workshop's own favor, a stray double-claim) can ever
+  // contaminate it after the fact.
+  S.coinsEarnedThisNight=coins-coinsAtRoundStart;
+  S.over=true; S.overT=0; sOver(); saveProgress(); recordNightEconomy();
+  // Night Complete tips: picked once, right here, rather than re-rolled
+  // every drawOver() frame -- same "pick once at the moment of the event"
+  // discipline as S.batchPerfect elsewhere.
+  S.tip=NIGHT_TIPS[Math.floor(Math.random()*NIGHT_TIPS.length)];
+  // send the all-time best, not this round's score — must match what's in the cloud save
+  if(YT&&YT.engagement&&YT.engagement.sendScore){ try{ YT.engagement.sendScore({value:best}); }catch(e){} }
+  if(humGain)humGain.gain.setTargetAtTime(0.0001,AC.currentTime,0.3);
+  S.flies.forEach(o=>{ if(o.state==='drift'){o.state='leaving';o.vy=-30;} });
+}
+// Declining the offer (explicit "End Night" tap, a false/rejected/thrown ad
+// result, or SDK unavailability all route here) closes the overlay and
+// finalizes the night exactly as if Extra Life had never been offered.
+function declineExtraLife(){
+  if(!S.extraLifeOfferOpen)return;
+  S.extraLifeOfferOpen=false;
+  finalizeNight();
+}
+function requestExtraLife(){
+  if(!S.extraLifeOfferOpen||S.extraLifePending||S.extraLifeUsed)return;
+  if(!rewardedAdsAvailable()){ declineExtraLife(); return; } // defensive -- the offer itself only opens when ads are available, see update()
+  S.extraLifePending=true;
+  const roundS=S;
+  let result;
+  try{ result=YT.ads.requestRewardedAd(REWARDED_AD_IDS.EXTRA_LIFE); }
+  catch(e){ roundS.extraLifePending=false; if(roundS===S)declineExtraLife(); return; }
+  Promise.resolve(result).then(res=>{
+    if(roundS!==S)return; // round already moved on -- discard
+    roundS.extraLifePending=false;
+    if(res===true){
+      // grants zero coins, on purpose -- purely one additional miss before the night ends
+      roundS.extraLifeAvailable=true;
+      roundS.extraLifeUsed=true;
+      roundS.extraLifeOfferOpen=false; // closes the overlay; loop()'s update() gate un-freezes next frame
+    } else if(roundS===S){
+      declineExtraLife();
+    }
+  },()=>{ if(roundS===S){ roundS.extraLifePending=false; declineExtraLife(); } });
+}
+// Workshop "Glowkeeper's Favor" -- +75 coins, once per completed night.
+// Session-level (not S-scoped): the Workshop is reachable outside an active
+// round (e.g. from the title screen), so this can't live on S. Reset back
+// to available every time a real (non-tutorial) night completes, in
+// continueFromOver() below -- reuses that exact hook rather than inventing
+// a second counter.
+let workshopFavorPending=false, workshopFavorClaimedThisNight=false;
+function requestWorkshopCoins(){
+  if(workshopFavorPending||workshopFavorClaimedThisNight)return;
+  if(!upgrades.tutorialDone)return;
+  if(!rewardedAdsAvailable())return;
+  workshopFavorPending=true;
+  let result;
+  try{ result=YT.ads.requestRewardedAd(REWARDED_AD_IDS.WORKSHOP_COINS); }
+  catch(e){ workshopFavorPending=false; return; }
+  Promise.resolve(result).then(res=>{
+    workshopFavorPending=false;
+    if(res===true){
+      workshopFavorClaimedThisNight=true;
+      coins+=75;
+      if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+      saveProgress();
+    }
+  },()=>{ workshopFavorPending=false; });
 }
 // The ONE path that leaves the Night Complete screen (both "tap anywhere
 // else to continue/restart" and its Enter/Space keyboard equivalent route
@@ -847,10 +957,16 @@ function requestRewardedCoins(){
 // tutorial (and its own Night Complete screen) stays completely ad-free.
 // requestInterstitialAd() failing/rejecting/being unavailable must never
 // block gameplay, so reset() always runs regardless of outcome.
+// UNCHANGED by this rework, aside from also re-arming the Workshop favor
+// (a plain assignment beside the existing counter, not a change to the
+// interstitial logic itself) -- current Continue/Restart integration,
+// frequency, failure behavior, and tutorial/gameplay restrictions are all
+// exactly as before.
 function continueFromOver(){
   if(!S.over)return;
   if(upgrades.tutorialDone){
     nightsCompletedThisSession++;
+    workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
     if(nightsCompletedThisSession%3===0&&interstitialAdsAvailable()){
       try{
         Promise.resolve(YT.ads.requestInterstitialAd()).then(()=>reset(),()=>reset());
@@ -1782,9 +1898,10 @@ function reset(){
   coinsAtRoundStart=coins; // Lumora UI port: same idea, for the RunSummary's "Coins Earned" delta
   S={
     score:0, misses:0, caughtN:0, deliveredN:0, over:false, overT:0, tip:'',
-    // Mediacube revision: rewarded-ad state, per round like everything else
-    // here -- a fresh round always gets a fresh Watch Ad opportunity.
-    rewardAdPending:false, rewardAdClaimed:false,
+    // rewarded-ad state, per round like everything else here -- a fresh
+    // round always gets a fresh opportunity at each offer. Never persisted.
+    rewardedDoubleCoinsPending:false, rewardedDoubleCoinsClaimed:false, rewardedDoubleCoinsAmount:0, coinsEarnedThisNight:0,
+    extraLifeOfferOpen:false, extraLifePending:false, extraLifeAvailable:false, extraLifeUsed:false,
     flies:[], moths:[], magnet:null, parts:[], sparks:[], fireworks:[], balloons:[], deliverWaves:[],
     jar:{x:W/2,y:H-320,tx:W/2,ty:H-320,px:W/2,py:H-320,spd:0,pulse:0,wob:0},
     carried:[], restT:0, cap:jarCapacityForRun(), capMsg:'', capMsgT:0, wasDelivering:false, batchPerfect:false, elderT:rand(20,30),
@@ -2067,13 +2184,21 @@ const BEGIN_BTN={x:W/2,y:H*0.66,r:60};
 // GOHOME_BTN) so the hit-test (inRect) and the visible pill are the exact
 // same bounds -- and a visible bordered pill instead of plain gray text.
 const SHOP_BTN_OVER={x:W/2,y:567,w:220,h:44,fontSize:12};
-// Mediacube revision: rewarded-ad opportunity, Night Complete screen only.
+// "Double the Glow" rewarded-ad opportunity, Night Complete screen only.
 // Sits well clear of SHOP_BTN_OVER (bottom ~589) and the Night Complete tip
 // text above it (starts H*0.66+16=649.6, at most a few wrapped lines) --
 // same single-source-of-truth rect convention as every button on this
 // screen, one object shared by drawOver()'s draw call and the pointerdown
 // hit-test below.
-const WATCH_AD_BTN={x:W/2,y:830,w:220,h:48,fontSize:12};
+const DOUBLE_COINS_BTN={x:W/2,y:830,w:240,h:48,fontSize:12};
+// "One More Chance" (Extra Life) offer -- a small confirm-style modal, same
+// construction as drawConfirmModal() (dim background + lumPanel), shown
+// instead of finalizing the night the instant the normal 5-miss ending is
+// reached. Two buttons, single source of truth shared by drawExtraLifeOffer()
+// and the pointerdown hit-test.
+const EXTRA_LIFE_MODAL_Y=H*0.5-70;
+const EXTRA_LIFE_AD_BTN={x:W/2,y:EXTRA_LIFE_MODAL_Y+168,w:280,h:52,fontSize:13};
+const EXTRA_LIFE_END_BTN={x:W/2,y:EXTRA_LIFE_MODAL_Y+228,w:180,h:36,fontSize:11};
 const WELCOME_CLOSE_BTN={x:W/2,y:H*0.62,r:56}; // "tap to continue" — a big, generous target since it's the overlay's only action
 const SHOP_CLOSE_BTN={x:W-38,y:56,r:20}; // echoes PAUSE_BTN's corner, one screen up
 const VILLAGE_CLOSE_BTN={x:W-38,y:56,r:20};
@@ -2245,6 +2370,29 @@ function upgradeCardRect(idx){
   const w=W-32, h=212, y=SHOP_CONTENT_Y+56+idx*(h+18);
   return {x:16,y,w,h};
 }
+// Workshop "Glowkeeper's Favor" rewarded-ad card: one small, compact glass
+// card placed just below whatever this tab's own content ends at, reusing
+// the exact same bottom-edge helpers each tab already has (jarGridBottom(),
+// trailGridBottom()+auroraTrailCardRect(), upgradeCardRect(n)) rather than
+// hardcoding a second layout system -- per direct instruction not to
+// redesign the Workshop. Some tabs (decor's 3 stacked cards, the 2-row jar
+// grid) already use nearly the full screen height; on those,
+// workshopFavorCardRect() below returns null and the card simply doesn't
+// render that tab rather than overlapping existing content -- "near the
+// bottom of the Workshop," not "crammed on top of it."
+function workshopFavorContentBottom(){
+  if(shopTab==='jars')return jarGridBottom();
+  if(shopTab==='trails')return auroraTrailCardRect().y+auroraTrailCardRect().h;
+  if(shopTab==='range'||shopTab==='light-value')return upgradeCardRect(1).y+upgradeCardRect(1).h;
+  if(shopTab==='decor')return upgradeCardRect(2).y+upgradeCardRect(2).h;
+  return upgradeCardRect(0).y+upgradeCardRect(0).h; // capacity/magnet: single card
+}
+function workshopFavorCardRect(){
+  const y=workshopFavorContentBottom()+20, h=84;
+  if(y+h>H-50)return null; // this tab's own content already fills the screen -- skip rather than overlap
+  return {x:16,y,w:W-32,h};
+}
+function workshopFavorBtnRect(card){ return {x:card.x+card.w/2,y:card.y+card.h-18,w:230,h:34,fontSize:11}; }
 // value formatting for the upgrade cards -- base+step*tier, matching the
 // Lumora UI prototype's valueAtTier()/formatValue() exactly. Capacity is
 // shown as the BONUS itself (0,1,2...), not the jar's total -- the jar's own
@@ -2422,6 +2570,22 @@ cv.addEventListener('pointerdown',e=>{
     else if(inRect(p.x,p.y,hitRectH(TUTORIAL_SKIP_BTN)))completeTutorial();
     return;
   }
+  // "One More Chance" (Extra Life) overlay swallows ALL input too, same
+  // guard as pause/welcome-back/tutorial above -- only its own two actions
+  // respond. This runs BEFORE the S.over branch further down since the
+  // offer is shown instead of finalizing the night, so S.over is still
+  // false while it's open.
+  if(S.extraLifeOfferOpen){
+    if(inRect(p.x,p.y,EXTRA_LIFE_AD_BTN))requestExtraLife();
+    // Deep-check finding: End Night must also be inert while the ad request
+    // is in flight -- otherwise tapping it mid-request finalizes the night
+    // (S.over=true) while requestExtraLife()'s roundS===S check is still
+    // satisfied (finalizeNight() never reassigns S), so a LATE successful
+    // resolution would silently flip extraLifeAvailable/extraLifeUsed after
+    // the round has already ended, for no actual benefit to the player.
+    else if(!S.extraLifePending&&inRect(p.x,p.y,EXTRA_LIFE_END_BTN))declineExtraLife();
+    return;
+  }
   initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
   if(screen==='village'){
     if(dist(p.x,p.y,VILLAGE_CLOSE_BTN.x,VILLAGE_CLOSE_BTN.y)<=hitR(VILLAGE_CLOSE_BTN)){ screen='title'; return; }
@@ -2458,6 +2622,14 @@ cv.addEventListener('pointerdown',e=>{
     }
     if(dist(p.x,p.y,SHOP_CLOSE_BTN.x,SHOP_CLOSE_BTN.y)<=hitR(SHOP_CLOSE_BTN)){ screen=shopFrom; jarCompareOpen=false; return; }
     for(const tab of shopTabRects()){ if(inRect(p.x,p.y,tab)){ shopTab=tab.key; return; } }
+    // Workshop "Glowkeeper's Favor" -- checked before any per-tab content
+    // below, same priority as SHOP_CLOSE_BTN/the tab row above; the rect
+    // itself is null (no hit-test possible) on tabs where the card doesn't
+    // render at all, so this is a no-op there.
+    if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!workshopFavorClaimedThisNight){
+      const favorCard=workshopFavorCardRect();
+      if(favorCard&&inRect(p.x,p.y,workshopFavorBtnRect(favorCard))){ requestWorkshopCoins(); return; }
+    }
     if(shopTab==='jars'){
       // Aurora shop-presentation pass: the ONLY trigger for the comparison
       // modal (no second entry point on Aurora's own grid card, no
@@ -2535,15 +2707,26 @@ cv.addEventListener('pointerdown',e=>{
   }
   if(S.over){
     if(S.overT>0.35){
+      // Deep-check finding: while a Double the Glow request is in flight,
+      // EVERY tap on this screen -- including Visit the Workshop, not just
+      // the "tap anywhere else continues" catch-all -- must be swallowed,
+      // checked first, before anything else below. Otherwise a stray tap
+      // can navigate/advance past this round mid-request
+      // (continueFromOver() -> reset() replaces S) and a would-be-earned
+      // reward silently discards itself via requestDoubleNightCoins()'s own
+      // roundS!==S staleness guard. Same "modal owns all input while
+      // pending" discipline as the Extra Life offer overlay.
+      if(S.rewardedDoubleCoinsPending)return;
       // shop button is a specific carve-out; every other click on this screen
       // still replays immediately, exactly as before this session — Part B
       // must not make an existing screen's input any less forgiving
       if(inRect(p.x,p.y,SHOP_BTN_OVER)){ shopFrom='play'; screen='shop'; jarCompareOpen=false; return; }
-      // Mediacube revision: same carve-out pattern as SHOP_BTN_OVER above --
-      // only drawn/tappable once the tutorial is done and the SDK actually
-      // offers rewarded ads (see drawOver()), but the hit-test itself stays
-      // defensive about both regardless.
-      if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardAdClaimed&&inRect(p.x,p.y,WATCH_AD_BTN)){ requestRewardedCoins(); return; }
+      // "Double the Glow" -- same carve-out pattern as SHOP_BTN_OVER above --
+      // only drawn/tappable once the tutorial is done, the SDK actually
+      // offers rewarded ads (see drawOver()), and this night earned
+      // something worth doubling, but the hit-test itself stays defensive
+      // about all three regardless.
+      if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardedDoubleCoinsClaimed&&S.coinsEarnedThisNight>0&&inRect(p.x,p.y,DOUBLE_COINS_BTN)){ requestDoubleNightCoins(); return; }
       continueFromOver(); pointer.down=false;
     }
     return;
@@ -2597,10 +2780,18 @@ window.addEventListener('keydown',e=>{
     if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){ tutorialAdvance(); e.preventDefault(); }
     return;
   }
+  // "One More Chance" overlay: same swallow-all-input guard, and same
+  // "no keyboard shortcut for either action" precedent as the pause
+  // confirm modal above -- both Watch Ad and End Night require an explicit
+  // tap/click, never a stray Enter/Space.
+  if(S.extraLifeOfferOpen){
+    if(e.key==='Enter'||e.key===' '||e.key==='Spacebar')e.preventDefault();
+    return;
+  }
   if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){
     initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
     if(screen==='title'){ beginPlay(); }
-    else if(S&&S.over&&S.overT>0.35){ continueFromOver(); }
+    else if(S&&S.over&&S.overT>0.35&&!S.rewardedDoubleCoinsPending){ continueFromOver(); }
     e.preventDefault(); return;
   }
   const dir=keyDir(e.key);
@@ -2915,16 +3106,20 @@ function update(dt){
         f.state='leaving'; f.vy=-30;
         S.misses++; sMiss(); puff(f.x,f.y,GLOW_M,5,26,0.9);
         if(!missHintShown){ missHintShown=true; S.missHintT=4; } // one-time reminder: fireflies drift off if kept waiting too long — first round only
-        if(S.misses>=5){
-          S.over=true; S.overT=0; sOver(); saveProgress(); recordNightEconomy();
-          // Night Complete tips: picked once, right here, rather than
-          // re-rolled every drawOver() frame -- same "pick once at the
-          // moment of the event" discipline as S.batchPerfect above.
-          S.tip=NIGHT_TIPS[Math.floor(Math.random()*NIGHT_TIPS.length)];
-          // send the all-time best, not this round's score — must match what's in the cloud save
-          if(YT&&YT.engagement&&YT.engagement.sendScore){ try{ YT.engagement.sendScore({value:best}); }catch(e){} }
-          if(humGain)humGain.gain.setTargetAtTime(0.0001,AC.currentTime,0.3);
-          S.flies.forEach(o=>{ if(o.state==='drift'){o.state='leaving';o.vy=-30;} });
+        // Extra Life ("One More Chance"): missLimit is 5 normally, 6 once
+        // Extra Life has been successfully claimed this round
+        // (S.extraLifeAvailable) -- S.misses itself is NEVER touched/reset,
+        // only the ending threshold moves. The offer is shown, instead of
+        // finalizing the night immediately, exactly once per round
+        // (guarded by !S.extraLifeUsed, which also becomes true the moment
+        // the offer is claimed) -- see requestExtraLife()/declineExtraLife().
+        const missLimit=S.extraLifeAvailable?6:5;
+        if(S.misses>=missLimit){
+          if(!S.extraLifeUsed&&upgrades.tutorialDone&&rewardedAdsAvailable()){
+            S.extraLifeOfferOpen=true; // pauses simulation (see loop()'s update() gate); drawExtraLifeOffer() takes over the screen instead of drawOver()
+          } else {
+            finalizeNight();
+          }
         }
       }
     } else if(f.state==='locked'){
@@ -4003,27 +4198,58 @@ function drawOver(){
     ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
     wrapText(S.tip,W/2,H*0.66+16,340,17,'center');
   }
-  // Mediacube revision: rewarded-ad opportunity. Hidden entirely during the
-  // first-night tutorial and whenever the SDK doesn't offer rewarded ads on
-  // this host -- never a dead/greyed button, it just doesn't exist there.
-  // Restrained footprint per spec ("must not visually dominate the actual
-  // game"): one small eyebrow + one line of copy + one pill, sitting well
-  // clear of the tip block above it.
-  if(upgrades.tutorialDone&&rewardedAdsAvailable()){
-    if(S.rewardAdClaimed){
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillStyle='rgba(212,235,200,0.85)'; ctx.font='italic 13px Georgia,serif';
-      ctx.fillText('✦ +100 coins added ✦',W/2,WATCH_AD_BTN.y);
-    } else {
-      ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-      lumEyebrow('Keep the Glow',W/2,WATCH_AD_BTN.y-54,'center');
-      ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='italic 12px Georgia,serif';
-      ctx.fillText('Watch a short ad to receive +100 coins',W/2,WATCH_AD_BTN.y-34);
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      lumButton(WATCH_AD_BTN,S.rewardAdPending?'Watching…':'Watch Ad','outline',S.rewardAdPending);
+  // "Double the Glow" -- hidden entirely during the first-night tutorial,
+  // whenever the SDK doesn't offer rewarded ads on this host, or when this
+  // night earned nothing worth doubling (never a dead/greyed button for a
+  // meaningless 0-coin claim, per direct instruction to prefer hiding it) --
+  // it just doesn't exist there. Restrained footprint: one small eyebrow +
+  // one line of copy (the real, authoritative earned-this-night amount,
+  // never reconstructed from firefly counts) + one pill, sitting well clear
+  // of the tip block above it.
+  // Reads S.coinsEarnedThisNight (frozen in finalizeNight()), NOT a live
+  // coins-coinsAtRoundStart recompute -- see requestDoubleNightCoins() for
+  // why a live value would double-count a Workshop favor claimed mid-Night-
+  // Complete.
+  {
+    const nightEarned=S.coinsEarnedThisNight;
+    if(upgrades.tutorialDone&&rewardedAdsAvailable()&&nightEarned>0){
+      if(S.rewardedDoubleCoinsClaimed){
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle='rgba(212,235,200,0.85)'; ctx.font='italic 13px Georgia,serif';
+        ctx.fillText('✦ +'+S.rewardedDoubleCoinsAmount+' coins added ✦',W/2,DOUBLE_COINS_BTN.y);
+      } else {
+        ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+        lumEyebrow('✦ Double the Glow ✦',W/2,DOUBLE_COINS_BTN.y-54,'center');
+        ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='italic 12px Georgia,serif';
+        ctx.fillText('Watch a short ad to double tonight\'s +'+nightEarned+' coins',W/2,DOUBLE_COINS_BTN.y-34);
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        lumButton(DOUBLE_COINS_BTN,S.rewardedDoubleCoinsPending?'Watching…':'Watch Ad · 2× Coins','outline',S.rewardedDoubleCoinsPending);
+      }
     }
   }
   ctx.globalAlpha=1;
+  ctx.textBaseline='top';
+}
+// "One More Chance" (Extra Life) offer -- shown instead of drawOver() the
+// instant the normal 5-miss ending is reached, gated by S.extraLifeOfferOpen
+// (see the miss-check in update() and requestExtraLife()/declineExtraLife()
+// above). Same dim-background + lumPanel construction as drawConfirmModal(),
+// just with its own copy/buttons -- a special Glowkeeper moment, not a
+// generic ad banner.
+function drawExtraLifeOffer(){
+  const w=460,h=280,x=W/2-w/2,y=EXTRA_LIFE_MODAL_Y;
+  ctx.fillStyle='rgba(5,7,27,0.55)'; ctx.fillRect(0,0,W,H);
+  lumPanel(x,y,w,h,20);
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.save(); ctx.fillStyle='rgba(248,196,79,0.6)'; ctx.font='13px Georgia,serif';
+  ctx.fillText('✦',W/2,y+34); ctx.restore();
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  lumGlow('One More Chance',W/2,y+62,20,'center');
+  ctx.fillStyle='rgba(174,184,203,0.9)'; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+  wrapText('The moths scattered your glow. Watch a short ad to keep this night going with one extra life.',W/2,y+86,w-56,18,'center');
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  lumButton(EXTRA_LIFE_AD_BTN,S.extraLifePending?'Watching…':'Watch Ad · Extra Life','primary',S.extraLifePending);
+  lumButton(EXTRA_LIFE_END_BTN,'End Night','quiet');
   ctx.textBaseline='top';
 }
 // ---------- Lumora UI design system ----------
@@ -5379,6 +5605,29 @@ function drawDecorCard(item,rect,accent){
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }
+// Workshop "Glowkeeper's Favor" rewarded-ad card. Same glass-card language
+// as everything else on this screen (lumGlassPanel/lumEdgeAccent/
+// lumButton), just centered instead of left-aligned to read as its own
+// distinct kind of card, not one more upgrade line. Muted violet edge
+// accent (echoes the Statue's own second accent tone below) rather than
+// gold, so it doesn't visually compete with the real progression cards for
+// primary attention -- ads stay secondary, per direct instruction.
+function drawWorkshopFavorCard(card){
+  lumGlassPanel(card.x,card.y,card.w,card.h,16);
+  lumEdgeAccent(card,'rgba(150,120,210,1)');
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  lumEyebrow('✦ Glowkeeper\'s Favor ✦',card.x+card.w/2,card.y+22,'center',11,WS_GOLD_HEADER);
+  if(workshopFavorClaimedThisNight){
+    ctx.fillStyle='rgba(212,235,200,0.85)'; ctx.font='italic 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText('✦ Favor granted for tonight ✦',card.x+card.w/2,card.y+42);
+  } else {
+    ctx.fillStyle=LUM_LAVENDER; ctx.font='italic 11px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText('A little extra light for tonight\'s journey.',card.x+card.w/2,card.y+40);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    lumButton(workshopFavorBtnRect(card),workshopFavorPending?'Watching…':'Watch Ad · +75 Coins','glass',workshopFavorPending);
+  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+}
 // Master Glowkeeper Statue -- the Decor shop's prestige landmark card. Four
 // real states (LOCKED / unlocked-but-not-bought / OWNED-not-equipped /
 // EQUIPPED), more than drawDecorCard() above supports, so it's its own
@@ -5572,6 +5821,15 @@ function drawShop(){
     drawStatueCard(SHOP_ITEMS.statue,upgradeCardRect(2));
   } else { // trails
     drawTrailCardsGrid();
+  }
+  // Workshop "Glowkeeper's Favor" rewarded-ad card -- hidden entirely
+  // during the first-night tutorial, whenever the SDK doesn't offer
+  // rewarded ads, or when this tab's own content leaves no room (see
+  // workshopFavorCardRect()). One compact card, never larger than the
+  // existing upgrade cards on this screen.
+  if(upgrades.tutorialDone&&rewardedAdsAvailable()){
+    const favorCard=workshopFavorCardRect();
+    if(favorCard)drawWorkshopFavorCard(favorCard);
   }
   // coin balance footer -- Shop UI Visual Redesign (section 18): wrapped in
   // a dark translucent pill. Same anchor point/data source as before
@@ -6103,6 +6361,7 @@ function draw(){
     if(S.carried.length>=S.cap&&!S.over)drawFullJarAlert();
     drawMothWarningFlash(); // always-on gameplay feedback, independent of the tutorial
     if(S.over)drawOver();
+    if(S.extraLifeOfferOpen)drawExtraLifeOffer(); // shown INSTEAD of drawOver() the instant the normal 5-miss ending is reached -- S.over is still false while this is up
     if(paused)drawPaused();
     if(tutorialPanelOpen)drawTutorialPanel(); // topmost overlay, same precedent as drawPaused()/drawOver() above
   } else if(screen==='shop'){
@@ -6130,7 +6389,9 @@ function loop(now){
   // draw() still runs every frame so the frozen scene + panel actually
   // render. Does not touch paused/pauseReason at all, per direct
   // instruction not to interfere with the existing pause/resume system.
-  if(!paused&&!tutorialPanelOpen)update(dt);
+  // "One More Chance" gates simulation the exact same sibling way the
+  // tutorial panel already does -- see requestExtraLife()/declineExtraLife().
+  if(!paused&&!tutorialPanelOpen&&!S.extraLifeOfferOpen)update(dt);
   draw(); // renders the title screen (our splash/main-menu) on the very first call
 
   // Lifecycle Hook 1: the first visual frame is now on screen.
