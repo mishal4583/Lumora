@@ -795,6 +795,71 @@ if(!(coinFraction>=0&&coinFraction<1))coinFraction=0; // defensive: corrupted/ou
 // total. Declared above reset()'s first top-level call, reassigned inside
 // reset() itself.
 let coinsAtRoundStart=coins;
+// ---------- Mediacube revision: rewarded + interstitial ads ----------
+// Official YouTube Playables SDK only (ytgame.ads.requestRewardedAd/
+// requestInterstitialAd) -- no third-party ad SDK, gated behind YT exactly
+// like every other SDK call in this file. Availability is re-checked live,
+// never cached, so the rewarded button/interstitial opportunity just quietly
+// stop existing if the host doesn't support ads rather than throwing.
+function rewardedAdsAvailable(){ return !!(YT&&YT.ads&&typeof YT.ads.requestRewardedAd==='function'); }
+function interstitialAdsAvailable(){ return !!(YT&&YT.ads&&typeof YT.ads.requestInterstitialAd==='function'); }
+// Static, non-identifying reward id per spec -- reused for every rewarded
+// request, never randomized/timestamped/player-tagged.
+const REWARD_ID_100_COINS='lumora-100-coins';
+// Session-level counter for the interstitial frequency rule (one request
+// opportunity every 3 completed nights) -- deliberately NOT persisted to
+// saveData; a fresh session starting the count over is fine, and the spec
+// itself prefers session-level tracking when it's sufficient. Only nights
+// that count toward this ever increment it -- see continueFromOver().
+let nightsCompletedThisSession=0;
+// The Night Complete "Watch a short ad" button grants coins exactly once,
+// only after requestRewardedAd() resolves strictly true -- never on request
+// start, never on false/rejection/exception, never twice from a double tap.
+// Pending/claimed state lives on S.rewardAdPending/S.rewardAdClaimed (see
+// reset()) so it's per-round like every other over-screen flag in this file
+// -- a fresh round always gets a fresh opportunity, and a stale callback
+// landing after the round has already moved on (roundS!==S) is a no-op.
+function requestRewardedCoins(){
+  if(!S.over||S.rewardAdPending||S.rewardAdClaimed)return;
+  if(!upgrades.tutorialDone)return; // first-night tutorial stays completely ad-free
+  if(!rewardedAdsAvailable())return;
+  S.rewardAdPending=true;
+  const roundS=S;
+  let result;
+  try{ result=YT.ads.requestRewardedAd(REWARD_ID_100_COINS); }
+  catch(e){ roundS.rewardAdPending=false; return; }
+  Promise.resolve(result).then(res=>{
+    if(roundS!==S)return; // round already moved on -- discard
+    roundS.rewardAdPending=false;
+    if(res===true){
+      roundS.rewardAdClaimed=true;
+      coins+=100;
+      if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+      saveProgress();
+    }
+  },()=>{ if(roundS===S)roundS.rewardAdPending=false; });
+}
+// The ONE path that leaves the Night Complete screen (both "tap anywhere
+// else to continue/restart" and its Enter/Space keyboard equivalent route
+// through here now, instead of calling reset() directly) so the
+// interstitial frequency rule has exactly one place to live. Tutorial
+// nights never count and never request an interstitial -- the first-night
+// tutorial (and its own Night Complete screen) stays completely ad-free.
+// requestInterstitialAd() failing/rejecting/being unavailable must never
+// block gameplay, so reset() always runs regardless of outcome.
+function continueFromOver(){
+  if(!S.over)return;
+  if(upgrades.tutorialDone){
+    nightsCompletedThisSession++;
+    if(nightsCompletedThisSession%3===0&&interstitialAdsAvailable()){
+      try{
+        Promise.resolve(YT.ads.requestInterstitialAd()).then(()=>reset(),()=>reset());
+        return;
+      }catch(e){}
+    }
+  }
+  reset();
+}
 // Phase 1 economy pass: LOCAL-ONLY playtest instrumentation, per direct
 // request to expose enough data to see how income actually evolves across
 // a real human playtest (early/mid/late game). Never transmitted anywhere,
@@ -1717,6 +1782,9 @@ function reset(){
   coinsAtRoundStart=coins; // Lumora UI port: same idea, for the RunSummary's "Coins Earned" delta
   S={
     score:0, misses:0, caughtN:0, deliveredN:0, over:false, overT:0, tip:'',
+    // Mediacube revision: rewarded-ad state, per round like everything else
+    // here -- a fresh round always gets a fresh Watch Ad opportunity.
+    rewardAdPending:false, rewardAdClaimed:false,
     flies:[], moths:[], magnet:null, parts:[], sparks:[], fireworks:[], balloons:[], deliverWaves:[],
     jar:{x:W/2,y:H-320,tx:W/2,ty:H-320,px:W/2,py:H-320,spd:0,pulse:0,wob:0},
     carried:[], restT:0, cap:jarCapacityForRun(), capMsg:'', capMsgT:0, wasDelivering:false, batchPerfect:false, elderT:rand(20,30),
@@ -1786,11 +1854,28 @@ function beginPlay(){
 // moved one point to keep Elder's unlock inside the medium tier, same as
 // it was under the old curve (where s=12 sat mid-way through a 10-20
 // medium tier, nowhere near the hardest settings).
+// Beginner grace window (score < 60), per two direct requests:
+// 1) Leave-patience: fireflies were leaving (going uncaught long enough to
+//    fly off and count as a miss) too fast for new players. Patience stays
+//    at the gentle s<5 value (12-14) all the way out to score 60, instead of
+//    dropping through the medium (10-12) and hard (9-11) tiers at the usual
+//    5/13 boundaries. At s>=60 it reverts to exactly the same hard-tier
+//    value (9-11) the curve has always used there -- "normal speed," not a
+//    new value of its own.
+// 2) maxFlies: reduced "by only a little," per direct request -- only the
+//    hardest tier (6, normally s>=13) is trimmed to 5 for 13<=s<60. The s<5
+//    gentle hook (3) and s<13 tier (4) are both left byte-identical --
+//    already modest, and the s<5 value specifically is the documented
+//    Depth Pass Part 1 hook, not something to touch here. At s>=60 maxFlies
+//    is back to the normal 6, same boundary as patience above.
+// speed/mothRate/magRate and the blue/shy unlock gates are untouched by
+// either request -- they keep their own original 5/13 tiering (Depth Pass
+// Part 1), ramping up normally underneath this grace window.
 function diff(){
   const s=S.score+S.carried.reduce((a,c)=>a+TYPES[c.type].pts,0);
   return {
-    maxFlies: s<5?3 : s<13?4 : 6,
-    patience: s<5?rand(12,14) : s<13?rand(10,12) : rand(9,11),
+    maxFlies: s<5?3 : s<13?4 : s<60?5 : 6,
+    patience: s<60?rand(12,14) : rand(9,11),
     speed:    s<5?rand(16,26) : rand(22,36),
     blue:     s>=10, shy: s>=15,
     mothRate: s<5?0 : s<13?rand(9,13) : rand(6,9),
@@ -1982,6 +2067,13 @@ const BEGIN_BTN={x:W/2,y:H*0.66,r:60};
 // GOHOME_BTN) so the hit-test (inRect) and the visible pill are the exact
 // same bounds -- and a visible bordered pill instead of plain gray text.
 const SHOP_BTN_OVER={x:W/2,y:567,w:220,h:44,fontSize:12};
+// Mediacube revision: rewarded-ad opportunity, Night Complete screen only.
+// Sits well clear of SHOP_BTN_OVER (bottom ~589) and the Night Complete tip
+// text above it (starts H*0.66+16=649.6, at most a few wrapped lines) --
+// same single-source-of-truth rect convention as every button on this
+// screen, one object shared by drawOver()'s draw call and the pointerdown
+// hit-test below.
+const WATCH_AD_BTN={x:W/2,y:830,w:220,h:48,fontSize:12};
 const WELCOME_CLOSE_BTN={x:W/2,y:H*0.62,r:56}; // "tap to continue" — a big, generous target since it's the overlay's only action
 const SHOP_CLOSE_BTN={x:W-38,y:56,r:20}; // echoes PAUSE_BTN's corner, one screen up
 const VILLAGE_CLOSE_BTN={x:W-38,y:56,r:20};
@@ -2447,7 +2539,12 @@ cv.addEventListener('pointerdown',e=>{
       // still replays immediately, exactly as before this session — Part B
       // must not make an existing screen's input any less forgiving
       if(inRect(p.x,p.y,SHOP_BTN_OVER)){ shopFrom='play'; screen='shop'; jarCompareOpen=false; return; }
-      reset(); pointer.down=false;
+      // Mediacube revision: same carve-out pattern as SHOP_BTN_OVER above --
+      // only drawn/tappable once the tutorial is done and the SDK actually
+      // offers rewarded ads (see drawOver()), but the hit-test itself stays
+      // defensive about both regardless.
+      if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardAdClaimed&&inRect(p.x,p.y,WATCH_AD_BTN)){ requestRewardedCoins(); return; }
+      continueFromOver(); pointer.down=false;
     }
     return;
   }
@@ -2503,7 +2600,7 @@ window.addEventListener('keydown',e=>{
   if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){
     initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
     if(screen==='title'){ beginPlay(); }
-    else if(S&&S.over&&S.overT>0.35){ reset(); }
+    else if(S&&S.over&&S.overT>0.35){ continueFromOver(); }
     e.preventDefault(); return;
   }
   const dir=keyDir(e.key);
@@ -3905,6 +4002,26 @@ function drawOver(){
     lumEyebrow('✦ Tip ✦',W/2,H*0.66,'center');
     ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
     wrapText(S.tip,W/2,H*0.66+16,340,17,'center');
+  }
+  // Mediacube revision: rewarded-ad opportunity. Hidden entirely during the
+  // first-night tutorial and whenever the SDK doesn't offer rewarded ads on
+  // this host -- never a dead/greyed button, it just doesn't exist there.
+  // Restrained footprint per spec ("must not visually dominate the actual
+  // game"): one small eyebrow + one line of copy + one pill, sitting well
+  // clear of the tip block above it.
+  if(upgrades.tutorialDone&&rewardedAdsAvailable()){
+    if(S.rewardAdClaimed){
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle='rgba(212,235,200,0.85)'; ctx.font='italic 13px Georgia,serif';
+      ctx.fillText('✦ +100 coins added ✦',W/2,WATCH_AD_BTN.y);
+    } else {
+      ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      lumEyebrow('Keep the Glow',W/2,WATCH_AD_BTN.y-54,'center');
+      ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='italic 12px Georgia,serif';
+      ctx.fillText('Watch a short ad to receive +100 coins',W/2,WATCH_AD_BTN.y-34);
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      lumButton(WATCH_AD_BTN,S.rewardAdPending?'Watching…':'Watch Ad','outline',S.rewardAdPending);
+    }
   }
   ctx.globalAlpha=1;
   ctx.textBaseline='top';
