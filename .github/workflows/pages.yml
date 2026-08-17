@@ -3,14 +3,13 @@ name: Deploy static site to Pages
 on:
   push:
     branches: [main]
-  workflow_dispatch: # lets us manually re-trigger a deploy from the Actions tab if needed
+  workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# only one Pages deployment at a time; a new push cancels an in-flight one rather than queueing behind it
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -18,10 +17,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # generous headroom over classic Pages' occasional queue delays, but still fails fast on a real hang
+    timeout-minutes: 15
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,12 +30,19 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Prepare Lumora site
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
+
       - name: Upload site artifact
-        # no build step -- index.html + README.md are served as-is, so the repo root IS the site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
