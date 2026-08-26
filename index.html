@@ -1671,6 +1671,73 @@ function evaluateMissObjectives(){
     }
   });
 }
+
+// ---------- Lumora 2.0 Phase 2: Glow Chain + Risk/Reward ----------
+// The catch mechanic itself, the jar/capacity system, and Perfect Delivery's
+// own banner (capMilestoneFx('perfect delivery!')) already existed -- this
+// phase adds real STAKES on top of them: a consecutive-catch streak that
+// pays out at milestones but resets the instant a firefly is missed, and a
+// coin bonus for Perfect Delivery (previously banner-only, no reward) plus
+// a new Rare Delivery bonus. No new controls, no new screen -- the existing
+// jar-fill indicator (drawFullJarAlert()) and misses dots already make the
+// "deliver safely or risk one more catch" decision visible without any
+// further UI. Both functions below have exactly one real call site each
+// (the catch-success site and the miss site) but are pulled out on their
+// own, mirroring objectiveProgress()/evaluateMissObjectives()'s own
+// discipline, so the harness can drive them directly without simulating
+// full catch/miss physics.
+const CHAIN_MILESTONES=[
+  { n:5,  reward:5,  label:'🔥 Glow Chain ×5' },
+  { n:10, reward:10, label:'🔥 Glow Chain ×10' },
+  { n:15, reward:18, label:'🌟 Glow Chain ×15' },
+  { n:20, reward:25, label:'🌟 Glow Chain ×20' }
+];
+// Beyond ×20 the live counter (drawHUD()) keeps counting, but no further
+// milestone fires -- a chain that long in one ~1-2 minute night is already
+// an outstanding outlier, and an unbounded escalating reward would be
+// exactly the "distort the economy" risk Phase 0/1 were both explicit
+// about avoiding. Numbers otherwise land in the same modest 5-30 coin
+// range the existing quest/objective rewards already use.
+function advanceChain(){
+  S.chain++;
+  const m=CHAIN_MILESTONES.find(m=>m.n===S.chain);
+  if(m){
+    coins+=m.reward;
+    if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+    capMilestoneFx(m.label+'  +'+m.reward);
+  }
+}
+// Missing breaks the chain -- per direct instruction, this is the ONLY way
+// it resets (delivering does not touch it, so a player can deliver mid-
+// chain and keep building it right after, matching the plan's own
+// "Catch → Catch → Catch → Catch" example continuing past a delivery).
+function breakChain(){ S.chain=0; }
+// Rare Delivery's threshold. TYPES[type].rarity is the existing field every
+// firefly type already carries (common/uncommon/rare/very rare/legendary)
+// -- reused directly rather than hand-picking type letters, so this stays
+// correct if a future firefly type is ever added.
+function isRareType(type){ const r=TYPES[type].rarity; return r!=='common'&&r!=='uncommon'; }
+// Called once per completed delivery trip (the same site that already
+// resolved S.batchPerfect into its own banner) -- Perfect Delivery (full
+// jar) and Rare Delivery (2+ rare fireflies in that SAME trip, snapshotted
+// via S.batchRareCount at the moment the trip began, mirroring exactly how
+// S.batchPerfect itself is captured) are independent conditions and both
+// can be true at once, so their messages are combined into one banner
+// rather than one silently overwriting the other in capMsg's single slot.
+// Returns the total bonus granted (0 if neither condition was met) purely
+// so a test can assert on it without re-deriving the math.
+function resolveDeliveryBonuses(){
+  let bonus=0; const msgs=[];
+  if(S.batchPerfect){ bonus+=10; msgs.push('✨ perfect delivery +10'); }
+  if(S.batchRareCount>=2){ const r=5*S.batchRareCount; bonus+=r; msgs.push('🌟 rare delivery +'+r); }
+  if(bonus>0){
+    coins+=bonus;
+    if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+    capMilestoneFx(msgs.join('   '));
+  }
+  return bonus;
+}
+
 // Minimal quest-object validation at the save-load boundary. The array-level
 // check below (Array.isArray/length) already existed, but nothing validated
 // each quest's OWN shape -- a malformed/tampered save (e.g. a quest entry
@@ -2153,7 +2220,13 @@ function reset(){
     objectiveActive:[], objectiveProgress:{}, eventActive:null, contractActive:null,
     flies:[], moths:[], magnet:null, parts:[], sparks:[], fireworks:[], balloons:[], deliverWaves:[],
     jar:{x:W/2,y:H-320,tx:W/2,ty:H-320,px:W/2,py:H-320,spd:0,pulse:0,wob:0},
-    carried:[], restT:0, cap:jarCapacityForRun(), capMsg:'', capMsgT:0, wasDelivering:false, batchPerfect:false, elderT:rand(20,30),
+    carried:[], restT:0, cap:jarCapacityForRun(), capMsg:'', capMsgT:0, wasDelivering:false, batchPerfect:false,
+    // Lumora 2.0 Phase 2: Glow Chain (consecutive catches without a miss --
+    // see advanceChain()/breakChain()) and the rare-firefly count snapshotted
+    // at the moment the CURRENT delivery trip began (see batchRareCount's own
+    // assignment next to S.batchPerfect's, for Rare Delivery -- resolveDeliveryBonuses()).
+    chain:0, batchRareCount:0,
+    elderT:rand(20,30),
     t:0, spawnT:0.4, mothT:0, magT:rand(12,18), lockCd:0, magnetT:0,
     hitch:0, cricketT:rand(0.5,2), owlT:rand(9,20), batT:rand(12,24),
     bloomT:rand(24,34), bloomBanner:0, deliverT:0, deliverN:0,
@@ -3362,6 +3435,7 @@ function update(dt){
       if(f.patience<=0){
         f.state='leaving'; f.vy=-30;
         S.misses++; sMiss(); puff(f.x,f.y,GLOW_M,5,26,0.9);
+        breakChain(); // Lumora 2.0 Phase 2: missing is the ONLY thing that breaks a Glow Chain
         if(!missHintShown){ missHintShown=true; S.missHintT=4; } // one-time reminder: fireflies drift off if kept waiting too long — first round only
         // Extra Life ("One More Chance"): missLimit is 5 normally, 6 once
         // Extra Life has been successfully claimed this round
@@ -3427,6 +3501,7 @@ function update(dt){
           journal[f.type]++; if(!YT){ try{localStorage.setItem('gk2_journal',JSON.stringify(journal));}catch(e){} } // Journal: lifetime catches per type, tracked from here forward (no backfill for history predating this)
           questProgress('catch',f.type); // same catch moment as the Journal increment above
           objectiveProgress('catch',f.type); // Lumora 2.0 Phase 1: same authoritative catch-success moment, not spawn/lock/radius-entry
+          advanceChain(); // Lumora 2.0 Phase 2: same authoritative catch-success moment
           S.carried.push({type:f.type,ph:rand(0,6.28),sp:rand(0.7,1.4)});
           if(f.type==='e')capMilestoneFx('the elder blesses your jar!'); // no capacity change any more -- see capMilestoneFx
           S.jar.pulse=1; sCatch(S.caughtN);
@@ -3460,6 +3535,11 @@ function update(dt){
   if(S.carried.length>0&&S.jar.y>DELIVER_Y){
     if(!S.wasDelivering){
       S.wasDelivering=true; S.batchPerfect=(S.carried.length===S.cap);
+      // Lumora 2.0 Phase 2: Rare Delivery's own snapshot, captured at the
+      // exact same moment and for the exact same reason as S.batchPerfect
+      // just above -- the trip's composition is fixed the instant it
+      // begins (S.carried is drained one-by-one as it animates out below).
+      S.batchRareCount=S.carried.filter(c=>isRareType(c.type)).length;
       S.deliverWaves.push({x:jx,cy0:jy,t:0}); // the delivery light-wave: travels from the jar down toward the village
     }
     S.deliverT-=dt;
@@ -3486,8 +3566,14 @@ function update(dt){
     // capacity at that moment, never assumed to be 5), counted here once
     // per completed trip, not once per individual firefly within it.
     if(S.batchPerfect)objectiveProgress('fulljar',null);
-    if(S.batchPerfect)capMilestoneFx('perfect delivery!'); // no capacity change any more -- see capMilestoneFx
+    // Lumora 2.0 Phase 2: Perfect Delivery's banner used to be reward-free
+    // (see capMilestoneFx's own comment on this having felt "thinner than
+    // before" once the old capacity-growth payoff was removed) -- it and
+    // the new Rare Delivery bonus are now resolved together, one combined
+    // banner if both conditions are true this trip.
+    resolveDeliveryBonuses();
     S.batchPerfect=false;
+    S.batchRareCount=0;
     if(!refillHintShown){ refillHintShown=true; S.deliverExplainT=4; } // one-time reminder: jar's empty, go catch more — first round only
   }
 
@@ -4350,6 +4436,17 @@ function drawHUD(){
   // in a real playtest before Part B prices anything against it
   ctx.fillStyle='#e8c179';
   ctx.fillText(coins+' coins',W-22,54); // no ✦ here — that glyph already means "score" on the line above; reusing it for a different stat would blur the two
+  // Lumora 2.0 Phase 2: live Glow Chain readout -- right column, directly
+  // under coins, mirroring the left column's own misses-dots-then-goals
+  // rhythm. Hidden below ×3 so a trivial 1-2 streak doesn't clutter the
+  // HUD (the plan's own example banner doesn't appear until ×4); escalates
+  // color/icon at the same ×5/×15 breakpoints CHAIN_MILESTONES already
+  // uses, so the readout and the milestone banners agree with each other.
+  if(!S.over&&S.chain>=3){
+    ctx.font='600 12px Georgia,serif';
+    ctx.fillStyle=S.chain>=15?'#ffd76a':S.chain>=5?'#ffb347':'#e8c179';
+    ctx.fillText((S.chain>=15?'🌟':'🔥')+' chain ×'+S.chain,W-22,76);
+  }
   if(S.magnetT>0)banner('✨ glow magnet '+Math.ceil(S.magnetT)+'s',148,'#fff3cf',0.85);
   if(S.deliverExplainT>0)banner('jar\'s empty — go catch more fireflies!',96,'#ffe9b8',Math.min(1,S.deliverExplainT));
   else if(S.missHintT>0)banner('a firefly drifted away — don\'t keep them waiting',96,'#f2b98e',Math.min(1,S.missHintT));
