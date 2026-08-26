@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,upgrades,trackerOn,lastPlayed,quests})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -972,6 +972,15 @@ function continueFromOver(){
   if(!S.over)return;
   if(upgrades.tutorialDone){
     nightsCompletedThisSession++;
+    // Lumora 2.0 Phase 0: persistent night counter, incremented in this exact
+    // same tutorial-gated block as the existing session counter above -- the
+    // tutorial night itself (upgrades.tutorialDone still false at that point)
+    // never reaches here, so it's excluded the same way nightsCompletedThisSession
+    // already is. Persisted immediately, before the interstitial branch below's
+    // early `return`, so it survives even if that ad request never resolves.
+    nightNumber++;
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
+    saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
     if(interstitialAdsAvailable()){
       try{
@@ -1353,6 +1362,49 @@ if(!YT){
 }
 let trackerOn=false; // Collector's optional QoL toggle — free, no coin cost, no balance risk
 if(!YT){ try{ trackerOn=localStorage.getItem('gk2_tracker')==='1'; }catch(e){} }
+// ---------- Lumora 2.0 Phase 0: foundation state ----------
+// Persistent, saved via the exact same saveProgress()/loadData() infrastructure as
+// every field above -- new fields only, existing save shape/keys otherwise
+// untouched. None of these are read or written by any current gameplay, economy,
+// ad, or tutorial code -- Phase 0 establishes storage only; a later phase decides
+// what actually populates it. See saveProgress() and the loadData() callback
+// further below for the load-side defensive parsing (same per-field guard pattern
+// as every existing field).
+let nightNumber=1; // "Which night is the player on" -- distinct from the existing
+// SESSION-only nightsCompletedThisSession (used for the Workshop favor's per-night
+// rearm, never persisted, resets on reload). nightNumber persists across sessions
+// and increments exactly once per genuinely completed non-tutorial night -- see
+// continueFromOver().
+let objectivesCompleted={}; // Night Objectives (Phase 1) -- historical record of
+// completed objectives, keyed by objective id. Always {} until Phase 1 exists.
+let eventHistory=[]; // Night Events (future phase) -- past event ids the player has
+// experienced. Always [] until that phase exists.
+let contractsCompleted=[]; // Night Contracts (future phase) -- completed contract
+// records, keyed by stable id rather than display text, per direct instruction.
+// Always [] until that phase exists.
+let cosmeticsUnlocked=[]; // Reserved for a NEW cosmetic category a future phase
+// introduces (e.g. village themes/landscape skins) that doesn't fit the jar or
+// trail shape. Existing cosmetic-ish ownership/equip state
+// (upgrades.ownedJars/equippedJar, upgrades.ownedTrails/equippedTrail) is
+// completely UNCHANGED and remains the live system for jars/trails specifically
+// -- this is deliberately a separate, empty bucket, not a duplicate of either.
+if(!YT){
+  try{
+    const l2=JSON.parse(localStorage.getItem('gk2_lumora2')||'{}');
+    if(typeof l2.nightNumber==='number'&&l2.nightNumber>nightNumber)nightNumber=l2.nightNumber;
+    if(l2.objectivesCompleted&&typeof l2.objectivesCompleted==='object')objectivesCompleted=l2.objectivesCompleted;
+    if(Array.isArray(l2.eventHistory))eventHistory=l2.eventHistory;
+    if(Array.isArray(l2.contractsCompleted))contractsCompleted=l2.contractsCompleted;
+    if(Array.isArray(l2.cosmeticsUnlocked))cosmeticsUnlocked=l2.cosmeticsUnlocked;
+  }catch(e){}
+}
+// Firefly Journal / Collections (Phase 1+) foundation: `journal` (declared above)
+// already IS the per-type lifetime catch count -- exactly what a future
+// collections.counts would be, so it is reused as-is rather than duplicated.
+// "Discovered" is trivially derivable from it, so no new persisted field is
+// needed for that either. Reuses the EXISTING stable firefly type ids
+// ('y','b','g','e','m'), never a new identifier scheme, per direct instruction.
+function isFireflyDiscovered(type){ return !!(journal&&journal[type]>0); }
 // Stage 3 Part C: shared last-played timestamp (ms since epoch), same additive
 // pattern as every prior field. prevLastPlayed captures the value from BEFORE
 // this session overwrites it — both quests (calendar-day check) and the
@@ -1766,6 +1818,14 @@ if(YT&&YT.game&&YT.game.loadData){
       // value, so the quest/welcome-back decisions must wait for it
       if(typeof d.lastPlayed==='number'&&d.lastPlayed>0)prevLastPlayed=d.lastPlayed;
       resolveQuests(Array.isArray(d.quests)?d.quests:null);
+      // Lumora 2.0 Phase 0 foundation fields -- same defensive per-field guard
+      // pattern as every field above; a save written before this phase simply
+      // has none of these, and each one already defaults safely at declaration.
+      if(typeof d.nightNumber==='number'&&d.nightNumber>nightNumber)nightNumber=d.nightNumber;
+      if(d.objectivesCompleted&&typeof d.objectivesCompleted==='object')objectivesCompleted=d.objectivesCompleted;
+      if(Array.isArray(d.eventHistory))eventHistory=d.eventHistory;
+      if(Array.isArray(d.contractsCompleted))contractsCompleted=d.contractsCompleted;
+      if(Array.isArray(d.cosmeticsUnlocked))cosmeticsUnlocked=d.cosmeticsUnlocked;
     }catch(e){}
   }).catch(()=>{})
     .then(()=>{
@@ -1908,6 +1968,14 @@ function reset(){
     // round always gets a fresh opportunity at each offer. Never persisted.
     rewardedDoubleCoinsPending:false, rewardedDoubleCoinsClaimed:false, rewardedDoubleCoinsAmount:0, coinsEarnedThisNight:0,
     extraLifeOfferOpen:false, extraLifePending:false, extraLifeAvailable:false, extraLifeUsed:false,
+    // Lumora 2.0 Phase 0 foundation: per-round state for future Night
+    // Objectives/Events/Contracts. Always empty/default this phase -- nothing
+    // reads or writes these yet. Reset every night like everything else in S,
+    // by design: an in-progress objective/event/contract does not carry across
+    // nights (the historical "completed" record for each lives in persistent
+    // top-level state instead -- see objectivesCompleted/eventHistory/
+    // contractsCompleted near `let trackerOn=` above).
+    objectiveActive:[], objectiveProgress:{}, eventActive:null, contractActive:null,
     flies:[], moths:[], magnet:null, parts:[], sparks:[], fireworks:[], balloons:[], deliverWaves:[],
     jar:{x:W/2,y:H-320,tx:W/2,ty:H-320,px:W/2,py:H-320,spd:0,pulse:0,wob:0},
     carried:[], restT:0, cap:jarCapacityForRun(), capMsg:'', capMsgT:0, wasDelivering:false, batchPerfect:false, elderT:rand(20,30),
