@@ -817,13 +817,20 @@ const REWARDED_AD_IDS={
   WORKSHOP_COINS:'lumora-workshop-75-coins',
   WORKSHOP_SMALL_UPGRADE:'lumora-workshop-small-upgrade'
 };
-// Session-level counter for the interstitial frequency rule (one request
-// opportunity every 3 completed nights) -- deliberately NOT persisted to
-// saveData; a fresh session starting the count over is fine, and the spec
-// itself prefers session-level tracking when it's sufficient. Only nights
-// that count toward this ever increment it -- see continueFromOver().
-// UNCHANGED by this rework -- interstitial frequency/behavior stays exactly
-// as it was.
+// Session-level counter, kept for the Workshop favor's own "once per
+// completed night" rule and general instrumentation -- deliberately NOT
+// persisted to saveData; a fresh session starting the count over is fine.
+// Certification pass (2026-08-26): the interstitial itself no longer reads
+// this for a frequency gate -- see continueFromOver(). Two independent
+// tests (a local ytgame.ads mock, and the real YouTube Playables Test
+// Suite) both confirmed requestInterstitialAd() fires correctly under the
+// original "every 3rd completed night" rule, but Mediacube's own review
+// twice reported "unable to locate any interstitials" regardless --
+// the trigger was real but too rare for a normal review playthrough
+// (tutorial + 1-2 nights) to ever reach it. Fired every completed
+// non-tutorial night instead, per direct instruction, specifically to
+// make it trivially reachable for certification; revisit the frequency
+// after approval if it needs dialing back for real players.
 let nightsCompletedThisSession=0;
 // "Double the Glow" -- Night Complete screen. Doubles ONLY the coins earned
 // during the completed night (coins-coinsAtRoundStart, the same
@@ -951,23 +958,22 @@ function requestWorkshopCoins(){
 }
 // The ONE path that leaves the Night Complete screen (both "tap anywhere
 // else to continue/restart" and its Enter/Space keyboard equivalent route
-// through here now, instead of calling reset() directly) so the
-// interstitial frequency rule has exactly one place to live. Tutorial
-// nights never count and never request an interstitial -- the first-night
+// through here now, instead of calling reset() directly). Tutorial nights
+// never count and never request an interstitial -- the first-night
 // tutorial (and its own Night Complete screen) stays completely ad-free.
 // requestInterstitialAd() failing/rejecting/being unavailable must never
 // block gameplay, so reset() always runs regardless of outcome.
-// UNCHANGED by this rework, aside from also re-arming the Workshop favor
-// (a plain assignment beside the existing counter, not a change to the
-// interstitial logic itself) -- current Continue/Restart integration,
-// frequency, failure behavior, and tutorial/gameplay restrictions are all
-// exactly as before.
+// Certification pass (2026-08-26): fires on EVERY completed non-tutorial
+// night now, not gated to every 3rd -- see nightsCompletedThisSession's own
+// comment for why. nightsCompletedThisSession is still incremented (the
+// Workshop favor's per-night rearm depends on it), just no longer read as
+// a frequency gate here.
 function continueFromOver(){
   if(!S.over)return;
   if(upgrades.tutorialDone){
     nightsCompletedThisSession++;
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
-    if(nightsCompletedThisSession%3===0&&interstitialAdsAvailable()){
+    if(interstitialAdsAvailable()){
       try{
         Promise.resolve(YT.ads.requestInterstitialAd()).then(()=>reset(),()=>reset());
         return;
