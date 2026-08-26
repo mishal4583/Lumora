@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1007,6 +1007,7 @@ function continueFromOver(){
     // early `return`, so it survives even if that ad request never resolves.
     nightNumber++;
     if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
+    weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
     if(interstitialAdsAvailable()){
@@ -1425,6 +1426,47 @@ if(!YT){
     if(Array.isArray(l2.cosmeticsUnlocked))cosmeticsUnlocked=l2.cosmeticsUnlocked;
   }catch(e){}
 }
+// ---------- Lumora 2.0 Phase 9: Weekly Progression ----------
+// Declared here (persistent, same infrastructure as every field above) --
+// the actual load-time RESOLUTION (which needs lastPlayed/prevLastPlayed,
+// not yet known this early) happens at resolveWeekly(), called from the
+// exact same spot resolveQuests() already is, both for the non-YT and the
+// YT loadData() paths. Reuses the existing daily-quest system's own
+// calendar-boundary-check SHAPE (a rolling window, checked once per
+// session) as its foundation, per direct instruction -- just a coarser
+// (weekly, not daily) grain, its own separate state.
+let weeklyStats={fireflies:0, rare:0, nights:0, events:0};
+// Per-milestone "already granted this week" flags -- separate from the raw
+// counts above so a reward can never be granted twice for the same week
+// even though the counts themselves are just running totals, not one-shot
+// flags (mirrors objectivesCompleted's own "done" tracking discipline).
+let weeklyMilestonesClaimed={fireflies:false, rare:false, nights:false, events:false};
+let weeklyChestClaimed=false; // the bonus for completing all 4 in the same week
+// A pure rolling 7-day bucket index from epoch ms -- NOT calendar-week-
+// aligned (not Mon-Sun) -- deliberately simpler than a real ISO week
+// calculation, same "device-local, no fancy calendar system" simplicity
+// localDayKey() already established for the daily quest boundary above.
+function weekKey(ms){ return Math.floor(ms/604800000); }
+function resolveWeekly(loaded){
+  if(prevLastPlayed<=0||weekKey(prevLastPlayed)!==weekKey(lastPlayed)){
+    // new week, or first-ever session -> fresh, same "reset, don't carry over" rule rollQuests() uses
+    weeklyStats={fireflies:0, rare:0, nights:0, events:0};
+    weeklyMilestonesClaimed={fireflies:false, rare:false, nights:false, events:false};
+    weeklyChestClaimed=false;
+  } else if(loaded&&typeof loaded==='object'){
+    if(loaded.stats&&typeof loaded.stats==='object'){
+      Object.keys(weeklyStats).forEach(k=>{ if(typeof loaded.stats[k]==='number'&&loaded.stats[k]>=0)weeklyStats[k]=loaded.stats[k]; });
+    }
+    if(loaded.claimed&&typeof loaded.claimed==='object'){
+      Object.keys(weeklyMilestonesClaimed).forEach(k=>{ if(loaded.claimed[k]===true)weeklyMilestonesClaimed[k]=true; });
+    }
+    if(loaded.chestClaimed===true)weeklyChestClaimed=true;
+  }
+  // same day/week but nothing usable was persisted (first cloud save ever,
+  // or a malformed entry) -- the declaration-time defaults above already
+  // cover this case, nothing further to do.
+}
+function persistWeeklyLocal(){ if(!YT){ try{ localStorage.setItem('gk2_weekly',JSON.stringify({stats:weeklyStats, claimed:weeklyMilestonesClaimed, chestClaimed:weeklyChestClaimed})); }catch(e){} } }
 // Firefly Journal / Collections (Phase 1+) foundation: `journal` (declared above)
 // already IS the per-type lifetime catch count -- exactly what a future
 // collections.counts would be, so it is reused as-is rather than duplicated.
@@ -1660,6 +1702,7 @@ function generateNightEvent(){
     // real happens, not merely relying on continueFromOver()'s earlier
     // save, which already ran before this executes inside reset()).
     eventHistory.push(S.eventActive);
+    weeklyProgress('events',1); // Lumora 2.0 Phase 9: same "the moment it's rolled" authoritative site
     if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
     saveProgress();
   } else {
@@ -1687,6 +1730,53 @@ function ensureNightEvent(){
 // shared/LOCKED coinMultiplierForRun() -- kept completely separate so a
 // Night Event can never quietly touch the persistent Coin Value economy.
 function nightEventCoinMult(){ return S.eventActive==='mothSwarm'?1.2:1; }
+
+// ---------- Lumora 2.0 Phase 9: Weekly Progression ----------
+// "Glowkeeper Journal" weekly checklist -- reuses the daily-quest system's
+// own coins-only, modest-reward philosophy (Phase 1's own "don't
+// overcomplicate" instruction, reapplied here) rather than inventing new
+// cosmetic rewards without an exact trail/decoration SKU to point at --
+// see the Phase 9 report's own note on this. Numbers land in the same
+// tune-later range as every other reward table this session has produced.
+const WEEKLY_MILESTONES=[
+  {key:'fireflies', target:100, reward:60, label:'Deliver 100 Fireflies'},
+  {key:'rare',      target:5,   reward:40, label:'Catch 5 Rare Fireflies'},
+  {key:'nights',    target:5,   reward:50, label:'Play 5 Nights'},
+  {key:'events',    target:1,   reward:30, label:'Witness 1 Night Event'}
+];
+const WEEKLY_CHEST_BONUS=100; // completing all 4 in the same week, on top of their own individual rewards
+// Called from the real authoritative moments (delivery success, rare
+// catch, a genuinely completed night, a rolled Night Event) -- mirrors
+// objectiveProgress()'s "one canonical increment function" discipline.
+// Silent by design (no in-round banner) -- this is a background/Journal-
+// tab system, not another contender in drawHUD()'s already-busy single-
+// slot banner chain; the player discovers a new checkmark next time they
+// open the Journal's Weekly tab, same as how a completed daily quest is
+// only ever surfaced there too, never via a mid-round popup of its own.
+function weeklyProgress(key,amount){
+  weeklyStats[key]=(weeklyStats[key]||0)+(amount||1);
+  checkWeeklyMilestones();
+  persistWeeklyLocal();
+  saveProgress();
+}
+function checkWeeklyMilestones(){
+  let anyNewlyClaimed=false;
+  WEEKLY_MILESTONES.forEach(m=>{
+    if(weeklyMilestonesClaimed[m.key])return;
+    if((weeklyStats[m.key]||0)>=m.target){
+      weeklyMilestonesClaimed[m.key]=true;
+      coins+=m.reward;
+      if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+      anyNewlyClaimed=true;
+    }
+  });
+  if(!weeklyChestClaimed&&WEEKLY_MILESTONES.every(m=>weeklyMilestonesClaimed[m.key])){
+    weeklyChestClaimed=true;
+    coins+=WEEKLY_CHEST_BONUS;
+    if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+  }
+  if(anyNewlyClaimed)persistWeeklyLocal();
+}
 // Mirrors questProgress()'s exact shape/discipline -- iterates
 // S.objectiveActive (tonight's 3, not a persistent pool), skips already-done
 // ones, matches by kind (+fireflyType for catch objectives that specify
@@ -1846,6 +1936,9 @@ if(!YT){
   let loadedQuests=null;
   try{ loadedQuests=JSON.parse(localStorage.getItem('gk2_quests')||'null'); }catch(e){}
   resolveQuests(loadedQuests);
+  let loadedWeekly=null;
+  try{ loadedWeekly=JSON.parse(localStorage.getItem('gk2_weekly')||'null'); }catch(e){}
+  resolveWeekly(loadedWeekly);
 }
 // luckBoostT: session-level like sessionT, NOT round-scoped (a quest completed
 // near a round's end shouldn't have its reward mostly wasted by S resetting) and
@@ -2129,6 +2222,7 @@ if(YT&&YT.game&&YT.game.loadData){
       // value, so the quest/welcome-back decisions must wait for it
       if(typeof d.lastPlayed==='number'&&d.lastPlayed>0)prevLastPlayed=d.lastPlayed;
       resolveQuests(Array.isArray(d.quests)?d.quests:null);
+      resolveWeekly(d.weekly&&typeof d.weekly==='object'?d.weekly:null);
       // Lumora 2.0 Phase 0 foundation fields -- same defensive per-field guard
       // pattern as every field above; a save written before this phase simply
       // has none of these, and each one already defaults safely at declaration.
@@ -3604,6 +3698,7 @@ function update(dt){
           questProgress('catch',f.type); // same catch moment as the Journal increment above
           objectiveProgress('catch',f.type); // Lumora 2.0 Phase 1: same authoritative catch-success moment, not spawn/lock/radius-entry
           advanceChain(); // Lumora 2.0 Phase 2: same authoritative catch-success moment
+          if(isRareType(f.type))weeklyProgress('rare',1); // Lumora 2.0 Phase 9: same authoritative catch-success moment
           S.carried.push({type:f.type,ph:rand(0,6.28),sp:rand(0.7,1.4)});
           if(f.type==='e')capMilestoneFx('the elder blesses your jar!'); // no capacity change any more -- see capMilestoneFx
           S.jar.pulse=1; sCatch(S.caughtN);
@@ -3731,6 +3826,7 @@ function update(dt){
       // (already updated by the S.score+=... line just above), not a
       // separate tracker.
       objectiveProgress('deliver',s.type);
+      weeklyProgress('fireflies',1); // Lumora 2.0 Phase 9: same authoritative delivery-success moment
       objectiveProgress('score',s.type);
       sDeliver(S.deliveredN);
       puff(s.tx,s.ty,TYPES[s.type].glow,8,45,0.6);
@@ -6653,7 +6749,7 @@ function latestUnlockedChapterKey(){
   STORY_CHAPTERS.forEach(ch=>{ if(storyChapterUnlocked(ch))latest=ch.key; });
   return latest;
 }
-const JOURNAL_TABS=[{key:'story',label:'Story'},{key:'fireflies',label:'Fireflies'}];
+const JOURNAL_TABS=[{key:'story',label:'Story'},{key:'fireflies',label:'Fireflies'},{key:'weekly',label:'Weekly'}];
 // single source of truth for both the tab draw and its hit-test, same
 // discipline as shopTabRects()/jarCardRects() elsewhere in the file.
 function journalTabRects(){
@@ -6733,6 +6829,48 @@ function journalRowRects(){
   const order=Object.keys(TYPES), top=230, h=78, gap=10;
   return order.map((t,i)=>({key:t,x:20,y:top+i*(h+gap),w:W-40,h}));
 }
+// Lumora 2.0 Phase 9: Weekly Progression's own tab, same row-list shape as
+// journalRowRects()/the Fireflies tab just below it -- one row per
+// WEEKLY_MILESTONES entry, plus a final "Weekly Glow Chest" summary row.
+function weeklyRowRects(){
+  const top=230, h=78, gap=10;
+  return WEEKLY_MILESTONES.map((m,i)=>({key:m.key,x:20,y:top+i*(h+gap),w:W-40,h}));
+}
+function drawWeeklyJournal(){
+  const claimedCount=WEEKLY_MILESTONES.filter(m=>weeklyMilestonesClaimed[m.key]).length;
+  ctx.fillStyle=LUM_HAZE; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(claimedCount+' of '+WEEKLY_MILESTONES.length+' milestones complete this week',W/2,172);
+  weeklyRowRects().forEach((rect,i)=>{
+    const m=WEEKLY_MILESTONES[i];
+    const progress=Math.min(m.target,weeklyStats[m.key]||0);
+    const done=weeklyMilestonesClaimed[m.key];
+    lumPanel(rect.x,rect.y,rect.w,rect.h,16);
+    const moteX=rect.x+40, moteY=rect.y+rect.h/2;
+    ctx.save();
+    ctx.shadowColor=done?LUM_GOLD:'transparent'; ctx.shadowBlur=done?18:0;
+    ctx.fillStyle=done?LUM_GOLD:'rgba(90,98,136,0.5)';
+    ctx.beginPath(); ctx.arc(moteX,moteY,13,0,6.28); ctx.fill();
+    if(done){ ctx.fillStyle=LUM_NIGHT_DEEP; ctx.font='600 13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('✓',moteX,moteY+1); }
+    ctx.restore();
+    const tx=rect.x+76;
+    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.fillStyle=LUM_CREAM; ctx.font='500 16px Georgia,serif';
+    ctx.fillText(m.label,tx,rect.y+28);
+    ctx.fillStyle='rgba(174,184,203,0.8)'; ctx.font='italic 12px Georgia,serif'; ctx.textBaseline='top';
+    ctx.fillText(progress+' / '+m.target,tx,rect.y+38);
+    ctx.fillStyle='rgba(174,184,203,0.7)'; ctx.font='500 10px Georgia,serif'; ctx.textAlign='right'; ctx.textBaseline='alphabetic';
+    ctx.fillText('REWARD',rect.x+rect.w-16,rect.y+28);
+    ctx.fillStyle=done?LUM_GOLD:LUM_CREAM; ctx.font='500 18px Georgia,serif';
+    ctx.fillText('+'+m.reward,rect.x+rect.w-16,rect.y+50);
+  });
+  const chestY=230+WEEKLY_MILESTONES.length*(78+10);
+  lumPanel(20,chestY,W-40,60,16);
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillStyle=weeklyChestClaimed?LUM_GOLD:'rgba(174,184,203,0.85)'; ctx.font='600 15px Georgia,serif';
+  ctx.fillText((weeklyChestClaimed?'✓ ':'🎁 ')+'Weekly Glow Chest',40,chestY+30);
+  ctx.textAlign='right'; ctx.fillStyle=weeklyChestClaimed?LUM_GOLD:'rgba(174,184,203,0.6)'; ctx.font='500 15px Georgia,serif';
+  ctx.fillText('+'+WEEKLY_CHEST_BONUS,W-40,chestY+30);
+}
 // Glowkeeper Story pass: the Journal is now the storybook (journalTab
 // defaults to 'story') with the original firefly-discovery grid moved to
 // its own tab, not removed -- still reads the exact same journal[type]
@@ -6776,6 +6914,8 @@ function drawJournalScreen(){
 
   if(journalTab==='story'){
     drawStoryList();
+  } else if(journalTab==='weekly'){
+    drawWeeklyJournal();
   } else {
     const order=Object.keys(TYPES);
     const discoveredCount=order.filter(t=>journal[t]>0).length;
