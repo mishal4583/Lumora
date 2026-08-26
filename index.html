@@ -892,6 +892,15 @@ function finalizeNight(){
   // Complete screen (Workshop's own favor, a stray double-claim) can ever
   // contaminate it after the fact.
   S.coinsEarnedThisNight=coins-coinsAtRoundStart;
+  // Lumora 2.0 Phase 1: miss-based objectives are evaluated exactly once,
+  // here -- the one authoritative "the night has genuinely ended" moment.
+  // Runs AFTER S.coinsEarnedThisNight is already frozen above, so any bonus
+  // this grants is correctly excluded from "Double the Glow"'s doubling
+  // calculation (catch/deliver/score objective rewards, by contrast, are
+  // granted mid-round and DO flow into that same figure -- exactly like
+  // existing quest rewards already do; not a new exception, the same
+  // already-accepted behavior every mid-round coin gain has always had).
+  evaluateMissObjectives();
   S.over=true; S.overT=0; sOver(); saveProgress(); recordNightEconomy();
   // Night Complete tips: picked once, right here, rather than re-rolled
   // every drawOver() frame -- same "pick once at the moment of the event"
@@ -1496,6 +1505,172 @@ function questProgress(kind,type){
   });
   if(changed)persistQuests();
 }
+// ---------- Lumora 2.0 Phase 1: Night Objectives ----------
+// Uses the Phase 0 foundation exactly as built -- S.objectiveActive (tonight's
+// 3), S.objectiveProgress (their live progress), and objectivesCompleted (the
+// persistent completion-history record) -- no second state system, no
+// duplicated data.
+//
+// Small, fixed pool of objective TEMPLATES (stable ids), each carrying its
+// own early/later target+reward pair -- generation resolves ONE tier per
+// template at the moment tonight's 3 are chosen, so the pool itself stays
+// small (9 templates) while still supporting progression-scaled targets.
+// Categories: 'catch' | 'delivery' | 'score' | 'miss'. Generation always
+// picks 3 DISTINCT categories (see generateNightObjectives()), so a night's
+// 3 objectives can never overlap in concept, not just by id.
+//
+// Elder/Mystery catch objectives are deliberately NOT in this pool: both are
+// rare, RNG-gated spawns on top of already needing real in-round score to
+// become eligible at all -- an objective that REQUIRES one is a poor fit for
+// "the player should normally be able to complete at least some objectives,"
+// regardless of target scaling. Flagging this explicitly rather than
+// silently omitting it (per direct instruction to report such dependencies).
+//
+// target/reward for catch_playful, deliver_total, and reach_score match the
+// instructions' own worked examples exactly at the 'later' tier; the rest
+// are derived proportionally from those, kept deliberately modest (in the
+// same 5-30 coin range the existing daily-quest rewards already use, so
+// objective bonuses read as "useful, not mandatory," per direct instruction).
+const OBJECTIVE_POOL=[
+  { id:'catch_curious', category:'catch', kind:'catch', fireflyType:'y', label:'Catch {t} Curious',
+    early:{target:6,reward:8}, later:{target:10,reward:12} },
+  { id:'catch_playful', category:'catch', kind:'catch', fireflyType:'b', label:'Catch {t} Playful',
+    early:{target:3,reward:12}, later:{target:5,reward:20} },
+  // 'early' deliberately omitted -- Shy doesn't unlock until in-round
+  // score>=15 (see diff()), unrealistic to expect reliably on a brand-new
+  // player's first few nights. Progression-aware per direct instruction.
+  { id:'catch_shy', category:'catch', kind:'catch', fireflyType:'g', label:'Catch {t} Shy',
+    later:{target:3,reward:22} },
+  { id:'catch_any', category:'catch', kind:'catch', fireflyType:null, label:'Catch {t} Fireflies',
+    early:{target:8,reward:8}, later:{target:14,reward:14} },
+  { id:'deliver_total', category:'delivery', kind:'deliver', label:'Deliver {t} Fireflies',
+    early:{target:10,reward:15}, later:{target:25,reward:30} },
+  // "full jar" reuses S.batchPerfect -- the EXISTING flag computed at the
+  // exact moment a delivery trip begins, using the jar's ACTUAL capacity at
+  // that moment (S.carried.length===S.cap) -- never assumed to be 5.
+  { id:'deliver_full_jar', category:'delivery', kind:'fulljar', label:'Deliver a Full Jar {t}×',
+    early:{target:1,reward:12}, later:{target:2,reward:22} },
+  { id:'reach_score', category:'score', kind:'score', label:'Reach {t} Light',
+    early:{target:15,reward:10}, later:{target:30,reward:18} },
+  // Flat across tiers -- the underlying miss/difficulty curve itself doesn't
+  // scale by nightNumber (see diff()), so neither does this.
+  { id:'finish_under_3_misses', category:'miss', kind:'missUnder', missLimit:3, label:'Finish With Fewer Than 3 Misses',
+    early:{target:3,reward:15}, later:{target:3,reward:15} },
+  { id:'finish_zero_misses', category:'miss', kind:'missZero', missLimit:0, label:'Finish With 0 Misses',
+    early:{target:0,reward:25}, later:{target:0,reward:25} }
+];
+// nightNumber is a persistent counter, not a live difficulty signal (the
+// in-round catch/spawn curve in diff() is identical every night) -- it's
+// used here only as a coarse, already-available proxy for "how likely is
+// this player to have the jar/upgrades a harder target assumes." Capped at
+// a simple 2-tier split per direct instruction (no new difficulty system).
+function nightObjectiveTier(){ return nightNumber<=3?'early':'later'; }
+// Session-level cache of "this is night N's objective set" -- deliberately
+// NOT part of S (reset() wipes S every call, by design) and NOT persisted
+// (objectives are per-night, not saved across sessions, per direct
+// instruction) -- exists solely so restarting the CURRENT night (pause
+// menu's Restart Night, or returning to title and starting again without
+// the night ever having genuinely completed) restores the SAME 3
+// objectives instead of rerolling them, while a genuine new night (detected
+// by nightNumber having actually advanced) still gets a fresh set. Mirrors
+// the exact "session-level, not persisted" precedent nightsCompletedThisSession
+// already established in Phase 0.
+let cachedNightObjectives=null, cachedNightObjectivesFor=-1;
+// Picks tonight's 3 objectives: 3 distinct categories (always possible --
+// catch/delivery/score/miss each have at least one always-eligible
+// template), one eligible template per chosen category, tier-resolved into
+// a concrete instance. Uses the project's own rand() helper -- no new
+// randomization primitive.
+function generateNightObjectives(){
+  const tier=nightObjectiveTier();
+  const categories=['catch','delivery','score','miss'];
+  for(let i=categories.length-1;i>0;i--){ const j=Math.floor(rand(0,i+1)); const tmp=categories[i]; categories[i]=categories[j]; categories[j]=tmp; }
+  const chosen=categories.slice(0,3);
+  const active=[], progress={};
+  chosen.forEach(cat=>{
+    const eligible=OBJECTIVE_POOL.filter(o=>o.category===cat&&o[tier]);
+    const tmpl=eligible[Math.floor(rand(0,eligible.length))];
+    const resolved=tmpl[tier];
+    active.push({id:tmpl.id, category:tmpl.category, kind:tmpl.kind, fireflyType:tmpl.fireflyType||null, missLimit:tmpl.missLimit,
+      label:tmpl.label.replace('{t}',resolved.target), target:resolved.target, reward:resolved.reward, done:false});
+    progress[tmpl.id]=0;
+  });
+  S.objectiveActive=active;
+  S.objectiveProgress=progress;
+}
+// The ONE place objective generation/restoration is decided -- called from
+// reset() (every lifecycle path funnels through it), not scattered across
+// beginPlay()/continueFromOver() separately. Deliberately NOT a blind
+// generate-every-time: checks nightNumber against the session cache above
+// so a genuine new night (nightNumber has advanced) gets a fresh set, while
+// a restart/resume of the SAME night number restores the SAME 3 objectives
+// with progress reset to 0 (a restarted attempt genuinely starts over, but
+// the objective SET itself is not a reroll target).
+function ensureNightObjectives(){
+  if(!upgrades.tutorialDone){ S.objectiveActive=[]; S.objectiveProgress={}; return; } // tutorial stays completely objective-free, per direct instruction
+  if(cachedNightObjectivesFor===nightNumber&&cachedNightObjectives){
+    S.objectiveActive=cachedNightObjectives.map(o=>Object.assign({},o,{done:false}));
+    S.objectiveProgress={};
+    S.objectiveActive.forEach(o=>{ S.objectiveProgress[o.id]=0; });
+  } else {
+    generateNightObjectives();
+    cachedNightObjectivesFor=nightNumber;
+    cachedNightObjectives=S.objectiveActive.map(o=>Object.assign({},o));
+  }
+}
+// Mirrors questProgress()'s exact shape/discipline -- iterates
+// S.objectiveActive (tonight's 3, not a persistent pool), skips already-done
+// ones, matches by kind (+fireflyType for catch objectives that specify
+// one), increments, and grants+marks done exactly once at target. Called
+// from the SAME authoritative gameplay hook sites questProgress() already
+// uses (actual catch success, actual delivery success) -- no parallel
+// tracking system. 'score' objectives read the live S.score directly
+// (score is a value, not an incrementing count); 'fulljar' is driven by the
+// EXISTING S.batchPerfect flag, once per completed full-jar delivery trip.
+function objectiveProgress(kind,type){
+  if(!S.objectiveActive||!S.objectiveActive.length)return;
+  let changed=false;
+  S.objectiveActive.forEach(o=>{
+    if(o.done||o.category==='miss')return; // miss-category objectives are only ever evaluated at night's end, see evaluateMissObjectives()
+    if(o.kind==='score'){
+      if(kind!=='score')return;
+      S.objectiveProgress[o.id]=S.score;
+    } else {
+      if(o.kind!==kind)return;
+      if(o.fireflyType&&o.fireflyType!==type)return;
+      S.objectiveProgress[o.id]=(S.objectiveProgress[o.id]||0)+1;
+    }
+    changed=true;
+    if(S.objectiveProgress[o.id]>=o.target){
+      o.done=true;
+      coins+=o.reward;
+      if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+      objectivesCompleted[o.id]=(objectivesCompleted[o.id]||0)+1;
+      capMilestoneFx('✓ objective complete!');
+    }
+  });
+  if(changed)saveProgress();
+}
+// Miss-based objectives ("Finish With Fewer Than X Misses"/"Finish With 0
+// Misses") are evaluated exactly once, here -- the one authoritative moment
+// the night has genuinely ended -- never mid-round. A player temporarily
+// under the threshold is NOT complete until finalizeNight() actually runs;
+// failing to meet it here leaves the objective incomplete (o.done stays
+// false), never marked complete, per direct instruction.
+function evaluateMissObjectives(){
+  if(!S.objectiveActive||!S.objectiveActive.length)return;
+  S.objectiveActive.forEach(o=>{
+    if(o.done||o.category!=='miss')return;
+    S.objectiveProgress[o.id]=S.misses;
+    const passed=o.kind==='missZero'?S.misses===0:S.misses<o.missLimit;
+    if(passed){
+      o.done=true;
+      coins+=o.reward;
+      if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+      objectivesCompleted[o.id]=(objectivesCompleted[o.id]||0)+1;
+    }
+  });
+}
 // Minimal quest-object validation at the save-load boundary. The array-level
 // check below (Array.isArray/length) already existed, but nothing validated
 // each quest's OWN shape -- a malformed/tampered save (e.g. a quest entry
@@ -2006,6 +2181,14 @@ function reset(){
   pointer.down=false;
   KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
+  // Lumora 2.0 Phase 1: the ONE place objective generation/restoration is
+  // decided -- every reset() call site (initial top-level init, beginPlay(),
+  // continueFromOver(), the pause menu's Restart Night) funnels through
+  // here, and ensureNightObjectives() itself is what tells a genuine new
+  // night (nightNumber advanced -> fresh 3) apart from a restart/resume of
+  // the same night (same nightNumber -> restore the same 3, progress reset
+  // to 0). See ensureNightObjectives()'s own comment for the full reasoning.
+  ensureNightObjectives();
 }
 reset();
 // Shared "start a fresh round from the title screen" sequence -- was
@@ -3243,6 +3426,7 @@ function update(dt){
           S.caughtN++;
           journal[f.type]++; if(!YT){ try{localStorage.setItem('gk2_journal',JSON.stringify(journal));}catch(e){} } // Journal: lifetime catches per type, tracked from here forward (no backfill for history predating this)
           questProgress('catch',f.type); // same catch moment as the Journal increment above
+          objectiveProgress('catch',f.type); // Lumora 2.0 Phase 1: same authoritative catch-success moment, not spawn/lock/radius-entry
           S.carried.push({type:f.type,ph:rand(0,6.28),sp:rand(0.7,1.4)});
           if(f.type==='e')capMilestoneFx('the elder blesses your jar!'); // no capacity change any more -- see capMilestoneFx
           S.jar.pulse=1; sCatch(S.caughtN);
@@ -3296,6 +3480,12 @@ function update(dt){
   } else S.deliverT=0;
   if(S.wasDelivering&&S.carried.length===0&&S.sparks.length===0){
     S.wasDelivering=false;
+    // Lumora 2.0 Phase 1: "deliver a full jar" objective progress, driven by
+    // the EXISTING S.batchPerfect flag -- computed at the moment the
+    // delivery trip began (S.carried.length===S.cap using the jar's ACTUAL
+    // capacity at that moment, never assumed to be 5), counted here once
+    // per completed trip, not once per individual firefly within it.
+    if(S.batchPerfect)objectiveProgress('fulljar',null);
     if(S.batchPerfect)capMilestoneFx('perfect delivery!'); // no capacity change any more -- see capMilestoneFx
     S.batchPerfect=false;
     if(!refillHintShown){ refillHintShown=true; S.deliverExplainT=4; } // one-time reminder: jar's empty, go catch more — first round only
@@ -3344,6 +3534,13 @@ function update(dt){
       // accumulates via grantDeliveryCoins(), same delivery moment as score.
       grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun());
       questProgress('deliver',s.type); // any type counts toward "deliver 20 fireflies" — same delivery moment as coins/score above
+      // Lumora 2.0 Phase 1: same authoritative delivery-success moment, not
+      // catch time -- "deliver X" must count actual successful deliveries,
+      // per direct instruction. Score objectives read the live S.score
+      // (already updated by the S.score+=... line just above), not a
+      // separate tracker.
+      objectiveProgress('deliver',s.type);
+      objectiveProgress('score',s.type);
       sDeliver(S.deliveredN);
       puff(s.tx,s.ty,TYPES[s.type].glow,8,45,0.6);
       // Glowkeeper's Blessing: a brief pulse on the statue's own held light
@@ -4112,6 +4309,27 @@ function banner(txt,y,color,alpha){
 // miss. Derived live from existing positions every frame -- no new state,
 // no duplicated collision logic.
 function jarNearAnyMoth(){ return S.moths.some(m=>dist(m.x,m.y,S.jar.x,S.jar.y-14)<140); }
+// Lumora 2.0 Phase 1: compact, always-visible, non-interactive objectives
+// readout during play -- draw-only (no new input handling, so no pause-guard
+// needed), small font, anchored under the existing misses dots (y72) in the
+// same left-side HUD column as score. Renders nothing at all when tonight
+// has no objectives (the tutorial night, or before ensureNightObjectives()
+// has run) -- never an empty placeholder panel.
+function drawObjectivesHUD(){
+  if(!S.objectiveActive||!S.objectiveActive.length)return;
+  ctx.save();
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  ctx.font='600 10px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.7)';
+  ctx.fillText('TONIGHT\'S GOALS',22,82);
+  S.objectiveActive.forEach((o,i)=>{
+    const y=98+i*15;
+    const p=Math.min(o.target,S.objectiveProgress[o.id]||0);
+    ctx.font='11px Georgia,serif';
+    ctx.fillStyle=o.done?'rgba(164,230,187,0.9)':'rgba(230,217,188,0.8)';
+    ctx.fillText((o.done?'✓ ':'○ ')+o.label+'  '+p+'/'+o.target,22,y);
+  });
+  ctx.restore();
+}
 function drawHUD(){
   ctx.textBaseline='top';
   ctx.font='600 30px Georgia,serif';
@@ -4123,6 +4341,7 @@ function drawHUD(){
     ctx.beginPath(); ctx.arc(30+i*15,72,4,0,6.28); ctx.fill();
   }
   ctx.globalAlpha=1;
+  if(!S.over)drawObjectivesHUD(); // Lumora 2.0 Phase 1 -- hides itself once Night Complete has its own summary
   ctx.font='500 18px Georgia,serif';
   ctx.fillStyle='#8992ba'; ctx.textAlign='right';
   ctx.fillText('best '+best,W-22,32);
@@ -4239,7 +4458,14 @@ function drawOver(){
   const restBefore=restorationPct(bestAtRoundStart), restAfter=restorationPct(best), restDelta=restAfter-restBefore;
   const coinsEarned=coins-coinsAtRoundStart;
   const rows=[['Light Delivered',S.score+''],['Coins Earned','+'+coinsEarned],['Village Restored','+'+Math.max(0,restDelta)+'%']];
-  const panelR={x:W/2-160,y:H*0.34,w:320,h:150};
+  // Lumora 2.0 Phase 1: hasObjectives is false for the tutorial night (its
+  // own S.objectiveActive is always []), so the ENTIRE block below --
+  // taller panel, the objectives sub-section, and the resulting shift to
+  // playBtn/SHOP_BTN_OVER/tipY/DOUBLE_COINS_BTN -- collapses back to
+  // exactly the original, unmodified layout there. Real nights only.
+  const hasObjectives=!!(S.objectiveActive&&S.objectiveActive.length);
+  const objExtra=hasObjectives?116:0;
+  const panelR={x:W/2-160,y:H*0.34,w:320,h:150+objExtra};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
   rows.forEach((row,i)=>{
     const ry=panelR.y+30+i*44;
@@ -4251,6 +4477,54 @@ function drawOver(){
     ctx.fillStyle=LUM_CREAM; ctx.font='500 20px Georgia,serif';
     ctx.fillText(row[1],panelR.x+panelR.w-20,ry);
   });
+  // Objectives sub-section -- same panel, smaller/tighter type than the 3
+  // main stat rows above (this is a "compact section," not a second full
+  // panel). Only completed objectives ever contribute to the bonus total;
+  // a failed miss-based objective (o.done still false after
+  // evaluateMissObjectives()) shows as incomplete, no reward, per direct
+  // instruction. The bonus figure is DISPLAY-ONLY (derived fresh from
+  // S.objectiveActive every frame) -- rewards themselves were already
+  // granted exactly once, at completion time, by objectiveProgress()/
+  // evaluateMissObjectives(); re-rendering this screen any number of times
+  // cannot re-grant anything.
+  if(hasObjectives){
+    const divY=panelR.y+140;
+    ctx.strokeStyle='rgba(174,184,203,0.15)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(panelR.x+20,divY); ctx.lineTo(panelR.x+panelR.w-20,divY); ctx.stroke();
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillStyle='rgba(174,184,203,0.8)'; ctx.font='600 11px Georgia,serif';
+    ctx.fillText('OBJECTIVES',panelR.x+20,panelR.y+158);
+    let bonus=0;
+    S.objectiveActive.forEach((o,i)=>{
+      const oy=panelR.y+180+i*21;
+      if(o.done)bonus+=o.reward;
+      ctx.textAlign='left'; ctx.font='12px Georgia,serif';
+      ctx.fillStyle=o.done?'rgba(164,230,187,0.95)':'rgba(174,184,203,0.7)';
+      ctx.fillText((o.done?'✓ ':'○ ')+o.label,panelR.x+20,oy);
+      if(o.done){ ctx.textAlign='right'; ctx.fillStyle=WS_GOLD_PRICE; ctx.fillText('+'+o.reward,panelR.x+panelR.w-20,oy); }
+    });
+    if(bonus>0){
+      const boy=panelR.y+180+S.objectiveActive.length*21+8;
+      ctx.textAlign='left'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.85)';
+      ctx.fillText('OBJECTIVE BONUS',panelR.x+20,boy);
+      ctx.textAlign='right'; ctx.fillStyle=WS_GOLD_PRICE; ctx.font='600 13px Georgia,serif';
+      ctx.fillText('+'+bonus,panelR.x+panelR.w-20,boy);
+    }
+  }
+
+  // Lumora 2.0 Phase 1: playBtn/SHOP_BTN_OVER/DOUBLE_COINS_BTN are shared,
+  // module-level objects also read by the pointerdown hit-test below (same
+  // "one object drives both draw and hit-test" discipline as every other
+  // button in this file) -- mutating their .y here, once per frame, keeps
+  // both in sync automatically. Safe because drawOver() always runs at
+  // least once per frame before any user input could be processed (JS is
+  // single-threaded; a pointerdown is only ever handled between frames).
+  // Nothing outside drawOver()/this screen's own pointerdown branch ever
+  // reads these three objects (verified), so no other screen is affected.
+  playBtn.y=hasObjectives?628:512;
+  SHOP_BTN_OVER.y=hasObjectives?683:567;
+  DOUBLE_COINS_BTN.y=hasObjectives?900:830;
+  const tipY=hasObjectives?SHOP_BTN_OVER.y+67:H*0.66;
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
@@ -4264,13 +4538,12 @@ function drawOver(){
   // Night Complete tips: one line of actionable advice, picked once at the
   // moment the round ended (see S.tip's assignment next to S.misses>=5
   // above), not re-rolled every frame. Sits well clear of SHOP_BTN_OVER's
-  // own hit region (the pill at y:567, h:44, bottom edge ~589) -- this is
-  // display-only text, no hit-test of its own.
+  // own hit region -- this is display-only text, no hit-test of its own.
   if(S.tip){
     ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-    lumEyebrow('✦ Tip ✦',W/2,H*0.66,'center');
+    lumEyebrow('✦ Tip ✦',W/2,tipY,'center');
     ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
-    wrapText(S.tip,W/2,H*0.66+16,340,17,'center');
+    wrapText(S.tip,W/2,tipY+16,340,17,'center');
   }
   // "Double the Glow" -- hidden entirely during the first-night tutorial,
   // whenever the SDK doesn't offer rewarded ads on this host, or when this
