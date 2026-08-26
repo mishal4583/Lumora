@@ -209,6 +209,24 @@ const WEATHER_INFO={
   aurora:       {msg:'Waking Aurora — rare ones drift closer'}
 };
 
+// Lumora 2.0 Phase 4: Night Events -- a rarer, whole-night, round-scoped
+// condition, deliberately DISTINCT from weather above rather than a
+// reskin of it. Weather cycles in and out every 12-30s within a single
+// night and is purely ambient; a Night Event is decided ONCE at the
+// moment the night begins (see ensureNightEvent()) and holds for the
+// entire night, using the S.eventActive/eventHistory state Phase 0
+// already reserved for exactly this. Effects layer additively (via
+// Math.max, same discipline elderRateMult already established for
+// weather) on top of whatever weather happens to roll that same night --
+// never replacing it, so the two systems can never fight over the same
+// variable's meaning.
+const EVENT_TYPES=['moonlight','fireflyRain','mothSwarm'];
+const EVENT_INFO={
+  moonlight:   {msg:'🌕 Moonlight — rare fireflies grow bold tonight'},
+  fireflyRain: {msg:'🌧️ Firefly Rain — the sky fills with light'},
+  mothSwarm:   {msg:'🦋 Moth Swarm — danger rises, but so does the reward'}
+};
+
 // ---------- audio ----------
 let AC=null, master, padStarted=false, padOsc=[], humOsc=null, humGain=null, windLP=null;
 // ambient wind pad's lowpass cutoff by tier — the Stage 1 "ambient sound layer"
@@ -1618,6 +1636,57 @@ function ensureNightObjectives(){
     cachedNightObjectives=S.objectiveActive.map(o=>Object.assign({},o));
   }
 }
+
+// ---------- Lumora 2.0 Phase 4: Night Events ----------
+// See EVENT_TYPES/EVENT_INFO's own comment (near WEATHER_INFO) for why this
+// is a separate system from weather, not a reskin of it. Session-level
+// cache keyed on nightNumber, same "restart never rerolls, a genuine new
+// night always can" discipline ensureNightObjectives() already established
+// -- deliberately NOT part of S (reset() wipes S every call) and NOT itself
+// the persistence mechanism (eventHistory is; see generateNightEvent()).
+let cachedNightEventFor=-1, cachedNightEvent=null;
+// Roughly 1 in 3 nights gets an event, evenly split across the 3 types --
+// frequent enough to matter, rare enough that "I wonder what happens
+// tonight?" stays a real question rather than a guarantee. Tune later,
+// same "not yet human-playtested" caveat as every other number this
+// session has picked.
+const NIGHT_EVENT_CHANCE=0.35;
+function generateNightEvent(){
+  if(rand(0,1)<NIGHT_EVENT_CHANCE){
+    S.eventActive=EVENT_TYPES[Math.floor(rand(0,EVENT_TYPES.length))];
+    S.eventBannerT=4.5; S.eventMsg=EVENT_INFO[S.eventActive].msg;
+    // Recorded the moment it's rolled, with its own save call -- mirrors
+    // objectivesCompleted's own discipline (saved at the moment something
+    // real happens, not merely relying on continueFromOver()'s earlier
+    // save, which already ran before this executes inside reset()).
+    eventHistory.push(S.eventActive);
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
+    saveProgress();
+  } else {
+    S.eventActive=null; S.eventBannerT=0; S.eventMsg='';
+  }
+}
+function ensureNightEvent(){
+  if(!upgrades.tutorialDone){ S.eventActive=null; S.eventBannerT=0; S.eventMsg=''; return; } // tutorial stays completely event-free, same as objectives
+  if(cachedNightEventFor===nightNumber){
+    S.eventActive=cachedNightEvent;
+    // Restarting the SAME night restores the SAME event (no reroll) but
+    // does NOT replay the announcement banner -- that's a one-time "the
+    // night begins" cue, not a persistent readout re-shown on every retry.
+    S.eventBannerT=0; S.eventMsg='';
+  } else {
+    generateNightEvent();
+    cachedNightEventFor=nightNumber;
+    cachedNightEvent=S.eventActive;
+  }
+}
+// Moth Swarm's compensating reward -- a flat, modest multiplier applied
+// ONLY at the delivery-coin-grant site, as a 4th independent layer next to
+// the 3 already documented there (raw value x jar Light Value x Coin
+// Value tier). Round-scoped, not persisted, not the same lever as the
+// shared/LOCKED coinMultiplierForRun() -- kept completely separate so a
+// Night Event can never quietly touch the persistent Coin Value economy.
+function nightEventCoinMult(){ return S.eventActive==='mothSwarm'?1.2:1; }
 // Mirrors questProgress()'s exact shape/discipline -- iterates
 // S.objectiveActive (tonight's 3, not a persistent pool), skips already-done
 // ones, matches by kind (+fireflyType for catch objectives that specify
@@ -2218,6 +2287,12 @@ function reset(){
     // top-level state instead -- see objectivesCompleted/eventHistory/
     // contractsCompleted near `let trackerOn=` above).
     objectiveActive:[], objectiveProgress:{}, eventActive:null, contractActive:null,
+    // Lumora 2.0 Phase 4: eventBannerT/eventMsg is a DEDICATED slot, not a
+    // reuse of S.weatherBannerT/S.capMsgT -- a Night Event is announced
+    // exactly once, at the moment the night begins (see ensureNightEvent()),
+    // and must not be silently clobbered by (or clobber) an unrelated
+    // weather roll or milestone banner landing in the same window.
+    eventBannerT:0, eventMsg:'',
     flies:[], moths:[], magnet:null, parts:[], sparks:[], fireworks:[], balloons:[], deliverWaves:[],
     jar:{x:W/2,y:H-320,tx:W/2,ty:H-320,px:W/2,py:H-320,spd:0,pulse:0,wob:0},
     carried:[], restT:0, cap:jarCapacityForRun(), capMsg:'', capMsgT:0, wasDelivering:false, batchPerfect:false,
@@ -2262,6 +2337,11 @@ function reset(){
   // the same night (same nightNumber -> restore the same 3, progress reset
   // to 0). See ensureNightObjectives()'s own comment for the full reasoning.
   ensureNightObjectives();
+  // Lumora 2.0 Phase 4: same "every reset() call site funnels through here"
+  // reasoning as ensureNightObjectives() just above -- kept as a separate
+  // call (not folded into that function) since events and objectives are
+  // independent systems with independent state, per Phase 0's own split.
+  ensureNightEvent();
 }
 reset();
 // Shared "start a fresh round from the title screen" sequence -- was
@@ -2345,7 +2425,13 @@ function spawnFly(forceType){
     // still fully gated behind the SAME d.shy/d.blue unlock booleans as before.
     // Weather only ever scales a width that's already nonzero; a locked-out
     // type's width stays exactly 0 regardless of weather.
-    const shyW=d.shy?(S.weather==='nightRain'?0.30:S.weather==='aurora'?0.22:0.16):0;
+    // Lumora 2.0 Phase 4: Moonlight folds in via Math.max alongside the
+    // existing weather widths, same "highest bonus wins, never multiply
+    // together" discipline elderRateMult below already established --
+    // Moonlight and a nightRain/aurora weather roll landing the same night
+    // don't stack into an even bigger number, they just take whichever is
+    // already the bigger boost.
+    const shyW=d.shy?Math.max(S.weather==='nightRain'?0.30:S.weather==='aurora'?0.22:0.16, S.eventActive==='moonlight'?0.28:0):0;
     const blueW=d.blue?(S.weather==='shootingStars'?0.30:0.26):0;
     if(r<shyW)type='g';
     else if(r<shyW+blueW)type='b';
@@ -3207,6 +3293,7 @@ function update(dt){
     }
   }
   if(S.weatherBannerT>0)S.weatherBannerT=Math.max(0,S.weatherBannerT-dt);
+  if(S.eventBannerT>0)S.eventBannerT=Math.max(0,S.eventBannerT-dt);
   if(S.score>=30)S.constA=Math.min(1,S.constA+dt*0.15); // 100->30, same reasoning as the shooting-star threshold above
   LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr)S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
   // milestone "awaken" fades — cat/windmill used to pop in instantly at their
@@ -3305,11 +3392,21 @@ function update(dt){
   // is expressed as more fireflies on screen at once + a faster cadence, rather
   // than touching the type-roll. diff().maxFlies itself (score-driven) is untouched.
   const festivalCapBoost=S.weather==='festival'?3:0;
-  if(S.spawnT<=0&&active<d.maxFlies+festivalCapBoost){
+  // Lumora 2.0 Phase 4: Firefly Rain reuses festival weather's own
+  // "more on screen + faster cadence" shape (Math.max/fastest-wins, not
+  // additive with festival, same discipline as Moonlight above) rather
+  // than inventing a second, different way to express "a burst of fireflies".
+  const fireflyRainActive=S.eventActive==='fireflyRain';
+  const eventCapBoost=fireflyRainActive?4:0;
+  if(S.spawnT<=0&&active<d.maxFlies+Math.max(festivalCapBoost,eventCapBoost)){
     spawnFly();
-    S.spawnT=S.weather==='festival'?rand(0.3,0.6):rand(0.7,1.5);
+    S.spawnT=(S.weather==='festival'||fireflyRainActive)?rand(0.25,0.5):rand(0.7,1.5);
   }
-  if(d.mothRate>0){ S.mothT-=dt; if(S.mothT<=0){ spawnMoth(); S.mothT=d.mothRate; } }
+  // Lumora 2.0 Phase 4: Moth Swarm -- more frequent moths (shorter interval,
+  // floor of 3s so it stays fair rather than becoming unavoidable spam),
+  // compensated by nightEventCoinMult() at the delivery-coin-grant site.
+  const mothRateNow=S.eventActive==='mothSwarm'&&d.mothRate>0?Math.max(3,d.mothRate*0.5):d.mothRate;
+  if(mothRateNow>0){ S.mothT-=dt; if(S.mothT<=0){ spawnMoth(); S.mothT=mothRateNow; } }
   if(d.magRate>0&&!S.magnet){ S.magT-=dt; if(S.magT<=0){ spawnMagnet(); S.magT=d.magRate; } }
   // elder firefly: rare, only after the game has opened up. Clear Moon, Aurora's
   // milder "rare combinations", and a completed "Catch 2 Elder" quest's luck
@@ -3326,7 +3423,9 @@ function update(dt){
   // would have permanently blocked Elder from ever spawning again for any
   // well-upgraded player.
   if(S.score>=12){
-    const elderRateMult=Math.max(S.weather==='clearMoon'?2.2:1, S.weather==='aurora'?1.4:1, luckBoostT>0?2.2:1);
+    // Lumora 2.0 Phase 4: Moonlight joins the same Math.max bound as every
+    // other elder-rate booster here -- capped, not stacked.
+    const elderRateMult=Math.max(S.weather==='clearMoon'?2.2:1, S.weather==='aurora'?1.4:1, luckBoostT>0?2.2:1, S.eventActive==='moonlight'?2.0:1);
     S.elderT-=dt*elderRateMult;
     if(S.elderT<=0&&!S.flies.some(f=>f.type==='e')){ spawnFly('e'); S.elderT=rand(35,55); }
   }
@@ -3335,7 +3434,10 @@ function update(dt){
   // score gate (>=20) and dedicated timer, same architecture as Elder above,
   // not folded into the normal type-roll.
   if(S.score>=20){
-    S.mysteryT-=dt;
+    // Lumora 2.0 Phase 4: Moonlight speeds Mystery's countdown too -- "rare
+    // fireflies become more common" covers all three rare types (shy/elder/
+    // mystery), not just shy/elder.
+    S.mysteryT-=dt*(S.eventActive==='moonlight'?1.6:1);
     if(S.mysteryT<=0&&!S.flies.some(f=>f.type==='m')){ spawnFly('m'); S.mysteryT=rand(60,90); }
   }
   // firefly bloom event
@@ -3618,7 +3720,10 @@ function update(dt){
       // LOCKED 1.00-1.30x Coin Value line, unaffected by which jar is
       // equipped). Not rounded per catch (values are fractional) --
       // accumulates via grantDeliveryCoins(), same delivery moment as score.
-      grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun());
+      // Lumora 2.0 Phase 4: a 4th layer, nightEventCoinMult() -- Moth
+      // Swarm's compensating +20%, round-scoped and completely separate
+      // from the persistent/LOCKED Coin Value line above.
+      grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun()*nightEventCoinMult());
       questProgress('deliver',s.type); // any type counts toward "deliver 20 fireflies" — same delivery moment as coins/score above
       // Lumora 2.0 Phase 1: same authoritative delivery-success moment, not
       // catch time -- "deliver X" must count actual successful deliveries,
@@ -4450,6 +4555,14 @@ function drawHUD(){
   if(S.magnetT>0)banner('✨ glow magnet '+Math.ceil(S.magnetT)+'s',148,'#fff3cf',0.85);
   if(S.deliverExplainT>0)banner('jar\'s empty — go catch more fireflies!',96,'#ffe9b8',Math.min(1,S.deliverExplainT));
   else if(S.missHintT>0)banner('a firefly drifted away — don\'t keep them waiting',96,'#f2b98e',Math.min(1,S.missHintT));
+  // Lumora 2.0 Phase 4: a Night Event's own announcement -- own dedicated
+  // slot (S.eventBannerT/eventMsg), so it can't be clobbered by (or
+  // clobber) capMsg/weatherBannerT. Placed above bloomBanner/weather/hints
+  // so a special night is genuinely hard to miss right when it begins,
+  // but below the two immediate contextual hints just above (those are
+  // tutorial-only anyway -- see missHintShown/refillHintShown's own
+  // "first round only" comments -- so real collisions are rare).
+  else if(S.eventBannerT>0)banner(S.eventMsg,96,'#e9c8ff',Math.min(1,S.eventBannerT));
   else if(S.bloomBanner>0)banner('a firefly bloom!',96,'#ffe9b8',S.bloomBanner);
   else if(S.mothFlash>0)banner('a moth startled your firefly!',96,'#dcb0d0',S.mothFlash);
   else if(jarNearAnyMoth())banner('⚠ moth nearby — keep your jar away',96,'#f2c199',0.75+0.2*Math.sin(S.t*3));
