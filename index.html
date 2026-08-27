@@ -114,6 +114,10 @@ const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const lerp=(a,b,t)=>a+(b-a)*t;
 const dist=(x1,y1,x2,y2)=>Math.hypot(x2-x1,y2-y1);
+// D1 (Claude Design spec): the one non-linear easing curve its animation
+// timings call for (entries/morphs) -- shared, not re-derived per call site.
+const easeInOutCubic=t=>t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const easeOutCubic=t=>1-Math.pow(1-t,3);
 
 // ---------- glow sprites ----------
 const glowCache={};
@@ -1667,15 +1671,21 @@ function generateNightObjectives(){
 // with progress reset to 0 (a restarted attempt genuinely starts over, but
 // the objective SET itself is not a reroll target).
 function ensureNightObjectives(){
-  if(!upgrades.tutorialDone){ S.objectiveActive=[]; S.objectiveProgress={}; return; } // tutorial stays completely objective-free, per direct instruction
+  if(!upgrades.tutorialDone){ S.objectiveActive=[]; S.objectiveProgress={}; S.isNewNight=false; return; } // tutorial stays completely objective-free, per direct instruction
   if(cachedNightObjectivesFor===nightNumber&&cachedNightObjectives){
     S.objectiveActive=cachedNightObjectives.map(o=>Object.assign({},o,{done:false}));
     S.objectiveProgress={};
     S.objectiveActive.forEach(o=>{ S.objectiveProgress[o.id]=0; });
+    // D1: a restart/resume of the SAME night restores the same 3 objectives
+    // (as already established) but must NOT replay the new-night reveal
+    // card -- that's a one-time "this night begins" moment, not a
+    // persistent state re-shown on every retry.
+    S.isNewNight=false;
   } else {
     generateNightObjectives();
     cachedNightObjectivesFor=nightNumber;
     cachedNightObjectives=S.objectiveActive.map(o=>Object.assign({},o));
+    S.isNewNight=true; // a genuine new night -- show the reveal card
   }
 }
 
@@ -1786,6 +1796,42 @@ function checkWeeklyMilestones(){
 // tracking system. 'score' objectives read the live S.score directly
 // (score is a value, not an incrementing count); 'fulljar' is driven by the
 // EXISTING S.batchPerfect flag, once per completed full-jar delivery trip.
+// D1: the new-night reveal card's own active-window check -- true from the
+// moment a genuine new night begins until its 4.30s auto-dismiss keyframe
+// (or a tap jumps S.newNightT straight there). Gated on screen==='play' so
+// it can never hold anything hostage before the player has even pressed
+// Begin (S.isNewNight can already be true then, since ensureNightObjectives()
+// runs inside reset(), which runs before the player ever reaches gameplay).
+function newNightCardActive(){ return screen==='play'&&S.isNewNight&&S.objectiveActive.length>0&&S.newNightT<4.30; }
+// Distinct from newNightCardActive() above on purpose: "active" (owns
+// input, pauses gameplay) ends exactly at the 4.30 dismiss keyframe, but
+// the card's own exit animation (scrim/card fade-out, motes flying to the
+// HUD) keeps rendering past that point while gameplay has already resumed
+// underneath it -- matching the spec's own "resume at 4.30, then the exit
+// plays out over live gameplay" sequencing.
+function newNightCardVisible(){ return screen==='play'&&S.isNewNight&&S.objectiveActive.length>0&&S.newNightT<4.70; }
+// D1 (Objective HUD state machine): a mid-round progress tick that does NOT
+// complete the row expands the HUD (or extends its hold if already
+// expanded) so the player actually sees the number move -- a completion is
+// the opposite (the dedicated banner composite owns the moment instead, so
+// the HUD gets out of its way), see hudOnObjectiveComplete() below. Neither
+// touches S.hudSticky once the player has manually pinned the HUD open.
+function hudOnObjectiveProgress(){
+  if(S.hudAllComplete)return; // already settled into the "GOALS COMPLETE" chip -- nothing left to reveal
+  S.hudCollapsed=false;
+  if(!S.hudSticky)S.hudHoldT=2.4;
+}
+function hudOnObjectiveComplete(){
+  if(S.objectiveActive.every(o=>o.done)){
+    // All 3 done: takes priority over the ordinary collapse-on-complete
+    // rule below -- expand, celebrate, then settle into the small
+    // "GOALS COMPLETE" chip for the rest of the night (drawObjectivesHUD()
+    // owns the actual celebrate->chip animation, keyed off hudAllCompleteT).
+    S.hudAllComplete=true; S.hudAllCompleteT=2.6; S.hudCollapsed=false; S.hudSticky=true;
+  } else if(!S.hudSticky){
+    S.hudCollapsed=true;
+  }
+}
 function objectiveProgress(kind,type){
   if(!S.objectiveActive||!S.objectiveActive.length)return;
   let changed=false;
@@ -1805,7 +1851,10 @@ function objectiveProgress(kind,type){
       coins+=o.reward;
       if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
       objectivesCompleted[o.id]=(objectivesCompleted[o.id]||0)+1;
-      capMilestoneFx('✓ objective complete!');
+      capMilestoneFx('✦ Objective Complete ✦','objectiveComplete',{label:o.label,reward:o.reward}); // D1: dedicated composite, see drawHUD()'s banner chain
+      hudOnObjectiveComplete();
+    } else {
+      hudOnObjectiveProgress();
     }
   });
   if(changed)saveProgress();
@@ -2381,6 +2430,34 @@ function reset(){
     // top-level state instead -- see objectivesCompleted/eventHistory/
     // contractsCompleted near `let trackerOn=` above).
     objectiveActive:[], objectiveProgress:{}, eventActive:null, contractActive:null,
+    // D1 (Night Objectives UI, Claude Design spec): new-night reveal card --
+    // S.newNightT is elapsed seconds since THIS reset() (a genuine new night
+    // or a restart, doesn't matter which -- only S.isNewNight decides
+    // whether the card actually shows), counting up from 0. Every card
+    // animation is a pure function of this one value, per the spec's own
+    // "every animation is a pure function of t" rule -- a tap dismiss just
+    // jumps newNightT straight to the 4.30 keyframe rather than a separate
+    // dismissed flag. isNewNight itself is decided by ensureNightObjectives()
+    // (true only on a genuine fresh generation, never on a restore/restart).
+    newNightT:0, isNewNight:false, newNightMotesFired:false,
+    // D1: Objective HUD collapse/expand state machine. hudCollapsed is the
+    // CURRENT visual state; hudMorphT is the 0..1 progress of the 220ms
+    // width/height/radius morph between the two layouts (see
+    // drawObjectivesHUD()). hudHoldT counts down while expanded; hitting 0
+    // auto-collapses UNLESS hudSticky (set once the player manually taps to
+    // expand -- "no auto-collapse for the rest of the night after the
+    // player expands by hand"). hudAllComplete{,T} drive the one-time
+    // celebrate-then-settle-into-a-chip sequence once all objectives are
+    // done, per direct spec.
+    hudCollapsed:false, hudMorphT:1, hudHoldT:4.0, hudSticky:false,
+    hudAllComplete:false, hudAllCompleteT:0,
+    // D1: capMsgKind distinguishes an objective-complete message (which
+    // renders the dedicated 3-line composite, see drawHUD()'s banner chain)
+    // from every other capMsg use (Elder catch, Perfect/Rare Delivery,
+    // Lumora Bloom, etc.) which keep the existing single-line banner
+    // treatment -- capMsg/capMsgT themselves are unchanged, still the same
+    // one shared slot, same "only one message at a time" rule.
+    capMsgKind:'generic', capMsgData:null,
     // Lumora 2.0 Phase 4: eventBannerT/eventMsg is a DEDICATED slot, not a
     // reuse of S.weatherBannerT/S.capMsgT -- a Night Event is announced
     // exactly once, at the moment the night begins (see ensureNightEvent()),
@@ -2604,8 +2681,18 @@ function spawnTrailParticles(dt){
 // Definition of Done report for which of the three this leaves feeling
 // thinner than before (perfect delivery, honestly) rather than quietly
 // papering over it with an invented replacement reward.
-function capMilestoneFx(msg){
-  S.capMsg=msg; S.capMsgT=3.5;
+// D1: optional 3rd/4th args let objectiveProgress() drive the dedicated
+// objective-complete composite (see drawHUD()'s banner chain) through this
+// SAME shared function/slot -- every existing call site (Elder catch,
+// Perfect/Rare Delivery, Lumora Bloom, chain milestones, ...) omits them
+// and gets exactly its old single-line banner behavior, since kind
+// defaults back to 'generic' every time this runs.
+function capMilestoneFx(msg,kind,data){
+  S.capMsg=msg; S.capMsgKind=kind||'generic'; S.capMsgData=data||null;
+  // D1: the objective-complete composite has its own spec'd on-screen
+  // duration (2.24s total, see drawObjectiveCompleteBanner()) rather than
+  // the generic banner's 3.5s -- everything else keeps the original timing.
+  S.capMsgT=S.capMsgKind==='objectiveComplete'?2.24:3.5;
   sMagnet(); puff(S.jar.x,S.jar.y-14,GLOW_W,12,80,0.8);
 }
 function milestoneCheck(prev){
@@ -3064,6 +3151,16 @@ cv.addEventListener('pointerdown',e=>{
     }
     return;
   }
+  // D1: the new-night reveal card swallows ALL input too, same guard as
+  // pause above -- a tap anywhere jumps straight to the 4.30s dismiss
+  // keyframe rather than cutting the exit animation short (per direct
+  // spec: "Tap = jump straight to the 4.30 s dismiss keyframe, so even an
+  // instant tap plays the exit"). A tap before the rows finish landing
+  // (before 0.30s) dismisses early with the rows simply skipped, not rushed.
+  if(newNightCardActive()){
+    S.newNightT=4.30;
+    return;
+  }
   // welcome-back overlay swallows ALL input too, same as pause above — it's
   // drawn on top of the title screen (screen stays 'title'), not a separate
   // screen value, so without this guard BEGIN_BTN/the title nav row
@@ -3241,6 +3338,18 @@ cv.addEventListener('pointerdown',e=>{
     }
     return;
   }
+  // D1: Objective HUD manual tap toggle -- x14 y75 w168 h48 hit target
+  // (visual pill is only 34 tall, padded to a comfortable 48 for touch,
+  // per direct spec), sitting well clear of the jar (which never rises
+  // above y≈470). Checked before the jar-drag start below so tapping the
+  // HUD can never also begin dragging. Not tappable once all objectives
+  // are complete -- the settled chip (or its one-time celebrate sequence)
+  // is display-only, per spec's own "chip is not tappable."
+  if(S.objectiveActive.length&&!S.hudAllComplete&&inRect(p.x,p.y,{x:98,y:99,w:168,h:48})){
+    S.hudCollapsed=!S.hudCollapsed;
+    if(!S.hudCollapsed)S.hudSticky=true; // manual expand is sticky -- no auto-collapse for the rest of the night
+    return;
+  }
   if(dist(p.x,p.y,PAUSE_BTN.x,PAUSE_BTN.y)<=hitR(PAUSE_BTN)){ pauseGame('user'); return; }
   pointer.down=true;
   S.jar.tx=clamp(p.x,30,W-30); S.jar.ty=clamp(p.y-70,H*0.13,H-170);
@@ -3345,6 +3454,24 @@ function update(dt){
   if(S.shyHint>0)S.shyHint=Math.max(0,S.shyHint-dt);
   if(S.bloomBanner>0)S.bloomBanner=Math.max(0,S.bloomBanner-dt);
   if(S.capMsgT>0)S.capMsgT=Math.max(0,S.capMsgT-dt);
+  // D1: Objective HUD collapse/expand + all-complete timers. hudHoldT only
+  // ever decrements while expanded, not sticky, and not already in the
+  // all-complete sequence (that has its own timer/priority -- see
+  // hudOnObjectiveComplete()). hudAllCompleteT counts down through BOTH the
+  // 2.6s celebration and the following 0.34s morph-to-chip in one timer
+  // (floor -0.34, not 0) so "elapsed" below is a single continuous value.
+  if(S.hudAllComplete){
+    if(S.hudAllCompleteT>-0.34)S.hudAllCompleteT=Math.max(-0.34,S.hudAllCompleteT-dt);
+  } else if(!S.hudCollapsed&&!S.hudSticky){
+    S.hudHoldT-=dt;
+    if(S.hudHoldT<=0)S.hudCollapsed=true;
+  }
+  { // 220ms morph toward whichever layout is current
+    const target=(S.hudCollapsed&&!S.hudAllComplete)?0:1;
+    const rate=dt/0.22;
+    if(S.hudMorphT<target)S.hudMorphT=Math.min(target,S.hudMorphT+rate);
+    else if(S.hudMorphT>target)S.hudMorphT=Math.max(target,S.hudMorphT-rate);
+  }
   if(S.deliverExplainT>0)S.deliverExplainT=Math.max(0,S.deliverExplainT-dt);
   if(S.missHintT>0)S.missHintT=Math.max(0,S.missHintT-dt);
   if(S.villageGlowTarget)S.villageGlow=Math.min(1,S.villageGlow+dt*0.5);
@@ -4587,6 +4714,44 @@ function banner(txt,y,color,alpha){
   ctx.fillText(txt,W/2,y);
   ctx.globalAlpha=1;
 }
+// D1 (Claude Design spec, section 4): the dedicated objective-complete
+// composite -- three lines (eyebrow / italic title / reward), centred at
+// (270,140) rather than the generic banner's y=96 slot, so it sits clear
+// of both the HUD (which stays expanded through this) and the jar. Uses
+// the SAME S.capMsg/capMsgT slot as every other capMilestoneFx() message
+// (only one at a time, across the whole game) -- this is purely what gets
+// DRAWN while an objective-complete message happens to own that slot.
+// Glow-only, no panel background, per direct spec ("a glass card here
+// would fight the HUD").
+function drawObjectiveCompleteBanner(){
+  const elapsed=2.24-S.capMsgT, data=S.capMsgData||{label:'',reward:0};
+  const inT=clamp(elapsed/0.24,0,1), outT=clamp((elapsed-1.86)/0.38,0,1);
+  const alpha=elapsed<1.86?easeOutCubic(inT):1-easeOutCubic(outT);
+  if(alpha<=0)return;
+  const rise=elapsed<1.86?(1-easeOutCubic(inT))*14:-easeOutCubic(outT)*10;
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.translate(0,rise);
+  const bloomA=elapsed<0.30?lerp(0,0.17,clamp((elapsed-0.04)/0.26,0,1)):lerp(0.17,0.094,clamp((elapsed-0.30)/0.60,0,1));
+  const bloom=ctx.createRadialGradient(270,146,0,270,146,200);
+  bloom.addColorStop(0,'rgba(251,210,107,'+bloomA+')'); bloom.addColorStop(1,'rgba(251,210,107,0)');
+  ctx.fillStyle=bloom; ctx.fillRect(100,94,340,96);
+  ctx.textAlign='center';
+  ctx.textBaseline='alphabetic'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,0.90)';
+  try{ ctx.letterSpacing='2.4px'; }catch(e){}
+  ctx.fillText('✦ OBJECTIVE COMPLETE ✦',270,122);
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  const titleScale=lerp(0.94,1,clamp((elapsed-0.02)/0.30,0,1));
+  ctx.save(); ctx.translate(270,152); ctx.scale(titleScale,titleScale); ctx.translate(-270,-152);
+  ctx.font='italic 23px Georgia,serif'; ctx.fillStyle='rgba(251,244,212,0.95)';
+  ctx.fillText(data.label,270,152);
+  ctx.restore();
+  const ruleW=190*clamp((elapsed-0.10)/0.32,0,1);
+  if(ruleW>0){ ctx.strokeStyle='rgba(174,184,203,0.28)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(270-ruleW/2,164); ctx.lineTo(270+ruleW/2,164); ctx.stroke(); }
+  ctx.font='600 15px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,0.95)';
+  ctx.fillText('+'+data.reward+' coins',270,186);
+  ctx.restore();
+}
 // Always-on gameplay feedback (not tutorial-gated -- every player benefits):
 // "near moth = warning, touch moth = mistake" (item 13's own framing). This
 // is the "near" half -- drawMothWarningFlash()/S.mothWarnT is the "touch"
@@ -4602,19 +4767,340 @@ function jarNearAnyMoth(){ return S.moths.some(m=>dist(m.x,m.y,S.jar.x,S.jar.y-1
 // same left-side HUD column as score. Renders nothing at all when tonight
 // has no objectives (the tutorial night, or before ensureNightObjectives()
 // has run) -- never an empty placeholder panel.
+// D1 (Claude Design spec, section 1): the new-night "Tonight's Goals"
+// reveal card. Every timing below is a pure function of S.newNightT (the
+// spec's own stated principle: "safe to skip frames, safe to draw at any
+// point mid-sequence"), so nothing here needs to track its own tweening
+// state -- a tap dismiss (which jumps S.newNightT straight to 4.30, see the
+// pointerdown guard) reproduces exactly the same visual as a natural
+// auto-dismiss arriving at that instant. Emoji glyphs for icons (🌙),
+// matching this codebase's existing convention (EVENT_INFO, the Weekly
+// Journal chest, chain milestones, ...) rather than hand-drawn shapes.
+function drawNewNightCard(){
+  const t=S.newNightT, exitAt=4.30;
+  const exiting=t>=exitAt, exitT=exiting?t-exitAt:0;
+  const scrimIn=Math.min(1,t/0.18);
+  const scrimOut=exiting?Math.max(0,1-exitT/0.38):1; // 4.30-4.68 fade out
+  const scrimA=scrimIn*scrimOut;
+  if(scrimA<=0)return; // fully gone -- next frame drawHUD()'s objective HUD takes over
+  ctx.save();
+  ctx.fillStyle='#05071b'; ctx.globalAlpha=0.72*scrimA; ctx.fillRect(0,0,W,H);
+  const vg=ctx.createRadialGradient(270,470,120,270,470,520);
+  vg.addColorStop(0,'rgba(5,7,27,0)'); vg.addColorStop(1,'rgba(5,7,27,'+(0.50*scrimA)+')');
+  ctx.fillStyle=vg; ctx.globalAlpha=1; ctx.fillRect(0,0,W,H);
+
+  const cardInT=clamp((t-0.06)/0.26,0,1); // 0.06-0.32
+  const cardOutT=exiting?Math.min(1,exitT/0.26):0; // 4.30-4.56
+  const cardAlpha=exiting?(1-cardOutT):cardInT;
+  if(cardAlpha>0){
+    const cardScale=exiting?lerp(1,1.02,cardOutT):lerp(0.96,1,easeOutCubic(cardInT));
+    const cx=270, cy=286+352/2;
+    ctx.save();
+    ctx.globalAlpha=cardAlpha;
+    ctx.translate(cx,cy); ctx.scale(cardScale,cardScale); ctx.translate(-cx,-cy);
+    // card -- same glass material as every panel in the game, at this
+    // card's own specified fill alpha (0.80, a touch more opaque than the
+    // 0.72 baseline lumPanel() uses, since this sits over live gameplay).
+    ctx.beginPath(); ctx.roundRect(80,286,380,352,20);
+    ctx.fillStyle='rgba(25,33,67,0.80)'; ctx.fill();
+    ctx.strokeStyle='rgba(174,184,203,0.22)'; ctx.lineWidth=1; ctx.stroke();
+
+    // eyebrow: crescent + "NIGHT N"
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font='11px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.85)';
+    const eyebrowLabel='NIGHT '+nightNumber;
+    try{ ctx.letterSpacing='2px'; }catch(e){}
+    const lw=ctx.measureText(eyebrowLabel).width;
+    ctx.fillText(eyebrowLabel,270+7,332);
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    ctx.font='13px Georgia,serif';
+    ctx.fillText('🌙',270-7-lw/2-8,332);
+
+    // title
+    ctx.font='26px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.95)';
+    ctx.save(); ctx.shadowColor='rgba(251,210,107,0.18)'; ctx.shadowBlur=18;
+    ctx.fillText('Tonight\'s Goals',270,378);
+    ctx.restore();
+
+    // rule
+    ctx.strokeStyle='rgba(174,184,203,0.28)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(270-48,396); ctx.lineTo(270+48,396); ctx.stroke();
+
+    // rows -- fade in + rise 8px, staggered 90ms each, 220ms duration
+    S.objectiveActive.forEach((o,i)=>{
+      const rowT=clamp((t-(0.36+i*0.09))/0.22,0,1);
+      if(rowT<=0)return;
+      const rowA=easeOutCubic(rowT), rowY=414+i*46+(1-rowA)*8;
+      ctx.save(); ctx.globalAlpha=rowA;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.strokeStyle='rgba(174,184,203,0.50)'; ctx.lineWidth=1.2;
+      ctx.beginPath(); ctx.arc(124,rowY,6,0,6.28); ctx.stroke();
+      ctx.textAlign='left'; ctx.font='14.5px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.92)';
+      ctx.fillText(o.label,142,rowY);
+      ctx.textAlign='right'; ctx.font='600 13px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,0.95)';
+      ctx.fillText('+'+o.reward,436,rowY);
+      ctx.restore();
+    });
+
+    // button -- fades in 0.66-0.90, glow ramps in alongside
+    const btnT=clamp((t-0.66)/0.24,0,1);
+    if(btnT>0){
+      ctx.save(); ctx.globalAlpha=btnT;
+      lumButton({x:170,y:572,w:200,h:48,fontSize:13},'Start Night','primary');
+      ctx.restore();
+    }
+    // hint -- fades in 0.86-1.16
+    const hintT=clamp((t-0.86)/0.30,0,1);
+    if(hintT>0){
+      ctx.save(); ctx.globalAlpha=hintT*0.55;
+      ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      ctx.font='italic 10.5px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,1)';
+      ctx.fillText('tap anywhere to begin',270,662);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // D1: 4.30-4.64 -- a small burst of motes drifting from each row toward
+  // the HUD anchor (114,98), reusing the existing S.parts particle system
+  // (the same one every catch/delivery puff already uses) rather than a
+  // bespoke flight-path object -- a deliberate simplification of the
+  // spec's "three motes fly precise bezier paths" into "the existing
+  // particle system does the same visual job."
+  if(exiting&&exitT<0.34&&!S.newNightMotesFired){
+    S.newNightMotesFired=true;
+    S.objectiveActive.forEach((o,i)=>{
+      const fromY=414+i*46;
+      for(let k=0;k<3;k++)S.parts.push({x:270+rand(-40,40),y:fromY,vx:(114-270)/0.34+rand(-20,20),vy:(98-fromY)/0.34+rand(-20,20),life:0.34,maxL:0.34,color:'rgba(251,210,107,1)',r:rand(1.3,2.2)});
+    });
+  }
+  ctx.restore();
+}
+// D1: display-only reads -- neither of these touches objectiveProgress()/
+// evaluateMissObjectives()'s own evaluation timing (still exactly once, at
+// finalizeNight(), per Phase 1's explicit design). A miss-category
+// objective's real S.objectiveProgress entry stays at 0 all round (see
+// objectiveProgress()'s own miss-category skip) since it's only ever
+// written at night's end -- these two helpers read S.misses LIVE instead,
+// purely so the HUD can show the player their actual current count/status
+// instead of a frozen "0/3" all night.
+function objectiveDisplayProgress(o){ return o.category==='miss'?S.misses:(S.objectiveProgress[o.id]||0); }
+function objectiveDisplayFailed(o){
+  if(o.done||o.category!=='miss')return false;
+  return o.kind==='missZero'?S.misses>0:S.misses>=o.missLimit;
+}
+// D1: "cur/target" right-aligned at one point, each segment its own font/
+// color -- shared by the Objective HUD's row fraction and (later) the
+// Night Complete failed-row callout, rather than three separate ad hoc
+// width measurements.
+function drawMixedFraction(rightX,baselineY,curStr,curFont,curColor,sepStr,sepFont,sepColor,targetStr,targetFont,targetColor){
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.font=targetFont; const targetW=ctx.measureText(targetStr).width;
+  ctx.font=sepFont; const sepW=ctx.measureText(sepStr).width;
+  ctx.font=curFont; const curW=ctx.measureText(curStr).width;
+  let x=rightX-targetW;
+  ctx.fillStyle=targetColor; ctx.font=targetFont; ctx.fillText(targetStr,x,baselineY);
+  x-=sepW; ctx.fillStyle=sepColor; ctx.font=sepFont; ctx.fillText(sepStr,x,baselineY);
+  x-=curW; ctx.fillStyle=curColor; ctx.font=curFont; ctx.fillText(curStr,x,baselineY);
+}
+// D1: one drawn row -- glyph (pending ring / done disc+tick / failed
+// hollow ring+×) + label + mixed fraction + progress track. Used by both
+// the live HUD (rowTop/rowH=30, glyph r6/6.5) and Night Complete's
+// objectives section (rowTop/rowH=28, glyph r6.5/7.5, no track -- "the
+// night is over"), which is why trackX2/showTrack are parameters rather
+// than hard-coded.
+function drawObjectiveRow(o,x,rowTop,rowH,trackX1,trackX2,showTrack){
+  const cy=rowTop+11, baseline=rowTop+15;
+  const p=objectiveDisplayProgress(o), target=o.target;
+  const failed=objectiveDisplayFailed(o);
+  const glyphR=showTrack?6:7.5, glyphCx=x+(showTrack?24:24);
+  ctx.textBaseline='alphabetic'; // self-contained regardless of the caller's ambient baseline -- `baseline` above assumes it
+  if(o.done){
+    ctx.beginPath(); ctx.arc(glyphCx,cy,glyphR,0,6.28);
+    ctx.save(); ctx.shadowColor='rgba(251,210,107,0.5)'; ctx.shadowBlur=8;
+    ctx.fillStyle='rgba(251,210,107,0.95)'; ctx.fill(); ctx.restore();
+    ctx.strokeStyle='#05071b'; ctx.lineWidth=1.7; ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.beginPath(); ctx.moveTo(glyphCx-3,cy); ctx.lineTo(glyphCx-0.8,cy+2.6); ctx.lineTo(glyphCx+3.4,cy-3); ctx.stroke();
+  } else if(failed){
+    ctx.beginPath(); ctx.arc(glyphCx,cy,glyphR,0,6.28);
+    ctx.strokeStyle='rgba(174,184,203,0.42)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.strokeStyle='rgba(174,184,203,0.42)'; ctx.lineWidth=1.3;
+    ctx.beginPath(); ctx.moveTo(glyphCx-2.6,cy-2.6); ctx.lineTo(glyphCx+2.6,cy+2.6); ctx.moveTo(glyphCx+2.6,cy-2.6); ctx.lineTo(glyphCx-2.6,cy+2.6); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(glyphCx,cy,glyphR,0,6.28);
+    ctx.strokeStyle='rgba(174,184,203,0.50)'; ctx.lineWidth=1.2; ctx.stroke();
+  }
+  ctx.textAlign='left'; ctx.font=(showTrack?'500 11.5px':'500 12px')+' Georgia,serif';
+  ctx.fillStyle=o.done?'rgba(230,217,188,0.95)':failed?'rgba(174,184,203,0.45)':'rgba(230,217,188,0.86)';
+  ctx.fillText(o.label,x+38,baseline);
+  if(o.done&&!showTrack){
+    ctx.textAlign='right'; ctx.font='600 12.5px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,0.95)';
+    ctx.fillText('+'+o.reward,trackX2+12,baseline);
+  } else if(failed&&!showTrack){
+    ctx.textAlign='right'; ctx.font='500 10px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.30)';
+    ctx.fillText('—',trackX2+12,baseline);
+  } else {
+    const curColor=failed?'rgba(240,150,56,0.85)':'rgba(251,210,107,0.95)';
+    drawMixedFraction(trackX2+12,baseline,''+Math.min(p,target),'600 11px Georgia,serif',curColor,
+      '/','500 10.5px Georgia,serif','rgba(174,184,203,0.48)',
+      ''+target,'500 10.5px Georgia,serif','rgba(174,184,203,0.80)');
+  }
+  if(showTrack){
+    const frac=target>0?clamp(p/target,0,1):0;
+    ctx.beginPath(); ctx.roundRect(trackX1,rowTop+21,trackX2-trackX1,2,1);
+    ctx.fillStyle='rgba(174,184,203,0.16)'; ctx.fill();
+    const fillW=Math.max(2,(trackX2-trackX1)*frac);
+    ctx.beginPath(); ctx.roundRect(trackX1,rowTop+21,fillW,2,1);
+    if(o.category==='miss'){
+      ctx.fillStyle='rgba(240,150,56,0.85)'; // ember -- counts UP toward failure, not success
+    } else {
+      const g=ctx.createLinearGradient(trackX1,0,trackX2,0);
+      g.addColorStop(0,LUM_GOLD); g.addColorStop(1,LUM_AMBER);
+      ctx.fillStyle=g;
+    }
+    ctx.fill();
+  }
+}
+// D1: the one-time celebrate sequence once all 3 objectives are done --
+// gold wash/bloom/sweep on the (still expanded) panel, checkmarks pop in
+// sequence, motes rise. elapsed is 2.6-S.hudAllCompleteT, 0..2.60.
+function drawObjectivesHUD_celebrate(X,Y,elapsed){
+  const w=214,h=118,r=14;
+  ctx.beginPath(); ctx.roundRect(X,Y,w,h,r);
+  ctx.fillStyle='rgba(25,33,67,0.72)'; ctx.fill();
+  ctx.strokeStyle='rgba(251,210,107,0.38)'; ctx.lineWidth=1; ctx.stroke();
+  ctx.save(); ctx.clip();
+  ctx.fillStyle='rgba(251,210,107,0.07)'; ctx.fillRect(X,Y,w,h);
+  const bloom=ctx.createRadialGradient(X+w/2,Y+h/2,0,X+w/2,Y+h/2,128);
+  bloom.addColorStop(0,'rgba(251,210,107,0.10)'); bloom.addColorStop(1,'rgba(251,210,107,0)');
+  ctx.fillStyle=bloom; ctx.fillRect(X-64,Y-64,w+128,h+128);
+  const sweepT=clamp((elapsed-0.06)/0.30,0,1);
+  if(sweepT>0&&sweepT<1){
+    const sx=X-140+(w+140)*easeInOutCubic(sweepT);
+    const g=ctx.createLinearGradient(sx,0,sx+140,0);
+    g.addColorStop(0,'rgba(251,210,107,0)'); g.addColorStop(0.5,'rgba(251,210,107,0.20)'); g.addColorStop(1,'rgba(251,210,107,0)');
+    ctx.fillStyle=g; ctx.fillRect(X,Y,w,h);
+  }
+  ctx.restore();
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 10px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.8)';
+  ctx.fillText('TONIGHT\'S GOALS',X+14,Y+14);
+  ctx.beginPath(); ctx.arc(X+w-20,Y+14,7.5,0,6.28); ctx.fillStyle='rgba(251,210,107,0.95)'; ctx.fill();
+  ctx.strokeStyle='#05071b'; ctx.lineWidth=1.7; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.moveTo(X+w-23,Y+14); ctx.lineTo(X+w-20.5,Y+16.8); ctx.lineTo(X+w-16.2,Y+11); ctx.stroke();
+  S.objectiveActive.forEach((o,i)=>{
+    const rowTop=Y+28+i*30, cy=rowTop+11, baseline=rowTop+15;
+    const popT=clamp((elapsed-(0.10+i*0.07))/0.22,0,1);
+    const scale=popT<=0?0:popT<0.6?lerp(0,1.15,popT/0.6):lerp(1.15,1,(popT-0.6)/0.4);
+    ctx.save();
+    ctx.translate(X+24,cy); ctx.scale(scale,scale); ctx.translate(-(X+24),-cy);
+    ctx.beginPath(); ctx.arc(X+24,cy,6.5,0,6.28);
+    ctx.save(); ctx.shadowColor='rgba(251,210,107,0.5)'; ctx.shadowBlur=8;
+    ctx.fillStyle='rgba(251,210,107,0.95)'; ctx.fill(); ctx.restore();
+    ctx.strokeStyle='#05071b'; ctx.lineWidth=1.7; ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.beginPath(); ctx.moveTo(X+24-3,cy); ctx.lineTo(X+24-0.8,cy+2.6); ctx.lineTo(X+24+3.4,cy-3); ctx.stroke();
+    ctx.restore();
+    ctx.textAlign='left'; ctx.font='500 11.5px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.95)';
+    ctx.fillText(o.label,X+38,baseline);
+    ctx.textAlign='right'; ctx.font='600 12.5px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,0.95)';
+    ctx.fillText('+'+o.reward,X+w-14,baseline);
+    // rising motes, staggered, sine-fade
+    if(elapsed>0.1+i*0.05){
+      const moteT=(elapsed-(0.1+i*0.05))/0.95;
+      if(moteT>0&&moteT<1){
+        const a=Math.sin(moteT*Math.PI);
+        ctx.save(); ctx.globalAlpha=a*0.8;
+        ctx.drawImage(glowSprite('rgba(251,210,107,1)',2),X+24-2,cy-moteT*66-2,4,4);
+        ctx.restore();
+      }
+    }
+  });
+}
+// D1: the settled state past the celebration -- the expanded panel
+// literally morphs (width/height lerp + cross-fade) into a small 144×30
+// "GOALS COMPLETE" chip that holds for the rest of the night, non-tappable.
+function drawObjectivesHUD_chipMorph(X,Y,morphT){
+  const w=lerp(214,144,morphT), h=lerp(118,30,morphT), r=lerp(14,15,morphT);
+  ctx.beginPath(); ctx.roundRect(X,Y,w,h,r);
+  ctx.fillStyle='rgba(25,33,67,0.72)'; ctx.fill();
+  ctx.strokeStyle='rgba(251,210,107,'+lerp(0.38,0.34,morphT)+')'; ctx.lineWidth=1; ctx.stroke();
+  const bigAlpha=1-clamp(morphT/0.4,0,1), chipAlpha=clamp((morphT-0.6)/0.4,0,1);
+  if(bigAlpha>0){
+    ctx.save(); ctx.globalAlpha=bigAlpha;
+    ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.font='600 10px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.8)';
+    ctx.fillText('TONIGHT\'S GOALS',X+14,Y+14);
+    S.objectiveActive.forEach((o,i)=>{
+      const rowTop=Y+28+i*30, cy=rowTop+11, baseline=rowTop+15;
+      ctx.beginPath(); ctx.arc(X+24,cy,6.5,0,6.28); ctx.fillStyle='rgba(251,210,107,0.95)'; ctx.fill();
+      ctx.textAlign='left'; ctx.font='500 11.5px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.95)';
+      ctx.fillText(o.label,X+38,baseline);
+    });
+    ctx.restore();
+  }
+  if(chipAlpha>0){
+    ctx.save(); ctx.globalAlpha=chipAlpha;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font='13px Georgia,serif'; ctx.fillText('🌙',X+w/2-46,Y+h/2);
+    ctx.font='600 9.5px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,'+(0.95*(0.88+0.12*Math.sin(S.t*2.4*Math.PI*0.5)))+')';
+    try{ ctx.letterSpacing='1.4px'; }catch(e){}
+    ctx.fillText('GOALS COMPLETE',X+w/2+6,Y+h/2);
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    ctx.restore();
+  }
+}
 function drawObjectivesHUD(){
   if(!S.objectiveActive||!S.objectiveActive.length)return;
+  const X=14, Y=82;
   ctx.save();
-  ctx.textAlign='left'; ctx.textBaseline='top';
-  ctx.font='600 10px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.7)';
-  ctx.fillText('TONIGHT\'S GOALS',22,82);
-  S.objectiveActive.forEach((o,i)=>{
-    const y=98+i*15;
-    const p=Math.min(o.target,S.objectiveProgress[o.id]||0);
-    ctx.font='11px Georgia,serif';
-    ctx.fillStyle=o.done?'rgba(164,230,187,0.9)':'rgba(230,217,188,0.8)';
-    ctx.fillText((o.done?'✓ ':'○ ')+o.label+'  '+p+'/'+o.target,22,y);
-  });
+
+  if(S.hudAllComplete){
+    const elapsed=2.6-S.hudAllCompleteT; // 0 -> 2.94, then holds (settled chip)
+    if(elapsed<2.60)drawObjectivesHUD_celebrate(X,Y,elapsed);
+    else drawObjectivesHUD_chipMorph(X,Y,clamp((elapsed-2.60)/0.34,0,1));
+    ctx.restore();
+    return;
+  }
+
+  const e=easeInOutCubic(clamp(S.hudMorphT,0,1));
+  const w=lerp(168,214,e), h=lerp(34,118,e), r=lerp(17,14,e);
+  ctx.beginPath(); ctx.roundRect(X,Y,w,h,r);
+  ctx.fillStyle='rgba(25,33,67,0.72)'; ctx.fill();
+  ctx.strokeStyle='rgba(174,184,203,0.22)'; ctx.lineWidth=1; ctx.stroke();
+
+  const doneCount=S.objectiveActive.filter(o=>o.done).length;
+  const collapsedAlpha=clamp(1-e*2,0,1), expandedAlpha=clamp(e*2-1,0,1);
+
+  if(collapsedAlpha>0){
+    ctx.save(); ctx.globalAlpha=collapsedAlpha;
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font='13px Georgia,serif'; ctx.fillText('🌙',X+14,Y+17);
+    ctx.font='600 15px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,0.95)';
+    ctx.fillText(doneCount+'/'+S.objectiveActive.length,X+36,Y+17);
+    ctx.font='600 9.5px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.72)';
+    try{ ctx.letterSpacing='1.2px'; }catch(e2){}
+    ctx.fillText('GOALS',X+68,Y+17);
+    try{ ctx.letterSpacing='0px'; }catch(e2){}
+    for(let i=0;i<S.objectiveActive.length;i++){
+      const pcx=X+127+i*13, pdone=S.objectiveActive[i].done;
+      ctx.beginPath(); ctx.arc(pcx,Y+17,pdone?3.5:3.2,0,6.28);
+      ctx.fillStyle=pdone?'rgba(251,210,107,0.95)':'rgba(174,184,203,0.35)';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  if(expandedAlpha>0&&h>60){ // don't draw full row content while still mostly collapsed-sized -- it would overflow the panel
+    ctx.save(); ctx.globalAlpha=expandedAlpha;
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font='600 10px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.8)';
+    try{ ctx.letterSpacing='1.3px'; }catch(e2){}
+    ctx.fillText('TONIGHT\'S GOALS',X+14,Y+14);
+    try{ ctx.letterSpacing='0px'; }catch(e2){}
+    ctx.textAlign='right'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(251,210,107,0.95)';
+    ctx.fillText(doneCount+'/'+S.objectiveActive.length,X+w-14,Y+14);
+    S.objectiveActive.forEach((o,i)=>{ drawObjectiveRow(o,X,Y+28+i*30,30,X+38,X+188,true); });
+    ctx.restore();
+  }
   ctx.restore();
 }
 function drawHUD(){
@@ -4664,6 +5150,7 @@ function drawHUD(){
   else if(jarNearAnyMoth())banner('⚠ moth nearby — keep your jar away',96,'#f2c199',0.75+0.2*Math.sin(S.t*3));
   else if(S.mothHint>0)banner('a moth! it startles fireflies near your jar',96,'#dcb0d0',S.mothHint);
   else if(S.shyHint>0)banner('a shy firefly — approach slowly…',96,'#cfeecb',S.shyHint);
+  else if(S.capMsgT>0&&S.capMsgKind==='objectiveComplete')drawObjectiveCompleteBanner(); // D1: dedicated composite, same shared slot
   else if(S.capMsgT>0)banner(S.capMsg,96,'#ffe9b8',Math.min(1,S.capMsgT));
   else if(S.deliverHint>0)banner('bring your glow down to the village ↓',96,'#ffe9b8',0.6+0.3*Math.sin(S.t*2.5));
   // First-Night Tutorial contextual hints (item 9) -- brief, one-time-ever
@@ -4770,7 +5257,14 @@ function drawOver(){
   // playBtn/SHOP_BTN_OVER/tipY/DOUBLE_COINS_BTN -- collapses back to
   // exactly the original, unmodified layout there. Real nights only.
   const hasObjectives=!!(S.objectiveActive&&S.objectiveActive.length);
-  const objExtra=hasObjectives?116:0;
+  // D1 (Claude Design spec, section 6): objective rows widened from 21px to
+  // 28px pitch ("tighter than the 44px stat rows on purpose -- these are a
+  // list, not headline stats" per direct spec) -- objExtra grew from 116 to
+  // 130 to match (3*28=84 vs 3*21=63, +21, offset by -7 of re-tightened
+  // existing whitespace per the spec's own "net +18" reasoning applied to
+  // this file's real base numbers rather than the spec's screenshot-
+  // measured approximation of them).
+  const objExtra=hasObjectives?130:0;
   const panelR={x:W/2-160,y:H*0.34,w:320,h:150+objExtra};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
   rows.forEach((row,i)=>{
@@ -4795,22 +5289,28 @@ function drawOver(){
   // cannot re-grant anything.
   if(hasObjectives){
     const divY=panelR.y+140;
-    ctx.strokeStyle='rgba(174,184,203,0.15)'; ctx.lineWidth=1;
+    // D1: a "slightly stronger" divider (haze .20 vs the existing stat-row
+    // hairlines' .15) -- the only signal that a new kind of content starts,
+    // per direct spec. The stat-row hairlines above (rows.forEach, .15) are
+    // existing/unchanged.
+    ctx.strokeStyle='rgba(174,184,203,0.20)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(panelR.x+20,divY); ctx.lineTo(panelR.x+panelR.w-20,divY); ctx.stroke();
     ctx.textAlign='left'; ctx.textBaseline='middle';
     ctx.fillStyle='rgba(174,184,203,0.8)'; ctx.font='600 11px Georgia,serif';
     ctx.fillText('OBJECTIVES',panelR.x+20,panelR.y+158);
     let bonus=0;
     S.objectiveActive.forEach((o,i)=>{
-      const oy=panelR.y+180+i*21;
       if(o.done)bonus+=o.reward;
-      ctx.textAlign='left'; ctx.font='12px Georgia,serif';
-      ctx.fillStyle=o.done?'rgba(164,230,187,0.95)':'rgba(174,184,203,0.7)';
-      ctx.fillText((o.done?'✓ ':'○ ')+o.label,panelR.x+20,oy);
-      if(o.done){ ctx.textAlign='right'; ctx.fillStyle=WS_GOLD_PRICE; ctx.fillText('+'+o.reward,panelR.x+panelR.w-20,oy); }
+      // D1: real drawn glyphs (filled gold disc+tick / hollow ring+× / plain
+      // pending ring) instead of text characters, shared with the live HUD
+      // via drawObjectiveRow() -- "filled-and-gold vs hollow-and-grey is the
+      // whole language," per direct spec. showTrack=false: no progress bar
+      // here, the night is over; a done row shows its own "+reward" instead
+      // of a fraction, a failed row shows an em dash (nothing is deducted).
+      drawObjectiveRow(o,panelR.x,panelR.y+180+i*28,28,panelR.x+38,panelR.w-20+panelR.x,false);
     });
     if(bonus>0){
-      const boy=panelR.y+180+S.objectiveActive.length*21+8;
+      const boy=panelR.y+180+S.objectiveActive.length*28+10;
       ctx.textAlign='left'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.85)';
       ctx.fillText('OBJECTIVE BONUS',panelR.x+20,boy);
       ctx.textAlign='right'; ctx.fillStyle=WS_GOLD_PRICE; ctx.font='600 13px Georgia,serif';
@@ -4827,9 +5327,12 @@ function drawOver(){
   // single-threaded; a pointerdown is only ever handled between frames).
   // Nothing outside drawOver()/this screen's own pointerdown branch ever
   // reads these three objects (verified), so no other screen is affected.
-  playBtn.y=hasObjectives?628:512;
-  SHOP_BTN_OVER.y=hasObjectives?683:567;
-  DOUBLE_COINS_BTN.y=hasObjectives?900:830;
+  // D1: shifted by the same +14 the taller objective rows (objExtra
+  // 116->130) added, keeping the original proportional gaps between these
+  // three and the panel bottom.
+  playBtn.y=hasObjectives?642:512;
+  SHOP_BTN_OVER.y=hasObjectives?697:567;
+  DOUBLE_COINS_BTN.y=hasObjectives?910:830;
   const tipY=hasObjectives?SHOP_BTN_OVER.y+67:H*0.66;
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
@@ -7057,6 +7560,7 @@ function draw(){
     drawHUD();
     if(S.carried.length>=S.cap&&!S.over)drawFullJarAlert();
     drawMothWarningFlash(); // always-on gameplay feedback, independent of the tutorial
+    if(newNightCardVisible())drawNewNightCard(); // D1: drawn over live gameplay + HUD, per direct spec ("nothing is gated: the jar is spawned")
     if(S.over)drawOver();
     if(S.extraLifeOfferOpen)drawExtraLifeOffer(); // shown INSTEAD of drawOver() the instant the normal 5-miss ending is reached -- S.over is still false while this is up
     if(paused)drawPaused();
@@ -7088,7 +7592,13 @@ function loop(now){
   // instruction not to interfere with the existing pause/resume system.
   // "One More Chance" gates simulation the exact same sibling way the
   // tutorial panel already does -- see requestExtraLife()/declineExtraLife().
-  if(!paused&&!tutorialPanelOpen&&!S.extraLifeOfferOpen)update(dt);
+  // D1: the new-night reveal card's own clock advances even while it gates
+  // update(dt) below (same "the card's timer keeps going, gameplay's
+  // timers don't" split the spec itself calls for) -- a tap dismiss jumps
+  // S.newNightT straight to the 4.30 keyframe (see the pointerdown guard),
+  // so this increment is the ONLY normal path that advances it otherwise.
+  if(screen==='play')S.newNightT+=dt;
+  if(!paused&&!tutorialPanelOpen&&!S.extraLifeOfferOpen&&!newNightCardActive())update(dt);
   draw(); // renders the title screen (our splash/main-menu) on the very first call
 
   // Lifecycle Hook 1: the first visual frame is now on screen.
