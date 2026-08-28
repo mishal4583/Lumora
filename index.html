@@ -1906,42 +1906,108 @@ const CHAIN_MILESTONES=[
 // exactly the "distort the economy" risk Phase 0/1 were both explicit
 // about avoiding. Numbers otherwise land in the same modest 5-30 coin
 // range the existing quest/objective rewards already use.
+// D2 (Claude Design spec): every CHAIN_MILESTONES threshold/reward above is
+// UNCHANGED -- the handoff's own collision analysis (its 7 reference
+// screenshots showed the shared single-line banner clipped under the pause
+// button at high chain counts, and crossed the D1 GOALS pill at ×5) is why
+// milestones/breaks now render through the pill itself (drawChainHUD(), in
+// the rendering section near drawFullJarAlert()) instead of capMilestoneFx().
+// D2_COOL_RGB has to live up here, not with the rest of the D2 rendering
+// constants below drawFullJarAlert() -- it's a default field value inside
+// the S={} literal, and reset() is already called once at top level before
+// that point (the same ordering hazard KEYS/JAR_SKINS hit before).
+const D2_COOL_RGB='150,200,255';
 function advanceChain(){
+  // width-morph bookkeeping (A1): capture the pill's natural width BEFORE
+  // incrementing so a digit-count change (e.g. ×9 -> ×10) can ease over
+  // 180ms instead of snapping -- d2ChainMetrics is declared in the
+  // rendering section but hoisted, so it's safe to call from here.
+  const priorN=S.chain, priorW=priorN>=3?d2ChainMetrics(priorN).w:0;
   S.chain++;
+  if(S.chain===3){
+    S.d2ChainEnterT=0.26; // one-shot enter: alpha/scale animate in drawChainHUD()
+  } else if(S.chain>3){
+    S.d2ChainTickT=0.22; // per-catch number-pop, see drawChainHUD()
+    const newW=d2ChainMetrics(S.chain).w;
+    if(newW!==priorW){ S.d2ChainWidthFrom=priorW; S.d2ChainWidthT=0.18; }
+  }
+  if(S.chain>=3)S.d2ChainLastN=S.chain; // held for the exit/break fade after a miss zeroes S.chain
   const m=CHAIN_MILESTONES.find(m=>m.n===S.chain);
   if(m){
     coins+=m.reward;
     if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
-    capMilestoneFx(m.label+'  +'+m.reward);
+    // D2: the readout itself flares and pays out (see drawChainMoment()) --
+    // NOT capMilestoneFx()'s shared banner slot any more. Duration escalates
+    // with tier, matching CHAIN_MILESTONES' own four thresholds exactly.
+    S.d2ChainMomentN=S.chain;
+    S.d2ChainMomentTotal=S.chain>=20?1.70:S.chain>=15?1.50:S.chain>=10?1.35:0.72;
+    S.d2ChainMomentT=S.d2ChainMomentTotal;
   }
 }
 // Missing breaks the chain -- per direct instruction, this is the ONLY way
 // it resets (delivering does not touch it, so a player can deliver mid-
 // chain and keep building it right after, matching the plan's own
 // "Catch → Catch → Catch → Catch" example continuing past a delivery).
-function breakChain(){ S.chain=0; }
+// D2: also decides which exit animation the HUD pill plays (see
+// drawChainHUD()) -- a chain that never reached 5 (never actually banked a
+// milestone reward) just quietly fades; ≥5 gets the full "chain broken"
+// sequence, since 5 is the first length whose loss is a genuine loss.
+function breakChain(){
+  const prior=S.chain;
+  S.chain=0;
+  if(prior>=5){
+    S.d2ChainBreakN=prior; S.d2ChainBreakTotal=0.92; S.d2ChainBreakT=0.92;
+  } else if(prior>=3){
+    S.d2ChainExitT=0.20;
+  }
+  S.d2ChainEnterT=0; S.d2ChainTickT=0; S.d2ChainWidthT=0; S.d2ChainMomentT=0;
+}
 // Rare Delivery's threshold. TYPES[type].rarity is the existing field every
 // firefly type already carries (common/uncommon/rare/very rare/legendary)
 // -- reused directly rather than hand-picking type letters, so this stays
 // correct if a future firefly type is ever added.
 function isRareType(type){ const r=TYPES[type].rarity; return r!=='common'&&r!=='uncommon'; }
+// D2 (B3): the rarest type CURRENTLY carried (mystery > elder > shy), used
+// both live (drawJarRarity()'s rim/mote tint while a rare firefly is still
+// in the jar) and as a one-time snapshot at delivery-trip-start (see
+// S.batchRarestType below, captured because S.carried is already empty by
+// the time resolveDeliveryBonuses() runs). Returns null if nothing rare is
+// carried. Deliberately tints to an EXISTING type glow color rather than
+// the handoff's own flat "150,200,255" cool-blue, which doesn't actually
+// exist anywhere else in this file -- the handoff's own CONFIRM section
+// flagged this exact question and recommended this fix.
+function rarestCarriedType(){
+  const rank={g:1,e:2,m:3}; let best=null,bestRank=0; // bestRank floors at 0, not -1 -- a common/uncommon entry (rank 0) must never win "best"
+  for(const c of S.carried){ const rk=rank[c.type]||0; if(rk>bestRank){ bestRank=rk; best=c.type; } }
+  return best;
+}
 // Called once per completed delivery trip (the same site that already
 // resolved S.batchPerfect into its own banner) -- Perfect Delivery (full
 // jar) and Rare Delivery (2+ rare fireflies in that SAME trip, snapshotted
 // via S.batchRareCount at the moment the trip began, mirroring exactly how
 // S.batchPerfect itself is captured) are independent conditions and both
-// can be true at once, so their messages are combined into one banner
-// rather than one silently overwriting the other in capMsg's single slot.
+// can be true at once. D2: instead of one concatenated banner line (which
+// overflowed the 540px frame at 2+ rares, per the handoff's own measurement),
+// both resolve into S.d2DeliveryRows -- one shared composite drawn above the
+// jar by drawDeliveryComposite(), perfect always above rare (perfect is
+// always exactly +10; rare varies with the batch, so the constant reads
+// first and the variable holds the eye last).
 // Returns the total bonus granted (0 if neither condition was met) purely
 // so a test can assert on it without re-deriving the math.
 function resolveDeliveryBonuses(){
-  let bonus=0; const msgs=[];
-  if(S.batchPerfect){ bonus+=10; msgs.push('✨ perfect delivery +10'); }
-  if(S.batchRareCount>=2){ const r=5*S.batchRareCount; bonus+=r; msgs.push('🌟 rare delivery +'+r); }
+  let bonus=0; const rows=[];
+  if(S.batchPerfect){ bonus+=10; rows.push({kind:'perfect',label:'perfect delivery',value:'+10'}); }
+  if(S.batchRareCount>=2){
+    const r=5*S.batchRareCount; bonus+=r;
+    rows.push({kind:'rare',label:'rare delivery ×'+S.batchRareCount,value:'+'+r});
+    S.d2DeliveryTintRGB=S.batchRarestType?toRgbTriple(TYPES[S.batchRarestType].glow):D2_COOL_RGB;
+  }
   if(bonus>0){
     coins+=bonus;
     if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
-    capMilestoneFx(msgs.join('   '));
+    S.d2DeliveryRows=rows;
+    S.d2DeliveryTotal=(rows.length>1?1.45:1.25)+0.34;
+    S.d2DeliveryT=S.d2DeliveryTotal;
   }
   return bonus;
 }
@@ -2471,7 +2537,19 @@ function reset(){
     // see advanceChain()/breakChain()) and the rare-firefly count snapshotted
     // at the moment the CURRENT delivery trip began (see batchRareCount's own
     // assignment next to S.batchPerfect's, for Rare Delivery -- resolveDeliveryBonuses()).
-    chain:0, batchRareCount:0,
+    chain:0, batchRareCount:0, batchRarestType:null,
+    // D2 (Claude Design spec): Glow Chain HUD pill + delivery composite +
+    // rare-carry ring state -- see drawChainHUD()/drawDeliveryComposite()/
+    // drawJarRarity() in the rendering section. Every "*T" is a countdown
+    // decremented in update() (same convention S.capMsgT above already
+    // uses); elapsed-since-trigger is always total-remaining, never tracked
+    // as a separate running value.
+    d2ChainEnterT:0, d2ChainTickT:0, d2ChainWidthT:0, d2ChainWidthFrom:0, d2ChainLastN:0,
+    d2ChainMomentT:0, d2ChainMomentTotal:0, d2ChainMomentN:0,
+    d2ChainBreakT:0, d2ChainBreakTotal:0, d2ChainBreakN:0,
+    d2ChainExitT:0,
+    d2DeliveryT:0, d2DeliveryTotal:0, d2DeliveryRows:[], d2DeliveryTintRGB:D2_COOL_RGB,
+    d2RareRingT:0,
     elderT:rand(20,30),
     t:0, spawnT:0.4, mothT:0, magT:rand(12,18), lockCd:0, magnetT:0,
     hitch:0, cricketT:rand(0.5,2), owlT:rand(9,20), batT:rand(12,24),
@@ -3454,6 +3532,24 @@ function update(dt){
   if(S.shyHint>0)S.shyHint=Math.max(0,S.shyHint-dt);
   if(S.bloomBanner>0)S.bloomBanner=Math.max(0,S.bloomBanner-dt);
   if(S.capMsgT>0)S.capMsgT=Math.max(0,S.capMsgT-dt);
+  // D2 (Claude Design spec): Glow Chain HUD pill + delivery composite
+  // timers -- every one is a plain countdown decremented here, same
+  // pattern as capMsgT above. drawChainHUD()/drawDeliveryComposite() derive
+  // elapsed-since-trigger as total-remaining; neither tracks its own tween.
+  if(S.d2ChainEnterT>0)S.d2ChainEnterT=Math.max(0,S.d2ChainEnterT-dt);
+  if(S.d2ChainTickT>0)S.d2ChainTickT=Math.max(0,S.d2ChainTickT-dt);
+  if(S.d2ChainWidthT>0)S.d2ChainWidthT=Math.max(0,S.d2ChainWidthT-dt);
+  if(S.d2ChainMomentT>0)S.d2ChainMomentT=Math.max(0,S.d2ChainMomentT-dt);
+  if(S.d2ChainBreakT>0)S.d2ChainBreakT=Math.max(0,S.d2ChainBreakT-dt);
+  if(S.d2ChainExitT>0)S.d2ChainExitT=Math.max(0,S.d2ChainExitT-dt);
+  if(S.d2DeliveryT>0)S.d2DeliveryT=Math.max(0,S.d2DeliveryT-dt);
+  { // B3: rare-ring fade-in timer -- counts UP while 2+ rares are carried
+    // (the payout-eligible threshold, same as resolveDeliveryBonuses()'s own
+    // check), resets instantly below it so the ring genuinely re-plays its
+    // fade-in next time rather than resuming mid-fade from a stale value.
+    let rareNow=0; for(const c of S.carried)if(isRareType(c.type))rareNow++;
+    S.d2RareRingT=rareNow>=2?Math.min(0.5,S.d2RareRingT+dt):0;
+  }
   // D1: Objective HUD collapse/expand + all-complete timers. hudHoldT only
   // ever decrements while expanded, not sticky, and not already in the
   // all-complete sequence (that has its own timer/priority -- see
@@ -3826,7 +3922,7 @@ function update(dt){
           objectiveProgress('catch',f.type); // Lumora 2.0 Phase 1: same authoritative catch-success moment, not spawn/lock/radius-entry
           advanceChain(); // Lumora 2.0 Phase 2: same authoritative catch-success moment
           if(isRareType(f.type))weeklyProgress('rare',1); // Lumora 2.0 Phase 9: same authoritative catch-success moment
-          S.carried.push({type:f.type,ph:rand(0,6.28),sp:rand(0.7,1.4)});
+          S.carried.push({type:f.type,ph:rand(0,6.28),sp:rand(0.7,1.4),caughtAt:S.t}); // D2 (B3): caughtAt drives the rare mote's own 550ms spiral-out, see drawJarRarity()
           if(f.type==='e')capMilestoneFx('the elder blesses your jar!'); // no capacity change any more -- see capMilestoneFx
           S.jar.pulse=1; sCatch(S.caughtN);
           puff(jx,jy,TYPES[f.type].glow,10,70,0.7);
@@ -3864,6 +3960,7 @@ function update(dt){
       // just above -- the trip's composition is fixed the instant it
       // begins (S.carried is drained one-by-one as it animates out below).
       S.batchRareCount=S.carried.filter(c=>isRareType(c.type)).length;
+      S.batchRarestType=rarestCarriedType(); // D2 (B3): snapshotted here since S.carried drains to empty before resolveDeliveryBonuses() runs
       S.deliverWaves.push({x:jx,cy0:jy,t:0}); // the delivery light-wave: travels from the jar down toward the village
     }
     S.deliverT-=dt;
@@ -5123,17 +5220,12 @@ function drawHUD(){
   // in a real playtest before Part B prices anything against it
   ctx.fillStyle='#e8c179';
   ctx.fillText(coins+' coins',W-22,54); // no ✦ here — that glyph already means "score" on the line above; reusing it for a different stat would blur the two
-  // Lumora 2.0 Phase 2: live Glow Chain readout -- right column, directly
-  // under coins, mirroring the left column's own misses-dots-then-goals
-  // rhythm. Hidden below ×3 so a trivial 1-2 streak doesn't clutter the
-  // HUD (the plan's own example banner doesn't appear until ×4); escalates
-  // color/icon at the same ×5/×15 breakpoints CHAIN_MILESTONES already
-  // uses, so the readout and the milestone banners agree with each other.
-  if(!S.over&&S.chain>=3){
-    ctx.font='600 12px Georgia,serif';
-    ctx.fillStyle=S.chain>=15?'#ffd76a':S.chain>=5?'#ffb347':'#e8c179';
-    ctx.fillText((S.chain>=15?'🌟':'🔥')+' chain ×'+S.chain,W-22,76);
-  }
+  // D2 (Claude Design spec): full A1-A4 Glow Chain state machine (idle pill,
+  // milestone flare, break sequence) -- replaces the plain text readout that
+  // used to live here, which the handoff's own screenshots showed clipping
+  // under the pause button at ×10+ (see drawChainHUD() in the D2 rendering
+  // section, right after drawFullJarAlert()).
+  drawChainHUD();
   if(S.magnetT>0)banner('✨ glow magnet '+Math.ceil(S.magnetT)+'s',148,'#fff3cf',0.85);
   if(S.deliverExplainT>0)banner('jar\'s empty — go catch more fireflies!',96,'#ffe9b8',Math.min(1,S.deliverExplainT));
   else if(S.missHintT>0)banner('a firefly drifted away — don\'t keep them waiting',96,'#f2b98e',Math.min(1,S.missHintT));
@@ -5207,6 +5299,360 @@ function drawFullJarAlert(){
   ctx.strokeRect(1.5,1.5,W-3,H-3);
   ctx.restore();
   ctx.globalAlpha=1;
+}
+// ---------- Lumora 2.0 D2 (Claude Design spec): Glow Chain HUD + Delivery
+// Feedback rendering. Ported function-for-function from the handoff's own
+// reference implementation (lumora-canvas.js), adapted to this file's plain
+// ctx.* calls (no generic text()/panel() helper here, matching how every
+// other draw function in this file already inlines its own font/fillStyle/
+// align calls) and its native ctx.roundRect() (already used by D1) instead
+// of the reference's hand-rolled arcTo version. Two deliberate corrections
+// against the handoff's own numbers, both already flagged in its own
+// CONFIRM section: rareMote's tint is parameterized (see rarestCarriedType()
+// above) instead of the flat, actually-nonexistent-in-this-file
+// "150,200,255"; the capacity halo it assumed (40+f*48) is NOT read here at
+// all -- B3 only ever draws OUTSIDE/around the jar drawJar() already
+// renders, so it never needed that number in the first place. ----------
+const d2gold=a=>'rgba(251,210,107,'+a+')';
+const d2haze=a=>'rgba(174,184,203,'+a+')';
+const d2ember=a=>'rgba(240,150,56,'+a+')';
+const d2cream=a=>'rgba(250,246,225,'+a+')';
+const D2_GOLD_RGB='251,210,107';
+// ei = ease-IN QUADRATIC (t*t), matching the handoff's own "ei" -- NOT
+// cubic, despite that being the shorthand used in prose while reviewing it.
+const easeInQuad=t=>{ const c=clamp(t,0,1); return c*c; };
+const d2seg=(t,s,d)=>clamp((t-s)/d,0,1);
+// Deterministic per-recompute pseudo-random sequence (NOT Math.random) --
+// the high-tier mote sparkle positions are recomputed from scratch every
+// single frame (nothing stores a mote list), so this has to return the same
+// sequence every call or the sparkles would visibly teleport each frame.
+// Same linear-congruential generator as the handoff's own rnd(), same seed.
+function d2rnd(seed){ let s=seed||1; return ()=>(s=(s*16807)%2147483647)/2147483647; }
+function d2bloom(x,y,r,rgb,a){
+  if(a<=0)return;
+  const g=ctx.createRadialGradient(x,y,0,x,y,r);
+  g.addColorStop(0,'rgba('+rgb+','+a+')'); g.addColorStop(0.42,'rgba('+rgb+','+(a*0.34)+')'); g.addColorStop(1,'rgba('+rgb+',0)');
+  ctx.save(); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,6.28); ctx.fill(); ctx.restore();
+}
+// Four-tier ladder, keyed to CHAIN_MILESTONES' own four thresholds -- not a
+// separate set of numbers, so the readout and the payout can never disagree.
+const D2_T_LIVE ={num:d2gold(0.92),border:d2haze(0.22),wash:null,        bl:0,    glyph:'ember',gc:d2ember(0.85),gr:5,  gb:0};
+const D2_T_WARM ={num:'#ffb347',   border:d2gold(0.30),wash:d2gold(0.05),bl:0.05, glyph:'ember',gc:'#fbb541',     gr:5.5,gb:6};
+const D2_T_HOT  ={num:'#ffb347',   border:d2gold(0.40),wash:d2gold(0.08),bl:0.08, glyph:'burst',gc:'#fbb541',     gr:6,  gb:8};
+const D2_T_BLAZE={num:'#ffd76a',   border:d2gold(0.55),wash:d2gold(0.12),bl:0.12, glyph:'burst',gc:'#ffd76a',     gr:6.5,gb:12};
+function d2TierOf(n){ return n>=15?D2_T_BLAZE:n>=10?D2_T_HOT:n>=5?D2_T_WARM:D2_T_LIVE; }
+const D2_REWARD_BY_N={}; CHAIN_MILESTONES.forEach(m=>D2_REWARD_BY_N[m.n]='+'+m.reward); // derived, not duplicated
+function d2EmberGlyph(cx,cy,r,col,blur){
+  ctx.save(); if(blur){ ctx.shadowColor=col; ctx.shadowBlur=blur; }
+  ctx.beginPath(); ctx.moveTo(cx,cy-r*1.4);
+  ctx.quadraticCurveTo(cx+r*0.95,cy-r*0.1,cx+r*0.62,cy+r*0.58);
+  ctx.quadraticCurveTo(cx+r*0.3,cy+r*1.05,cx,cy+r*1.05);
+  ctx.quadraticCurveTo(cx-r*0.3,cy+r*1.05,cx-r*0.62,cy+r*0.58);
+  ctx.quadraticCurveTo(cx-r*0.95,cy-r*0.1,cx,cy-r*1.4);
+  ctx.closePath(); ctx.fillStyle=col; ctx.fill(); ctx.restore();
+}
+function d2BurstGlyph(cx,cy,r,col,blur){
+  ctx.save(); if(blur){ ctx.shadowColor=col; ctx.shadowBlur=blur; }
+  ctx.fillStyle=col; ctx.beginPath();
+  for(let i=0;i<8;i++){
+    const a0=-Math.PI/2+i*6.28318/8, rk=i%2?r*0.34:r;
+    const px=cx+Math.cos(a0)*rk, py=cy+Math.sin(a0)*rk;
+    if(i)ctx.lineTo(px,py); else ctx.moveTo(px,py);
+  }
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function d2TierGlyph(kind,cx,cy,r,col,blur){ if(kind==='burst')d2BurstGlyph(cx,cy,r,col,blur); else d2EmberGlyph(cx,cy,r,col,blur); }
+// B3's rare mote -- also reused as B1 row 2's own glyph, per direct spec
+// ("the thing that was orbiting your jar is the thing that just paid").
+// rgb defaults to D2_COOL_RGB but every real call site below passes
+// rarestCarriedType()'s own tint instead -- see that function's comment.
+function d2RareMote(x,y,s,a,liftBonus,rgb){
+  d2bloom(x,y,10*s,rgb||D2_COOL_RGB,0.34*a+(liftBonus||0));
+  ctx.beginPath(); ctx.arc(x,y,1.8*s,0,6.28); ctx.fillStyle=d2cream(0.92*a); ctx.fill();
+}
+
+// ---- A1: chain pill geometry -- measured every call, never hardcoded, per
+// the handoff's own "MEASURE, DO NOT HARDCODE" instruction. ----
+const D2_CPR=526, D2_CPY=130, D2_CPH=34;
+function d2ChainMetrics(n){
+  const num='×'+n;
+  ctx.font='600 15px Georgia,serif'; const nw=ctx.measureText(num).width;
+  ctx.font='600 9.5px Georgia,serif'; try{ ctx.letterSpacing='1.2px'; }catch(e){}
+  const lw=ctx.measureText('CHAIN').width;
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  const w=Math.max(112,Math.round(14+13+9+lw+7+nw+14));
+  return {num,nw,lw,w,x:D2_CPR-w,cx:D2_CPR-w/2,cy:D2_CPY+D2_CPH/2};
+}
+// The pill itself -- idle, mid-milestone (via o.scale/o.momentBloom) and
+// mid-break (via o.brokeP/o.strikeP/o.flashBorder/o.dy) all render through
+// this ONE function, so a milestone or a break is always visibly "the same
+// object, more (or less) intense" rather than a different-looking element.
+function d2DrawChainPill(o){
+  const n=o.n, T=o.tier||d2TierOf(n);
+  const m=o.metrics||d2ChainMetrics(n);
+  const a=o.alpha==null?1:o.alpha; if(a<=0)return m;
+  const sc=o.scale==null?1:o.scale, br=clamp(o.brokeP||0,0,1);
+  const breathe=(T===D2_T_BLAZE)?0.5+0.5*Math.sin((o.tBreathe||0)*6.28318/2.2):0;
+  ctx.save(); ctx.globalAlpha=a;
+  if(o.dy)ctx.translate(0,o.dy);
+  ctx.translate(m.cx,m.cy); ctx.scale(sc,sc); ctx.translate(-m.cx,-m.cy);
+  const bl=T.bl*(1+0.25*breathe)*(1-br);
+  if(bl>0)d2bloom(m.cx,m.cy,56+bl*200,D2_GOLD_RGB,bl);
+  if(o.momentBloom)d2bloom(m.cx,m.cy,84,D2_GOLD_RGB,o.momentBloom);
+  ctx.beginPath(); ctx.roundRect(m.x,D2_CPY,m.w,D2_CPH,D2_CPH/2);
+  ctx.fillStyle='rgba(25,33,67,0.72)'; ctx.fill();
+  if(!br&&T.wash){
+    const lg=ctx.createLinearGradient(0,D2_CPY,0,D2_CPY+D2_CPH);
+    lg.addColorStop(0,T.wash); lg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.roundRect(m.x,D2_CPY,m.w,D2_CPH,D2_CPH/2); ctx.fillStyle=lg; ctx.fill();
+  }
+  ctx.lineWidth=1; ctx.strokeStyle=br?d2haze(lerp(0.5,0.16,br)):(o.flashBorder?d2haze(0.5):T.border);
+  ctx.beginPath(); ctx.roundRect(m.x+0.5,D2_CPY+0.5,m.w-1,D2_CPH-1,D2_CPH/2); ctx.stroke();
+  d2TierGlyph(T.glyph, m.x+20.5, D2_CPY+17, T.gr*lerp(1,0.6,br),
+    br?d2haze(lerp(0.5,0.25,br)):T.gc, br?0:T.gb*(1+breathe*0.4));
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 9.5px Georgia,serif'; ctx.fillStyle=d2haze(lerp(0.72,0.38,br));
+  try{ ctx.letterSpacing='1.2px'; }catch(e){}
+  ctx.fillText('CHAIN',m.x+36,D2_CPY+21.5);
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  const ns=o.tick!=null?lerp(1.16,1,easeOutCubic(o.tick)):1;
+  ctx.save(); ctx.translate(512,D2_CPY+22); ctx.scale(ns,ns);
+  ctx.textAlign='right'; ctx.textBaseline='middle'; ctx.font='600 15px Georgia,serif';
+  if(br<1){
+    ctx.save(); ctx.globalAlpha=1-br; ctx.shadowColor=d2gold(0.25); ctx.shadowBlur=8;
+    ctx.fillStyle=T.num; ctx.fillText(m.num,0,0); ctx.restore();
+  }
+  if(br>0){ ctx.save(); ctx.globalAlpha=br; ctx.fillStyle=d2haze(0.62); ctx.fillText(m.num,0,0); ctx.restore(); }
+  ctx.restore();
+  if(o.strikeP>0){
+    const sp=easeOutCubic(o.strikeP), x1=512-m.nw-4;
+    ctx.save(); ctx.strokeStyle=d2haze(0.5); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x1,D2_CPY+17.5); ctx.lineTo(lerp(x1,515,sp),D2_CPY+17.5); ctx.stroke(); ctx.restore();
+  }
+  ctx.restore();
+  return m;
+}
+// Reward chip: pill centre -> the existing coins readout, a quadratic
+// Bézier bowing out past the right edge (implies "coming from off-frame").
+// Drawn from drawChainHUD()'s own call site, which always runs after the
+// coins line has already been drawn earlier in drawHUD() -- so it passes
+// over the coins readout it flies to without any extra draw-order plumbing.
+function d2DrawRewardChip(m,label,p){
+  if(p<=0||p>=1)return;
+  const e=easeInOutCubic(p), k=1-e;
+  const x=k*k*m.cx+2*k*e*556+e*e*500;
+  const y=k*k*m.cy+2*k*e*96+e*e*50;
+  const al=p<0.7?1:1-(p-0.7)/0.3, s=lerp(1,0.72,e);
+  ctx.save(); ctx.globalAlpha=al; ctx.translate(x,y); ctx.scale(s,s);
+  ctx.font='600 14px Georgia,serif';
+  const w=ctx.measureText(label).width;
+  // the shop's own coin-disc gradient (cream core -> gold -> ember rim)
+  ctx.save(); ctx.shadowColor=d2gold(0.5); ctx.shadowBlur=8;
+  const cg=ctx.createRadialGradient(-w/2-9-1.35,-1.35,0,-w/2-9,0,4.5);
+  cg.addColorStop(0,'#fbf2d4'); cg.addColorStop(0.55,'#fbd26b'); cg.addColorStop(1,'#f09638');
+  ctx.beginPath(); ctx.arc(-w/2-9,0,4.5,0,6.28); ctx.fillStyle=cg; ctx.fill(); ctx.restore();
+  ctx.textAlign='right'; ctx.textBaseline='alphabetic';
+  ctx.shadowColor=d2gold(0.4); ctx.shadowBlur=10; ctx.fillStyle=d2gold(0.98);
+  ctx.fillText(label,w/2,5);
+  ctx.restore();
+}
+// A2/A3: the flare-and-pay-out moment itself. n>=10 adds the corner wash +
+// sweep ring(s) + named line + more motes; every tier shares the same pill
+// scale-pulse envelope and reward chip, so the escalation reads as the same
+// system turned up, not a different one appearing at high tiers.
+function d2DrawChainMoment(elapsed,n){
+  const high=n>=10, top=n>=20;
+  const m=d2ChainMetrics(n);
+  const env=Math.sin(Math.PI*d2seg(elapsed,0,0.42));
+  if(high){
+    const cw=clamp(d2seg(elapsed,0,0.18)-d2seg(elapsed,0.30,0.50),0,1);
+    const pk=top?0.18:n>=15?0.14:0.10;
+    if(cw>0){
+      const r=lerp(140,320,easeOutCubic(d2seg(elapsed,0,0.42)));
+      const g=ctx.createRadialGradient(540,96,0,540,96,r);
+      g.addColorStop(0,d2gold(pk*cw)); g.addColorStop(0.5,d2gold(pk*cw*0.4)); g.addColorStop(1,d2gold(0));
+      ctx.save(); ctx.fillStyle=g; ctx.fillRect(0,0,W,460); ctx.restore();
+    }
+    const sp=d2seg(elapsed,0.04,0.50);
+    if(sp>0&&sp<1){
+      ctx.save(); ctx.lineWidth=2; ctx.strokeStyle=(n>=15?d2cream:d2gold)((1-sp)*0.5);
+      ctx.beginPath(); ctx.arc(m.cx,m.cy,lerp(20,130,easeOutCubic(sp)),0,6.28); ctx.stroke(); ctx.restore();
+    }
+    if(top){
+      const sp2=d2seg(elapsed,0.16,0.50);
+      if(sp2>0&&sp2<1){
+        ctx.save(); ctx.lineWidth=1.4; ctx.strokeStyle=d2cream((1-sp2)*0.38);
+        ctx.beginPath(); ctx.arc(m.cx,m.cy,lerp(20,168,easeOutCubic(sp2)),0,6.28); ctx.stroke(); ctx.restore();
+      }
+    }
+  }
+  d2DrawChainPill({n,tBreathe:S.t,metrics:m,scale:1+(high?0.22:0.14)*env,
+    momentBloom:lerp(high?0.22:0.16,0,easeOutCubic(d2seg(elapsed,0.06,0.66)))});
+  if(high){
+    const p=clamp(d2seg(elapsed,0.12,0.22)-d2seg(elapsed,1.05,0.30),0,1);
+    if(p>0){
+      ctx.save(); ctx.globalAlpha=p;
+      ctx.textAlign='right'; ctx.textBaseline='alphabetic'; ctx.font='italic 500 19px Georgia,serif';
+      ctx.shadowColor=d2gold(0.45); ctx.shadowBlur=16; ctx.fillStyle='#fbf2d4';
+      if(top)try{ ctx.letterSpacing='0.5px'; }catch(e){}
+      const yy=190+lerp(6,0,easeOutCubic(d2seg(elapsed,0.12,0.22)));
+      const str=top?'✦  Glow Chain ×20  ✦':'Glow Chain ×'+n;
+      ctx.fillText(str,512,yy); ctx.fillText(str,512,yy); // filled twice, for glow density
+      if(top)try{ ctx.letterSpacing='0px'; }catch(e){}
+      ctx.restore();
+    }
+  }
+  d2DrawRewardChip(m,D2_REWARD_BY_N[n]||'+5',d2seg(elapsed,0.10,high?0.74:0.62));
+  const cnt=top?18:n>=15?14:high?10:0;
+  const rr=d2rnd(613);
+  for(let i=0;i<cnt;i++){
+    const px=m.x+8+rr()*(m.w-16), ph=rr();
+    const p=clamp((elapsed-0.06-ph*0.34)/1.0,0,1); if(p<=0||p>=1)continue;
+    const y=D2_CPY+D2_CPH-8-p*74, al=Math.sin(p*Math.PI)*0.8;
+    d2bloom(px,y,8,D2_GOLD_RGB,al*0.45);
+    ctx.beginPath(); ctx.arc(px,y,1.3,0,6.28); ctx.fillStyle=d2gold(al); ctx.fill();
+  }
+}
+// A4: the inversion of every gain moment above, built from the same pill --
+// no colour is introduced, gold is withdrawn (same rule D1 used for a
+// failed objective), and it falls where every gain moment rises.
+function d2DrawChainBreak(elapsed,n){
+  const drop=d2seg(elapsed,0.62,0.30);
+  const a=1-easeInQuad(drop);
+  if(a<=0)return;
+  d2DrawChainPill({n,tBreathe:S.t,alpha:a,dy:lerp(0,10,easeInQuad(drop)),
+    brokeP:easeOutCubic(d2seg(elapsed,0,0.30)),strikeP:d2seg(elapsed,0.10,0.24),flashBorder:elapsed<0.09});
+  const lp=d2seg(elapsed,0.20,0.26)*a;
+  if(lp>0){
+    ctx.save(); ctx.globalAlpha=lp;
+    ctx.textAlign='right'; ctx.textBaseline='alphabetic'; ctx.font='italic 500 13px Georgia,serif';
+    ctx.fillStyle=d2haze(0.6);
+    ctx.fillText('chain broken',512,182+lerp(0,10,easeInQuad(drop)));
+    ctx.restore();
+  }
+}
+// The one entry point drawHUD() calls -- routes to whichever of A1-A4 is
+// currently active. Never more than one at a time: break/exit take priority
+// over the idle pill (there is nothing live to show once S.chain is 0), and
+// a moment IS the pill for its own duration (drawChainMoment() calls
+// d2DrawChainPill() itself), never drawn underneath a separate idle pill.
+function drawChainHUD(){
+  if(S.over)return;
+  if(S.d2ChainBreakT>0){ d2DrawChainBreak(S.d2ChainBreakTotal-S.d2ChainBreakT,S.d2ChainBreakN); return; }
+  if(S.d2ChainExitT>0){ d2DrawChainPill({n:S.d2ChainLastN,tBreathe:S.t,alpha:clamp(S.d2ChainExitT/0.20,0,1)}); return; }
+  if(S.chain<3)return;
+  if(S.d2ChainMomentT>0){ d2DrawChainMoment(S.d2ChainMomentTotal-S.d2ChainMomentT,S.d2ChainMomentN); return; }
+  let m=d2ChainMetrics(S.chain);
+  if(S.d2ChainWidthT>0){
+    const we=easeInOutCubic(clamp(1-S.d2ChainWidthT/0.18,0,1));
+    const w=lerp(S.d2ChainWidthFrom,m.w,we);
+    m={num:m.num,nw:m.nw,lw:m.lw,w,x:D2_CPR-w,cx:D2_CPR-w/2,cy:m.cy};
+  }
+  const enterActive=S.d2ChainEnterT>0, enterP=enterActive?clamp(1-S.d2ChainEnterT/0.26,0,1):1;
+  const tick=S.d2ChainTickT>0?clamp(1-S.d2ChainTickT/0.22,0,1):null;
+  d2DrawChainPill({n:S.chain,tBreathe:S.t,metrics:m,tick,
+    alpha:enterActive?easeOutCubic(enterP):1, scale:enterActive?lerp(0.86,1,easeOutCubic(enterP)):1});
+  // one-shot entry bloom -- simplified to decay across the same 260ms
+  // window as the entry itself rather than tracking a second, longer timer
+  // for what the handoff describes as a slightly longer 400ms decay.
+  if(enterActive)d2bloom(m.cx,m.cy,56,D2_GOLD_RGB,lerp(0.10,0,enterP));
+}
+
+// ---- B1/B2: delivery composite -- bottom row baseline ALWAYS y536, rows
+// stack upward, so one row or two never creeps the composite toward the jar.
+function d2DrawDeliveryRow(kind,label,value,baseline,alpha,tintRGB){
+  ctx.font='italic 500 17px Georgia,serif'; const lw=ctx.measureText(label).width;
+  ctx.font='600 15px Georgia,serif'; const vw=ctx.measureText(value).width;
+  const total=13+10+lw+14+vw, x0=270-total/2;
+  ctx.save(); ctx.globalAlpha=alpha;
+  if(kind==='rare')d2RareMote(x0+6.5,baseline-5,1.15,1,0,tintRGB);
+  else{ // perfect delivery reuses the existing score glyph (4-point star)
+    const cx=x0+6.5, cy=baseline-5, r=6, k=r*0.2;
+    ctx.save(); ctx.shadowColor=d2gold(0.45); ctx.shadowBlur=12;
+    ctx.beginPath(); ctx.moveTo(cx,cy-r);
+    ctx.quadraticCurveTo(cx+k,cy-k,cx+r,cy);
+    ctx.quadraticCurveTo(cx+k,cy+k,cx,cy+r);
+    ctx.quadraticCurveTo(cx-k,cy+k,cx-r,cy);
+    ctx.quadraticCurveTo(cx-k,cy-k,cx,cy-r);
+    ctx.closePath(); ctx.fillStyle=d2cream(0.95); ctx.fill(); ctx.restore();
+  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.font='italic 500 17px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.92)';
+  ctx.shadowColor=d2gold(0.28); ctx.shadowBlur=12; ctx.fillText(label,x0+23,baseline); ctx.shadowBlur=0;
+  ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.96);
+  ctx.shadowColor=d2gold(0.35); ctx.shadowBlur=10; ctx.fillText(value,x0+23+lw+14,baseline);
+  ctx.restore();
+}
+// No flying chip here -- deliberately: that motion belongs to the chain
+// (drawChainHUD()'s reward chip). Delivery blooms where the trip ended.
+function drawDeliveryComposite(){
+  if(S.d2DeliveryT<=0)return;
+  const elapsed=S.d2DeliveryTotal-S.d2DeliveryT, rows=S.d2DeliveryRows, n=rows.length;
+  if(!n)return;
+  const BASE=536, PITCH=30, hold=n>1?1.45:1.25;
+  const inA=d2seg(elapsed,0,0.24), outA=d2seg(elapsed,hold,0.34);
+  const a=clamp(inA-outA,0,1); if(a<=0)return;
+  const cyB=BASE-(n-1)*PITCH/2-6;
+  ctx.save();
+  d2bloom(270,cyB,n>1?190:160,D2_GOLD_RGB,
+    lerp(0,n>1?0.13:0.12,easeOutCubic(d2seg(elapsed,0,0.14)))*lerp(1,0.45,d2seg(elapsed,0.40,0.70))*(1-easeOutCubic(outA)));
+  rows.forEach((r,i)=>{
+    const p=d2seg(elapsed,i*0.14,0.24); if(p<=0)return;
+    const dy=lerp(6,0,easeOutCubic(p))+lerp(0,-8,easeOutCubic(outA));
+    const vp=d2seg(elapsed,i*0.14+0.06,0.20);
+    d2DrawDeliveryRow(r.kind,r.label,r.value,BASE-(n-1-i)*PITCH+dy,clamp(p-outA,0,1),S.d2DeliveryTintRGB);
+    if(vp>0&&vp<1){
+      ctx.font='italic 500 17px Georgia,serif'; const lw=ctx.measureText(r.label).width;
+      ctx.font='600 15px Georgia,serif'; const vw=ctx.measureText(r.value).width;
+      const total=13+10+lw+14+vw;
+      const vx=270-total/2+23+lw+14+vw/2, vy=BASE-(n-1-i)*PITCH+dy-5;
+      d2bloom(vx,vy,26,D2_GOLD_RGB,Math.sin(vp*Math.PI)*0.22);
+    }
+  });
+  ctx.restore();
+}
+
+// ---- B3: ambient "carrying something valuable" signal, drawn right after
+// drawJar() so it layers directly on the jar it orbits. Screenshots 06/07
+// (sent to Claude Design) showed the jar's OWN glow radius/brightness is
+// already the capacity channel (see drawJar()'s gr/gInt) -- so rarity gets
+// a channel that structurally cannot read as "fuller": discrete COOL motes
+// on a dashed ring, one per rare firefly currently carried. Zero draw calls
+// at rare=0, per direct spec -- nothing here runs unless a rare is carried.
+function drawJarRarity(){
+  const rareEntries=S.carried.filter(c=>isRareType(c.type));
+  const rare=rareEntries.length;
+  if(rare<=0)return;
+  const cx=S.jar.x, cy=S.jar.y-14; // the same vertical anchor the reticle/capacity glow already use
+  const tintRGB=toRgbTriple(TYPES[rarestCarriedType()].glow);
+  const full=S.carried.length>=S.cap;
+  const cool=Math.min(1,rare/4)*0.45; // rim overstroke intensity: .056/.11/.17/.225(4+ ceiling)
+  if(cool>0){
+    // overstrokes the SAME jar outline path drawJar() already fills/strokes
+    // (own save/scale, so it tracks this jar's own purchased capacity size)
+    ctx.save(); ctx.translate(cx,cy+14);
+    const jar=currentJar(); const jsc=1+(S.cap-jar.capacity)*0.05; ctx.scale(jsc,jsc);
+    ctx.strokeStyle='rgba('+tintRGB+','+(cool*0.5)+')'; ctx.lineWidth=2.5;
+    ctx.beginPath();
+    ctx.moveTo(-19,-30); ctx.quadraticCurveTo(-27,-24,-27,-8); ctx.quadraticCurveTo(-27,16,-18,20);
+    ctx.lineTo(18,20); ctx.quadraticCurveTo(27,16,27,-8); ctx.quadraticCurveTo(27,-24,19,-30);
+    ctx.stroke(); ctx.restore();
+  }
+  if(rare>=2){ // the dashed ring only arms once the bonus is actually payout-eligible
+    const ra=clamp(S.d2RareRingT/0.5,0,1);
+    ctx.save(); ctx.setLineDash([2,9]); ctx.lineWidth=1; ctx.strokeStyle=d2cream(0.10*ra);
+    ctx.beginPath(); ctx.ellipse(cx,cy,54,44,0,0,6.28); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+  }
+  const shown=Math.min(6,rare), grow=rare>6?1.32:1;
+  for(let i=0;i<shown;i++){
+    const th=S.t*0.88+i*6.28318/Math.max(1,shown);
+    const entry=rareEntries[i];
+    const born=entry.caughtAt==null?1:easeOutCubic(clamp((S.t-entry.caughtAt)/0.55,0,1));
+    const rk=lerp(0.11,1,born);
+    const mx=cx+Math.cos(th)*54*rk, my=cy+Math.sin(th)*44*rk;
+    const al=(0.72+0.28*Math.sin(S.t*1.1+i*2.4))*born;
+    d2RareMote(mx,my,grow,al,full?0.06:0,tintRGB);
+  }
 }
 // Night Complete tips: one shown per round-end, picked at random (see the
 // S.tip assignment beside S.misses>=5 in update()). Each line is checked
@@ -7545,6 +7991,8 @@ function draw(){
     drawDeliverWaves();
     drawSparks();
     drawJar();
+    drawJarRarity(); // D2 (B3): rare-carry ring/motes, layered right on the jar it orbits
+    drawDeliveryComposite(); // D2 (B1/B2): perfect/rare delivery reveal, above the jar
     for(const p of S.parts){
       // Trail System Redesign: optional peak-alpha multiplier (p.a), used by
       // the new layered trail particles below so different layers (soft
