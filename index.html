@@ -6466,7 +6466,16 @@ function drawOver(){
   // tipY is an independent H*0.66 constant with no relation to
   // SHOP_BTN_OVER.y, so it needs the explicit add or it would end up
   // overlapping SHOP_BTN_OVER's own new (lower) position.
-  const tipY=hasObjectives?(SHOP_BTN_OVER.y+67):(H*0.66+contractExtra);
+  // Bug found live (not part of D3's own spec): the original +67 offset
+  // left only ~30px before the Double-the-Glow eyebrow (DOUBLE_COINS_BTN.y-54,
+  // itself deliberately fixed/unshifted) once a contract was active --
+  // every real NIGHT_TIPS string wraps to exactly 2 lines at this width
+  // (confirmed against all 8, live), and a 2-line tip's own rendered
+  // height already exceeded that budget, overlapping the ad copy below it.
+  // +52 (real ctx.measureText-verified) restores a genuine ~12px clearance
+  // in the tightest case (objectives + contract both present) without
+  // touching the no-objectives branch, which already had ample room.
+  const tipY=hasObjectives?(SHOP_BTN_OVER.y+52):(H*0.66+contractExtra);
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
