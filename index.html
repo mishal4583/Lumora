@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -923,6 +923,17 @@ function finalizeNight(){
   // existing quest rewards already do; not a new exception, the same
   // already-accepted behavior every mid-round coin gain has always had).
   evaluateMissObjectives();
+  // D3: record which contract ran, once, at this exact authoritative moment
+  // -- same "the night has genuinely ended" site nightNumber/
+  // nightsCompletedThisSession update at (in continueFromOver()). The coin
+  // multiplier reward already landed continuously all night via
+  // grantDeliveryCoins() (see contractPayoutCoins() for the display-only
+  // re-derivation); Collector's flat Workshop Token has no continuous hook
+  // to ride along with, so it's granted here instead.
+  if(activeContract>=0){
+    contractsCompleted.push(CONTRACTS[activeContract].id);
+    if(CONTRACTS[activeContract].tokenReward)workshopTokens++;
+  }
   S.over=true; S.overT=0; sOver(); saveProgress(); recordNightEconomy();
   // Night Complete tips: picked once, right here, rather than re-rolled
   // every drawOver() frame -- same "pick once at the moment of the event"
@@ -1010,16 +1021,22 @@ function continueFromOver(){
     // already is. Persisted immediately, before the interstitial branch below's
     // early `return`, so it survives even if that ad request never resolves.
     nightNumber++;
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens})); }catch(e){} }
     weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
+    // D3: every real night now goes through contract selection before
+    // reset() -- see enterContractScreen()/beginPlay(). The tutorial night
+    // (this whole block's own gate) never does, so it still falls straight
+    // through to the bare reset() below, byte-for-byte as before this phase.
     if(interstitialAdsAvailable()){
       try{
-        Promise.resolve(YT.ads.requestInterstitialAd()).then(()=>reset(),()=>reset());
+        Promise.resolve(YT.ads.requestInterstitialAd()).then(()=>enterContractScreen(),()=>enterContractScreen());
         return;
       }catch(e){}
     }
+    enterContractScreen();
+    return;
   }
   reset();
 }
@@ -1411,9 +1428,16 @@ let objectivesCompleted={}; // Night Objectives (Phase 1) -- historical record o
 // completed objectives, keyed by objective id. Always {} until Phase 1 exists.
 let eventHistory=[]; // Night Events (future phase) -- past event ids the player has
 // experienced. Always [] until that phase exists.
-let contractsCompleted=[]; // Night Contracts (future phase) -- completed contract
+let contractsCompleted=[]; // Night Contracts (Phase 3) -- completed contract
 // records, keyed by stable id rather than display text, per direct instruction.
-// Always [] until that phase exists.
+// Pushed exactly once per completed real night, in finalizeNight().
+// D3: Collector's own reward is a flat Workshop Token rather than a coin
+// multiplier (the handoff's own placeholder reward type) -- persisted like
+// coins, granted once per completed Collector night in finalizeNight().
+// Deliberately no redemption/spend mechanic yet -- same "reserved, not yet
+// wired to anything" precedent contractsCompleted itself already set before
+// this phase existed.
+let workshopTokens=0;
 let cosmeticsUnlocked=[]; // Reserved for a NEW cosmetic category a future phase
 // introduces (e.g. village themes/landscape skins) that doesn't fit the jar or
 // trail shape. Existing cosmetic-ish ownership/equip state
@@ -1428,6 +1452,7 @@ if(!YT){
     if(Array.isArray(l2.eventHistory))eventHistory=l2.eventHistory;
     if(Array.isArray(l2.contractsCompleted))contractsCompleted=l2.contractsCompleted;
     if(Array.isArray(l2.cosmeticsUnlocked))cosmeticsUnlocked=l2.cosmeticsUnlocked;
+    if(typeof l2.workshopTokens==='number'&&l2.workshopTokens>=0)workshopTokens=l2.workshopTokens;
   }catch(e){}
 }
 // ---------- Lumora 2.0 Phase 9: Weekly Progression ----------
@@ -1650,6 +1675,12 @@ function generateNightObjectives(){
   const categories=['catch','delivery','score','miss'];
   for(let i=categories.length-1;i>0;i--){ const j=Math.floor(rand(0,i+1)); const tmp=categories[i]; categories[i]=categories[j]; categories[j]=tmp; }
   const chosen=categories.slice(0,3);
+  // D3: a contract that names a category (Peaceful->delivery, Rush->score,
+  // Collector->catch) forces it into tonight's 3 -- Moth Night names none
+  // (objCategory null), so it stays exactly as random as before this phase.
+  // The other 2 slots stay whatever the shuffle already picked.
+  const forcedCat=contractObjectiveCategory();
+  if(forcedCat&&!chosen.includes(forcedCat))chosen[2]=forcedCat;
   const active=[], progress={};
   chosen.forEach(cat=>{
     const eligible=OBJECTIVE_POOL.filter(o=>o.category===cat&&o[tier]);
@@ -1713,7 +1744,7 @@ function generateNightEvent(){
     // save, which already ran before this executes inside reset()).
     eventHistory.push(S.eventActive);
     weeklyProgress('events',1); // Lumora 2.0 Phase 9: same "the moment it's rolled" authoritative site
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens})); }catch(e){} }
     saveProgress();
   } else {
     S.eventActive=null; S.eventBannerT=0; S.eventMsg='';
@@ -1878,6 +1909,72 @@ function evaluateMissObjectives(){
       objectivesCompleted[o.id]=(objectivesCompleted[o.id]||0)+1;
     }
   });
+}
+
+// ---------- Lumora 2.0 Phase 3: Night Contracts ----------
+// D3 (Claude Design spec): the underlying gameplay system this UI needed
+// did NOT exist before this pass -- the handoff itself is explicit that,
+// unlike D1/D2, there was no contract-selection state, no spawn-rate
+// modifier, no reward-scaling code for it to give a presentation layer to.
+// Every modifier/reward/risk NUMBER below is PLACEHOLDER content from the
+// design plan, per that handoff's own explicit instruction -- finalize
+// during a real playtest, same "tune later" status every other economy
+// number in this file already carries. The SHAPE is not placeholder: one
+// contract accepted per real (non-tutorial) night, held for its entire
+// duration, feeding that night's forced objective category (Moth Night
+// names none, so it stays exactly as randomly-categorized as before this
+// phase).
+const CONTRACTS=[
+  { id:'peaceful', name:'PEACEFUL', full:'PEACEFUL NIGHT', glyph:'moon',
+    desc:'A slower sky. Room to breathe.',
+    mods:['Firefly speed −25%','Two extra misses'], rewardLabel:'+20% coins', risk:1,
+    line:'Slower fireflies · +20% coins',
+    speedMult:0.75, missBonus:2, coinMult:1.20, objCategory:'delivery' },
+  { id:'rush', name:'RUSH', full:'RUSH NIGHT', glyph:'ember',
+    desc:'Everything moves. Keep up.',
+    mods:['Spawn rate +60%','Rare chance +50%'], rewardLabel:'+40% coins', risk:3,
+    line:'Faster, denser · +40% coins',
+    spawnMult:1.60, rareMult:1.50, coinMult:1.40, objCategory:'score' },
+  { id:'moth', name:'MOTH', full:'MOTH NIGHT', glyph:'moth',
+    desc:'Moths crowd the lantern.',
+    mods:['Moths ×3','Rare fireflies ×2'], rewardLabel:'+65% coins', risk:3,
+    line:'More moths, more rares · +65% coins',
+    mothMult:3, rareMult:2, coinMult:1.65, objCategory:null },
+  { id:'collector', name:'COLLECTOR', full:'COLLECTOR’S NIGHT', glyph:'star',
+    desc:'Only Playful light the way.',
+    mods:['Playful spawns ×2','Collection objective'], rewardLabel:'✦ Workshop Token', risk:2,
+    line:'Playful ×2 · a Workshop token',
+    playfulMult:2, tokenReward:true, objCategory:'catch' }
+];
+// Session-level, like nightsCompletedThisSession/cachedNightObjectives --
+// NOT part of S (a contract is chosen on its own screen BEFORE reset() ever
+// runs for the night it governs) and NOT persisted across a reload (same
+// "session only" precedent the objective/event caches already established).
+// -1 = no contract active: the tutorial night (which never visits the
+// contract screen at all, see beginPlay()) or before the very first one is
+// ever accepted.
+let activeContract=-1;
+function contractSpeedMult(){ return activeContract>=0?(CONTRACTS[activeContract].speedMult||1):1; }
+function contractMissBonus(){ return activeContract>=0?(CONTRACTS[activeContract].missBonus||0):0; }
+function contractCoinMult(){ return activeContract>=0?(CONTRACTS[activeContract].coinMult||1):1; }
+function contractSpawnMult(){ return activeContract>=0?(CONTRACTS[activeContract].spawnMult||1):1; }
+function contractRareMult(){ return activeContract>=0?(CONTRACTS[activeContract].rareMult||1):1; }
+function contractMothMult(){ return activeContract>=0?(CONTRACTS[activeContract].mothMult||1):1; }
+function contractPlayfulMult(){ return activeContract>=0?(CONTRACTS[activeContract].playfulMult||1):1; }
+function contractObjectiveCategory(){ return activeContract>=0?CONTRACTS[activeContract].objCategory:null; }
+// Display-only: how much of TONIGHT's real, already-earned coins the
+// contract's own multiplier is responsible for. Derived algebraically
+// (earned = base*mult, so bonus = earned*(1-1/mult)) from S.coinsEarnedThisNight
+// -- the SAME "computed fresh from what's already real" discipline the
+// Objective Bonus row already uses, rather than a second, separately-
+// tracked shadow economy that could ever drift out of sync with it.
+// Collector has no coinMult (its reward is a flat Workshop Token, shown as
+// its own '✦ TOKEN' case at the call site) so this correctly returns 0 for it.
+function contractPayoutCoins(){
+  if(activeContract<0)return 0;
+  const c=CONTRACTS[activeContract];
+  if(!c.coinMult||c.coinMult<=1)return 0;
+  return Math.round(S.coinsEarnedThisNight*(1-1/c.coinMult));
 }
 
 // ---------- Lumora 2.0 Phase 2: Glow Chain + Risk/Reward ----------
@@ -2346,6 +2443,7 @@ if(YT&&YT.game&&YT.game.loadData){
       if(Array.isArray(d.eventHistory))eventHistory=d.eventHistory;
       if(Array.isArray(d.contractsCompleted))contractsCompleted=d.contractsCompleted;
       if(Array.isArray(d.cosmeticsUnlocked))cosmeticsUnlocked=d.cosmeticsUnlocked;
+      if(typeof d.workshopTokens==='number'&&d.workshopTokens>=0)workshopTokens=d.workshopTokens;
     }catch(e){}
   }).catch(()=>{})
     .then(()=>{
@@ -2451,7 +2549,17 @@ function tutorialCheckAdvance(){
     if(!tutFirstMagnetHinted&&S.magnet){ tutFirstMagnetHinted=true; S.tutMagnetHintT=3; }
   }
 }
-let screen='title'; // 'title' | 'play' | 'shop' | 'village' | 'journal'
+let screen='title'; // 'title' | 'play' | 'shop' | 'village' | 'journal' | 'contract'
+// D3 (Claude Design spec): Contract Selection screen state. NOT part of S --
+// this screen exists BEFORE reset() ever runs for the night it's choosing
+// (S at this point is still whichever round just ended, or doesn't
+// meaningfully exist yet on the very first night). contractScreenAt is the
+// one incrementing clock (see loop()); every other "*At" below is a
+// SNAPSHOT of it at the moment something was triggered, so elapsed-since-
+// trigger is always contractScreenAt-that snapshot, same pure-function-of-
+// elapsed-time discipline D1/D2 already established -- just keyed off this
+// screen's own clock instead of S.t, since S doesn't apply here.
+let contractScreenAt=-1, contractSel=-1, contractSelAt=-1, contractDockAt=-1, contractExitAt=-1;
 // Stage 2 Part B: the shop is only ever entered from title or a game-over
 // screen (never mid-round — see the pointerdown handler below, which only
 // checks SHOP_BTN_TITLE/SHOP_BTN_OVER inside those two existing branches,
@@ -2599,8 +2707,50 @@ reset();
 // this adds (arming the tutorial for a genuinely new player) lives in
 // exactly one place instead of needing to be kept in sync at two.
 function beginPlay(){
+  // D3: a tutorial-done player picks a Night Contract first (see
+  // enterContractScreen()); the tutorial night itself never does -- it
+  // stays completely contract-free, same as it's already objective/event-
+  // free (ensureNightObjectives()/ensureNightEvent()'s own tutorialDone
+  // guard), so this branch is byte-for-byte the original behavior for it.
+  if(upgrades.tutorialDone){ enterContractScreen(); return; }
   screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
   beginTutorialIfNew();
+}
+// D3: the one entry point onto the Contract Selection screen -- from the
+// title screen (beginPlay()) or from continuing a completed night
+// (continueFromOver()). Always resets the screen's own local animation/
+// selection state fresh, since a stale selection from a PREVIOUS visit
+// (e.g. Go Home mid-decision, then begin again) must not silently carry
+// over into a night the player never actually accepted it for.
+function enterContractScreen(){
+  screen='contract';
+  contractScreenAt=0; contractSel=-1; contractSelAt=-1; contractDockAt=-1; contractExitAt=-1;
+}
+// Tapping a card: the SELECTED card again -> deselect (dock retracts, the
+// "choose a contract" hint returns). A DIFFERENT card -> the dock's text
+// cross-fades in place, no retract/dismiss step (per direct spec). The dock
+// itself only ever RISES once per visit to this screen -- swapping which
+// contract is selected doesn't re-trigger that rise.
+function selectContract(i){
+  if(contractExitAt>=0)return; // mid-accept-exit -- swallowed at the pointerdown call site too, defensive here as well
+  if(contractSel===i){ contractSel=-1; contractSelAt=contractScreenAt; contractDockAt=-1; return; }
+  const firstSelectionEver=contractSel<0;
+  contractSel=i; contractSelAt=contractScreenAt;
+  if(firstSelectionEver)contractDockAt=contractScreenAt;
+}
+// ACCEPT: arms the 280ms exit sequence. The actual screen/reset()
+// transition happens once that finishes -- see loop()'s own check.
+function acceptContract(){
+  if(contractSel<0||contractExitAt>=0)return;
+  contractExitAt=contractScreenAt;
+}
+// Fires exactly once, when the ACCEPT exit animation completes (checked in
+// loop()). Sets activeContract for the WHOLE night before reset() ever
+// runs, so ensureNightObjectives() (called from inside reset()) sees the
+// contract's forced category immediately, on this very first frame of play.
+function finishContractAccept(){
+  activeContract=contractSel;
+  screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
 }
 
 // Depth Pass Part 1 retune: maxFlies/patience/speed/mothRate used to sit
@@ -2652,7 +2802,10 @@ function diff(){
   return {
     maxFlies: s<5?3 : s<13?4 : s<60?5 : 6,
     patience: s<60?rand(12,14) : rand(9,11),
-    speed:    s<5?rand(16,26) : rand(22,36),
+    // D3: Peaceful's "Firefly speed -25%" -- the ONLY contract that touches
+    // this. contractSpeedMult() defaults to 1 for every other contract/no
+    // contract, so this is a no-op change for everyone else.
+    speed:    (s<5?rand(16,26) : rand(22,36))*contractSpeedMult(),
     blue:     s>=10, shy: s>=15,
     mothRate: s<5?0 : s<13?rand(9,13) : rand(6,9),
     magRate:  s<8?0 : s<20?rand(15,20) : rand(10,14)
@@ -2680,8 +2833,19 @@ function spawnFly(forceType){
     // Moonlight and a nightRain/aurora weather roll landing the same night
     // don't stack into an even bigger number, they just take whichever is
     // already the bigger boost.
-    const shyW=d.shy?Math.max(S.weather==='nightRain'?0.30:S.weather==='aurora'?0.22:0.16, S.eventActive==='moonlight'?0.28:0):0;
-    const blueW=d.blue?(S.weather==='shootingStars'?0.30:0.26):0;
+    // D3: Rush ("Rare chance +50%") and Moth Night ("Rare fireflies ×2")
+    // join the SAME Math.max-capped chain Moonlight already established --
+    // whichever boost is strongest wins, never stacked/multiplied together.
+    // A plain rareMult (1.5/2) is compared directly against the OTHER
+    // entries' already-boosted absolute widths (0.28/0.30/0.22/0.16), so it's
+    // expressed here as a scale-up of the baseline 0.16 width, keeping the
+    // comparison apples-to-apples with those.
+    const contractRareW=0.16*contractRareMult();
+    const shyW=d.shy?Math.max(S.weather==='nightRain'?0.30:S.weather==='aurora'?0.22:0.16, S.eventActive==='moonlight'?0.28:0, contractRareW):0;
+    // D3: Collector's "Playful spawns ×2" -- a direct multiplier (not a
+    // Math.max entry) since blueW has no existing multi-source boost chain
+    // of its own to join; defaults to 1 for every other contract/no contract.
+    const blueW=d.blue?(S.weather==='shootingStars'?0.30:0.26)*contractPlayfulMult():0;
     if(r<shyW)type='g';
     else if(r<shyW+blueW)type='b';
   }
@@ -2848,6 +3012,16 @@ const GOHOME_BTN={x:W/2,y:RESTART_BTN.y+56,w:220,h:48,fontSize:13};
 const CONFIRM_CANCEL_BTN={x:W/2-84,y:H*0.5+96,w:150,h:48,fontSize:12};
 const CONFIRM_ACTION_BTN={x:W/2+84,y:H*0.5+96,w:150,h:48,fontSize:12};
 const BEGIN_BTN={x:W/2,y:H*0.66,r:60};
+// D3 (Claude Design spec, C1/C3): Contract Selection screen geometry --
+// shared by drawContractScreen() and the pointerdown hit-test above, same
+// "one object drives both draw and hit-test" discipline as every other
+// button in this file. Cards are drawn/hit at their own TOP-LEFT (cx,cy);
+// ACCEPT is drawn centred (matches lumButton's own convention) but hit-
+// tested via the wider top-left+w/h target the spec calls for.
+const CONTRACT_GRID_X=[30,278], CONTRACT_GRID_Y=[282,504], CONTRACT_CARD_W=232, CONTRACT_CARD_H=206;
+const CONTRACT_ACCEPT_BTN={x:270,y:865,w:200,h:50,fontSize:15}; // drawn size, centred (170,840)+(200,50)/2
+const CONTRACT_ACCEPT_HIT={x:270,y:865,w:220,h:62}; // wider tap target, same centre, per direct spec
+const CONTRACT_CHIP_X=14, CONTRACT_CHIP_Y=208, CONTRACT_CHIP_H=30;
 // Night Complete's "Visit the Workshop" -- was a bare fillText() with only a
 // small (r:34+10) CIRCULAR hit-test centered under the text, while the
 // visible label itself ("VISIT THE WORKSHOP", 12px bold, letter-spaced) is
@@ -3272,6 +3446,20 @@ cv.addEventListener('pointerdown',e=>{
     return;
   }
   initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
+  // D3: Contract Selection screen. The card rect IS the tap target (no
+  // inner targets, no long-press, no drag, per direct spec) -- checked as
+  // plain top-left+w/h bounds, matching how the spec itself expresses the
+  // grid (columns/rows as left/top edges), rather than forcing this through
+  // inRect()'s own centre-based convention.
+  if(screen==='contract'){
+    if(contractExitAt>=0)return; // mid-accept-exit -- swallow all input, same discipline as every other "screen is mid-transition" guard above
+    for(let i=0;i<CONTRACTS.length;i++){
+      const cx=CONTRACT_GRID_X[i%2], cy=CONTRACT_GRID_Y[i>>1];
+      if(p.x>=cx&&p.x<=cx+CONTRACT_CARD_W&&p.y>=cy&&p.y<=cy+CONTRACT_CARD_H){ selectContract(i); return; }
+    }
+    if(contractSel>=0&&inRect(p.x,p.y,CONTRACT_ACCEPT_HIT))acceptContract();
+    return;
+  }
   if(screen==='village'){
     if(dist(p.x,p.y,VILLAGE_CLOSE_BTN.x,VILLAGE_CLOSE_BTN.y)<=hitR(VILLAGE_CLOSE_BTN)){ screen='title'; return; }
     // Glowkeeper Story pass: opens straight to the latest unlocked chapter
@@ -3717,12 +3905,21 @@ function update(dt){
   const eventCapBoost=fireflyRainActive?4:0;
   if(S.spawnT<=0&&active<d.maxFlies+Math.max(festivalCapBoost,eventCapBoost)){
     spawnFly();
-    S.spawnT=(S.weather==='festival'||fireflyRainActive)?rand(0.25,0.5):rand(0.7,1.5);
+    // D3: Rush's "Spawn rate +60%" -- a straight cadence divisor (shrinks the
+    // gap between spawns), independent of the festival/rain cap-boost above,
+    // which is about how many are on screen AT ONCE, not how often a new one
+    // appears. Defaults to 1 for every other contract/no contract.
+    S.spawnT=((S.weather==='festival'||fireflyRainActive)?rand(0.25,0.5):rand(0.7,1.5))/contractSpawnMult();
   }
   // Lumora 2.0 Phase 4: Moth Swarm -- more frequent moths (shorter interval,
   // floor of 3s so it stays fair rather than becoming unavoidable spam),
   // compensated by nightEventCoinMult() at the delivery-coin-grant site.
-  const mothRateNow=S.eventActive==='mothSwarm'&&d.mothRate>0?Math.max(3,d.mothRate*0.5):d.mothRate;
+  // D3: Moth Night's own "Moths ×3" joins the SAME floor-of-3s divisor
+  // discipline -- the STRONGEST single divisor wins (never stacked), so a
+  // Moth Night contract landing on a mothSwarm event the same night doesn't
+  // compound into an unfair pile-up.
+  const mothDivisor=Math.max(S.eventActive==='mothSwarm'?2:1, contractMothMult());
+  const mothRateNow=mothDivisor>1&&d.mothRate>0?Math.max(3,d.mothRate/mothDivisor):d.mothRate;
   if(mothRateNow>0){ S.mothT-=dt; if(S.mothT<=0){ spawnMoth(); S.mothT=mothRateNow; } }
   if(d.magRate>0&&!S.magnet){ S.magT-=dt; if(S.magT<=0){ spawnMagnet(); S.magT=d.magRate; } }
   // elder firefly: rare, only after the game has opened up. Clear Moon, Aurora's
@@ -3742,7 +3939,8 @@ function update(dt){
   if(S.score>=12){
     // Lumora 2.0 Phase 4: Moonlight joins the same Math.max bound as every
     // other elder-rate booster here -- capped, not stacked.
-    const elderRateMult=Math.max(S.weather==='clearMoon'?2.2:1, S.weather==='aurora'?1.4:1, luckBoostT>0?2.2:1, S.eventActive==='moonlight'?2.0:1);
+    // D3: Rush/Moth Night's own rare-chance boost joins the same bound.
+    const elderRateMult=Math.max(S.weather==='clearMoon'?2.2:1, S.weather==='aurora'?1.4:1, luckBoostT>0?2.2:1, S.eventActive==='moonlight'?2.0:1, contractRareMult());
     S.elderT-=dt*elderRateMult;
     if(S.elderT<=0&&!S.flies.some(f=>f.type==='e')){ spawnFly('e'); S.elderT=rand(35,55); }
   }
@@ -3754,7 +3952,8 @@ function update(dt){
     // Lumora 2.0 Phase 4: Moonlight speeds Mystery's countdown too -- "rare
     // fireflies become more common" covers all three rare types (shy/elder/
     // mystery), not just shy/elder.
-    S.mysteryT-=dt*(S.eventActive==='moonlight'?1.6:1);
+    // D3: same Math.max bound extended to the contract's own rare-chance boost.
+    S.mysteryT-=dt*Math.max(S.eventActive==='moonlight'?1.6:1, contractRareMult());
     if(S.mysteryT<=0&&!S.flies.some(f=>f.type==='m')){ spawnFly('m'); S.mysteryT=rand(60,90); }
   }
   // firefly bloom event
@@ -3863,7 +4062,10 @@ function update(dt){
         // finalizing the night immediately, exactly once per round
         // (guarded by !S.extraLifeUsed, which also becomes true the moment
         // the offer is claimed) -- see requestExtraLife()/declineExtraLife().
-        const missLimit=S.extraLifeAvailable?6:5;
+        // D3: Peaceful's "Two extra misses" folds in here, on top of Extra
+        // Life's own +1 -- both are additive headroom grants, not competing
+        // systems, so they simply add rather than one overriding the other.
+        const missLimit=(S.extraLifeAvailable?6:5)+contractMissBonus();
         if(S.misses>=missLimit){
           if(!S.extraLifeUsed&&upgrades.tutorialDone&&rewardedAdsAvailable()){
             S.extraLifeOfferOpen=true; // pauses simulation (see loop()'s update() gate); drawExtraLifeOffer() takes over the screen instead of drawOver()
@@ -4042,7 +4244,10 @@ function update(dt){
       // Lumora 2.0 Phase 4: a 4th layer, nightEventCoinMult() -- Moth
       // Swarm's compensating +20%, round-scoped and completely separate
       // from the persistent/LOCKED Coin Value line above.
-      grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun()*nightEventCoinMult());
+      // D3: a 5th layer, contractCoinMult() -- Peaceful/Rush/Moth's own
+      // "+N% coins" reward, defaulting to 1 for Collector (a flat Workshop
+      // Token instead, granted once at finalizeNight()) and for no contract.
+      grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun()*nightEventCoinMult()*contractCoinMult());
       questProgress('deliver',s.type); // any type counts toward "deliver 20 fireflies" — same delivery moment as coins/score above
       // Lumora 2.0 Phase 1: same authoritative delivery-success moment, not
       // catch time -- "deliver X" must count actual successful deliveries,
@@ -5212,6 +5417,7 @@ function drawHUD(){
   }
   ctx.globalAlpha=1;
   if(!S.over)drawObjectivesHUD(); // Lumora 2.0 Phase 1 -- hides itself once Night Complete has its own summary
+  drawContractChip(); // D3: persistent active-contract chip -- hides itself (activeContract<0 or S.over), same discipline as the line above
   ctx.font='500 18px Georgia,serif';
   ctx.fillStyle='#8992ba'; ctx.textAlign='right';
   ctx.fillText('best '+best,W-22,32);
@@ -5362,6 +5568,21 @@ function d2BurstGlyph(cx,cy,r,col,blur){
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function d2TierGlyph(kind,cx,cy,r,col,blur){ if(kind==='burst')d2BurstGlyph(cx,cy,r,col,blur); else d2EmberGlyph(cx,cy,r,col,blur); }
+// The 4-point score glyph -- extracted here (D3) from where it was first
+// inlined (D2's own delivery-row "perfect" glyph, see d2DrawDeliveryRow()
+// below) since D3's Collector card/chip/Night-Complete-row glyph needs the
+// exact same shape. One shared function, two call sites, not a duplicate.
+function star4Glyph(cx,cy,r,fill,glowColor,glowBlur){
+  const k=r*0.2;
+  ctx.save();
+  if(glowBlur){ ctx.shadowColor=glowColor; ctx.shadowBlur=glowBlur; }
+  ctx.beginPath(); ctx.moveTo(cx,cy-r);
+  ctx.quadraticCurveTo(cx+k,cy-k,cx+r,cy);
+  ctx.quadraticCurveTo(cx+k,cy+k,cx,cy+r);
+  ctx.quadraticCurveTo(cx-k,cy+k,cx-r,cy);
+  ctx.quadraticCurveTo(cx-k,cy-k,cx,cy-r);
+  ctx.closePath(); ctx.fillStyle=fill; ctx.fill(); ctx.restore();
+}
 // B3's rare mote -- also reused as B1 row 2's own glyph, per direct spec
 // ("the thing that was orbiting your jar is the thing that just paid").
 // rgb defaults to D2_COOL_RGB but every real call site below passes
@@ -5566,16 +5787,7 @@ function d2DrawDeliveryRow(kind,label,value,baseline,alpha,tintRGB){
   const total=13+10+lw+14+vw, x0=270-total/2;
   ctx.save(); ctx.globalAlpha=alpha;
   if(kind==='rare')d2RareMote(x0+6.5,baseline-5,1.15,1,0,tintRGB);
-  else{ // perfect delivery reuses the existing score glyph (4-point star)
-    const cx=x0+6.5, cy=baseline-5, r=6, k=r*0.2;
-    ctx.save(); ctx.shadowColor=d2gold(0.45); ctx.shadowBlur=12;
-    ctx.beginPath(); ctx.moveTo(cx,cy-r);
-    ctx.quadraticCurveTo(cx+k,cy-k,cx+r,cy);
-    ctx.quadraticCurveTo(cx+k,cy+k,cx,cy+r);
-    ctx.quadraticCurveTo(cx-k,cy+k,cx-r,cy);
-    ctx.quadraticCurveTo(cx-k,cy-k,cx,cy-r);
-    ctx.closePath(); ctx.fillStyle=d2cream(0.95); ctx.fill(); ctx.restore();
-  }
+  else star4Glyph(x0+6.5,baseline-5,6,d2cream(0.95),d2gold(0.45),12); // perfect delivery reuses the existing score glyph
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   ctx.font='italic 500 17px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.92)';
   ctx.shadowColor=d2gold(0.28); ctx.shadowBlur=12; ctx.fillText(label,x0+23,baseline); ctx.shadowBlur=0;
@@ -5654,6 +5866,298 @@ function drawJarRarity(){
     d2RareMote(mx,my,grow,al,full?0.06:0,tintRGB);
   }
 }
+
+// ---------- Lumora 2.0 D3 (Claude Design spec): Night Contract UI ----------
+// Ported the same way D2's own rendering was: function-for-function where
+// the handoff's numbers were genuinely new work, adapted to this file's
+// plain ctx.* calls and its native ctx.roundRect(). Two corrections against
+// the handoff's own claims (both the kind its own CONFIRM section already
+// anticipates): Peaceful's "crescent" and Collector's "star4" are claimed
+// as reusing existing drawn shapes, but D1's own eyebrow crescent is
+// actually the 🌙 EMOJI (not a vector shape -- confirmed while implementing
+// D2's own glyph corrections), and no shared star4() function existed
+// before this pass (D2's delivery row drew its star inline) -- see
+// star4Glyph() above, newly extracted for exactly this reuse. The risk
+// dots' colour is corrected to the ACTUAL miss-dot colours (#b98ec9/
+// #7b83a8) rather than the handoff's own "lavender rgba(166,168,198)",
+// which is a different colour from either of those and doesn't exist
+// anywhere else in this file.
+function d3CrescentGlyph(cx,cy,r,col,carve){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,6.28); ctx.fillStyle=col; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx+r*0.46,cy-r*0.17,r*0.92,0,6.28); ctx.fillStyle=carve||'rgba(10,13,33,0.92)'; ctx.fill();
+  ctx.restore();
+}
+function d3MothGlyph(cx,cy,r,col,blur){
+  ctx.save(); if(blur){ ctx.shadowColor=col; ctx.shadowBlur=blur; }
+  ctx.fillStyle=col;
+  ctx.beginPath(); ctx.moveTo(cx,cy-r*0.18);
+  ctx.quadraticCurveTo(cx-r*1.16,cy-r*1.02,cx-r*0.94,cy+r*0.16);
+  ctx.quadraticCurveTo(cx-r*0.82,cy+r*0.96,cx-r*0.12,cy+r*0.5);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx,cy-r*0.18);
+  ctx.quadraticCurveTo(cx+r*1.16,cy-r*1.02,cx+r*0.94,cy+r*0.16);
+  ctx.quadraticCurveTo(cx+r*0.82,cy+r*0.96,cx+r*0.12,cy+r*0.5);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx,cy+r*0.06,r*0.17,r*0.6,0,0,6.28); ctx.fill();
+  ctx.strokeStyle=col; ctx.lineWidth=Math.max(0.8,r*0.1); ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(cx-r*0.06,cy-r*0.48); ctx.quadraticCurveTo(cx-r*0.5,cy-r*0.96,cx-r*0.6,cy-r*1.14);
+  ctx.moveTo(cx+r*0.06,cy-r*0.48); ctx.quadraticCurveTo(cx+r*0.5,cy-r*0.96,cx+r*0.6,cy-r*1.14);
+  ctx.stroke(); ctx.restore();
+}
+function contractGlyph(kind,cx,cy,r,col,blur,carve){
+  if(kind==='moon')d3CrescentGlyph(cx,cy,r,col,carve);
+  else if(kind==='ember')d2EmberGlyph(cx,cy,r*0.76,col,blur);
+  else if(kind==='moth')d3MothGlyph(cx,cy,r,col,blur);
+  else star4Glyph(cx,cy,r,col,col,blur||0);
+}
+// 0 -> 1 -> 0 pop with a slight overshoot -- used only for the SELECTED
+// badge's entrance, same shape the handoff's own reference implementation
+// uses for it.
+function contractBadgePop(p){
+  const c=clamp(p,0,1);
+  return c<0.55?easeOutCubic(c/0.55)*1.15:lerp(1.15,1,easeInOutCubic((c-0.55)/0.45));
+}
+
+// ---- C2: the card itself -- one function serves all four grid positions,
+// every offset card-relative. sel/badge/breathe state all read from the
+// module-level contractSel/contractSelAt so the caller only needs to pass
+// entry-animation overrides (alpha/dy/scale). ----
+function drawContractCard(i,o){
+  o=o||{};
+  const c=CONTRACTS[i];
+  const x=CONTRACT_GRID_X[i%2], y=CONTRACT_GRID_Y[i>>1]+(o.dy||0);
+  const sp=clamp(o.selP==null?(i===contractSel?1:0):o.selP,0,1);
+  const a=o.alpha==null?1:o.alpha, sc=o.scale==null?1:o.scale;
+  if(a<=0)return;
+  ctx.save(); ctx.globalAlpha=a;
+  ctx.translate(x+CONTRACT_CARD_W/2,y+CONTRACT_CARD_H/2); ctx.scale(sc,sc); ctx.translate(-(x+CONTRACT_CARD_W/2),-(y+CONTRACT_CARD_H/2));
+  if(sp>0.02)d2bloom(x+CONTRACT_CARD_W/2,y+CONTRACT_CARD_H/2,168,D2_GOLD_RGB,0.085*sp);
+  lumGlassPanel(x,y,CONTRACT_CARD_W,CONTRACT_CARD_H,18); // the Workshop's own material, called directly per the handoff's own CONFIRM instruction
+  // D3's own selected-state wash, layered ON TOP of that shared material --
+  // lumGlassPanel() itself has no selected concept of its own.
+  if(sp>0.02){
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(x,y,CONTRACT_CARD_W,CONTRACT_CARD_H,18); ctx.fillStyle=d2gold(0.055*sp); ctx.fill();
+    ctx.lineWidth=1+sp; ctx.strokeStyle=d2gold(lerp(0.2,0.85,sp));
+    ctx.beginPath(); ctx.roundRect(x+0.5+sp*0.5,y+0.5+sp*0.5,CONTRACT_CARD_W-1-sp,CONTRACT_CARD_H-1-sp,18); ctx.stroke();
+    ctx.restore();
+  }
+  // shelf -- keeps *price* visually separate from *terms*, same split the Workshop card makes
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(x,y,CONTRACT_CARD_W,CONTRACT_CARD_H,18); ctx.clip();
+  ctx.fillStyle='rgba(5,7,27,0.32)'; ctx.fillRect(x,y+148,CONTRACT_CARD_W,CONTRACT_CARD_H-148);
+  ctx.restore();
+  ctx.strokeStyle=sp>0.02?d2gold(0.10+0.16*sp):d2haze(0.12); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(x+1,y+148); ctx.lineTo(x+CONTRACT_CARD_W-1,y+148); ctx.stroke();
+  // medallion + glyph
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x+32,y+34,16,0,6.28); ctx.fillStyle='rgba(10,13,33,0.92)'; ctx.fill();
+  ctx.lineWidth=1; ctx.strokeStyle=sp>0.02?d2gold(0.16+0.26*sp):d2haze(0.16); ctx.stroke();
+  ctx.restore();
+  contractGlyph(c.glyph,x+32,y+34,9,sp>0.02?'#fbd26b':d2gold(0.82),sp>0.02?9:0,'rgba(10,13,33,0.92)');
+  // name
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.font='600 15px Georgia,serif';
+  if(sp>0.02){ ctx.shadowColor=d2gold(0.35*sp); ctx.shadowBlur=10; ctx.fillStyle='#fbf2d4'; } else { ctx.shadowBlur=0; ctx.fillStyle='rgba(230,217,188,0.95)'; }
+  ctx.fillText(c.name,x+56,y+39); ctx.shadowBlur=0;
+  // description
+  ctx.font='italic 500 11.5px Georgia,serif'; ctx.fillStyle=d2haze(0.72);
+  ctx.fillText(c.desc,x+16,y+68);
+  // rule
+  ctx.strokeStyle=d2haze(0.12); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(x+16,y+84); ctx.lineTo(x+216,y+84); ctx.stroke();
+  // modifiers (diamond bullet + text, 1-2 lines)
+  c.mods.forEach((md,k)=>{
+    const b=y+108+k*22;
+    ctx.save(); ctx.translate(x+22,b-4); ctx.rotate(Math.PI/4);
+    ctx.fillStyle=d2gold(0.55); ctx.fillRect(-2.2,-2.2,4.4,4.4); ctx.restore();
+    ctx.font='500 11px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.84)';
+    ctx.fillText(md,x+32,b);
+  });
+  // risk dots -- the existing top-left miss-dot idiom, same colours/shape
+  ctx.font='600 8.5px Georgia,serif'; try{ ctx.letterSpacing='1.2px'; }catch(e){}
+  ctx.fillStyle=d2haze(0.58); ctx.fillText('RISK',x+16,y+181);
+  const rlw=ctx.measureText('RISK').width;
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  for(let k=0;k<3;k++){
+    ctx.beginPath(); ctx.arc(x+16+rlw+9+k*9,y+177.5,2.6,0,6.28);
+    ctx.fillStyle=k<c.risk?'#b98ec9':'#7b83a8'; ctx.fill();
+  }
+  // reward -- a coin disc for a coin-scaled reward; Collector's own flat
+  // Workshop Token skips it (the token's own '✦' already sits in its own
+  // label), same "non-coin reward shows as its own thing" rule C5 uses.
+  ctx.textAlign='right'; ctx.font='600 12.5px Georgia,serif';
+  const rw=ctx.measureText(c.rewardLabel).width;
+  if(!c.tokenReward){
+    const coinCx=x+CONTRACT_CARD_W-16-rw-11;
+    const cg=ctx.createRadialGradient(coinCx-1.35,y+177-1.35,0,coinCx,y+177,4.5);
+    cg.addColorStop(0,'#fbf2d4'); cg.addColorStop(0.55,'#fbd26b'); cg.addColorStop(1,'#f09638');
+    ctx.save(); ctx.shadowColor=d2gold(0.5); ctx.shadowBlur=8;
+    ctx.beginPath(); ctx.arc(coinCx,y+177,4.5,0,6.28); ctx.fillStyle=cg; ctx.fill(); ctx.restore();
+  }
+  ctx.fillStyle=d2gold(0.95);
+  ctx.fillText(c.rewardLabel,x+CONTRACT_CARD_W-16,y+182);
+  // SELECTED badge
+  if(sp>0.02){
+    const bs=o.badgeScale==null?1:o.badgeScale;
+    ctx.save(); ctx.globalAlpha=sp;
+    ctx.translate(x+CONTRACT_CARD_W-45,y+21); ctx.scale(bs,bs);
+    ctx.beginPath(); ctx.roundRect(-31,-8,62,16,8); ctx.fillStyle='#fbd26b'; ctx.fill();
+    ctx.textAlign='center'; ctx.font='600 8px Georgia,serif'; try{ ctx.letterSpacing='1.2px'; }catch(e){}
+    ctx.fillStyle='#05071b'; ctx.fillText('SELECTED',0,3.2);
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ---- C1/C3: the screen itself -- scrim, head, the 4 cards, and either the
+// idle hint or the confirmation dock, depending on contractSel. ----
+function drawContractScreen(){
+  const t=contractScreenAt;
+  const sIn=clamp(t/0.20,0,1);
+  const sOut=contractExitAt>=0?clamp((t-contractExitAt)/0.28,0,1):0;
+  const scrim=lerp(0,0.74,easeOutCubic(sIn))*(1-easeOutCubic(sOut));
+  ctx.save();
+  ctx.fillStyle='rgba(5,7,27,'+scrim+')'; ctx.fillRect(0,0,W,H);
+  const vg=ctx.createRadialGradient(270,470,140,270,470,540);
+  vg.addColorStop(0,'rgba(5,7,27,0)'); vg.addColorStop(1,'rgba(5,7,27,'+(scrim*(0.5/0.74))+')');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+  const hp=clamp((t-0.10)/0.22,0,1), head=clamp(hp-sOut,0,1);
+  if(head>0){
+    ctx.save(); ctx.globalAlpha=head;
+    const lbl='NIGHT '+nightNumber;
+    ctx.font='600 11px Georgia,serif'; try{ ctx.letterSpacing='2px'; }catch(e){}
+    const lw=ctx.measureText(lbl).width;
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    d3CrescentGlyph(270-lw/2-19,178,7,d2gold(0.9));
+    ctx.font='600 11px Georgia,serif'; try{ ctx.letterSpacing='2px'; }catch(e){}
+    ctx.fillStyle=d2haze(0.85); ctx.fillText(lbl,270+7,178);
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+    ctx.font='500 26px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.95)';
+    ctx.save(); ctx.shadowColor=d2gold(0.18); ctx.shadowBlur=18;
+    ctx.fillText('Tonight\'s Contract',270,222+lerp(6,0,easeOutCubic(hp)));
+    ctx.restore();
+    const rg=ctx.createLinearGradient(270-48,0,270+48,0);
+    rg.addColorStop(0,'rgba(174,184,203,0)'); rg.addColorStop(0.5,d2haze(0.28)); rg.addColorStop(1,'rgba(174,184,203,0)');
+    ctx.fillStyle=rg; ctx.fillRect(270-48,240,96,1);
+    ctx.font='italic 500 12.5px Georgia,serif'; ctx.fillStyle=d2haze(0.6);
+    ctx.fillText('One pact, held for the whole night.',270,264);
+    ctx.restore();
+  }
+  CONTRACTS.forEach((c,i)=>{
+    const isSel=i===contractSel;
+    const cardT=clamp((t-(0.22+i*0.07))/0.26,0,1);
+    const p=clamp(cardT-sOut*(isSel?0.6:1.5),0,1);
+    const selEl=contractSelAt>=0&&isSel?clamp((t-contractSelAt)/0.16,0,1):0;
+    const badgeP=contractSelAt>=0?clamp((t-contractSelAt)/0.22,0,1):1;
+    const breathe=isSel&&contractSelAt>=0?0.03*Math.sin(Math.PI*clamp((t-contractSelAt)/0.22,0,1)):0;
+    drawContractCard(i,{
+      alpha:p, dy:lerp(10,0,easeOutCubic(cardT)),
+      scale:lerp(0.97,1,easeOutCubic(cardT))*(1+breathe)*(isSel?lerp(1,1.05,easeOutCubic(sOut)):1),
+      selP:selEl, badgeScale:contractBadgePop(badgeP)
+    });
+  });
+  const dockRiseP=contractDockAt>=0?clamp((t-contractDockAt)/0.24,0,1):0;
+  if(contractSel<0){
+    const q=clamp((t-0.62)/0.30,0,1)*(1-sOut);
+    if(q>0){
+      ctx.save(); ctx.globalAlpha=q;
+      ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      ctx.font='italic 500 14px Georgia,serif'; ctx.fillStyle=d2haze(0.55);
+      ctx.fillText('Choose tonight\'s contract to begin',270,802);
+      ctx.restore();
+    }
+    ctx.restore();
+    return;
+  }
+  const dp=clamp(dockRiseP-sOut*1.6,0,1);
+  if(dp>0){
+    const c=CONTRACTS[contractSel];
+    ctx.save(); ctx.globalAlpha=dp; ctx.translate(0,lerp(12,0,easeOutCubic(dp)));
+    const rg2=ctx.createLinearGradient(270-150,0,270+150,0);
+    rg2.addColorStop(0,'rgba(174,184,203,0)'); rg2.addColorStop(0.5,d2haze(0.26)); rg2.addColorStop(1,'rgba(174,184,203,0)');
+    ctx.fillStyle=rg2; ctx.fillRect(270-150,760,300,1);
+    ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+    ctx.font='600 11px Georgia,serif'; try{ ctx.letterSpacing='2.4px'; }catch(e){}
+    ctx.fillStyle=d2gold(0.9); ctx.fillText(c.full,270,792);
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    ctx.font='italic 500 15px Georgia,serif'; ctx.fillStyle='rgba(230,217,188,0.92)';
+    ctx.save(); ctx.shadowColor=d2gold(0.22); ctx.shadowBlur=12;
+    ctx.fillText(c.line,270,820);
+    ctx.restore();
+    lumButton(CONTRACT_ACCEPT_BTN,'ACCEPT','primary');
+    ctx.font='italic 500 10.5px Georgia,serif'; ctx.fillStyle=d2haze(0.5);
+    ctx.fillText('tap your contract again to reconsider',270,916);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ---- C4: the active-contract chip -- persistent, ambient, not tappable.
+// Zero draw calls with no contract active, or once Night Complete has its
+// own summary -- same discipline D1/D2's own HUD elements already use.
+// Deliberate simplification: no bespoke entry-fade timer (the spec's own
+// 300ms one) -- every OTHER static HUD element in this game (score, coins,
+// best, this chip's own neighbours) already renders at full alpha the
+// instant the round starts, with no entrance of its own, so a fade here
+// would be the one inconsistent exception rather than following anything.
+function drawContractChip(){
+  if(activeContract<0||S.over)return;
+  const c=CONTRACTS[activeContract];
+  ctx.font='600 9.5px Georgia,serif'; try{ ctx.letterSpacing='1.2px'; }catch(e){}
+  const lw=ctx.measureText(c.name).width;
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  const w=Math.round(13+13+8+lw+13);
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(CONTRACT_CHIP_X,CONTRACT_CHIP_Y,w,CONTRACT_CHIP_H,CONTRACT_CHIP_H/2);
+  ctx.fillStyle='rgba(25,33,67,0.55)'; ctx.fill();
+  ctx.strokeStyle=d2haze(0.14); ctx.lineWidth=1; ctx.stroke();
+  contractGlyph(c.glyph,CONTRACT_CHIP_X+19.5,CONTRACT_CHIP_Y+15,6.5,d2gold(0.78),0,'rgba(10,13,33,0.92)');
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 9.5px Georgia,serif'; try{ ctx.letterSpacing='1.2px'; }catch(e){}
+  ctx.fillStyle=d2haze(0.62);
+  ctx.fillText(c.name,CONTRACT_CHIP_X+34,CONTRACT_CHIP_Y+19);
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  ctx.restore();
+}
+
+// ---- C5: one row appended to the Night Complete panel, after whichever
+// section currently ends last (the objective bonus row, or the 3 stat rows
+// if tonight had none). Static, drawn at the panel's own shared alpha
+// (drawOver()'s own single top-level S.overT fade) -- a deliberate
+// simplification against the mockup's own bespoke fade+count-up timer:
+// every OTHER row on this exact screen (including the pre-existing
+// OBJECTIVE BONUS figure) is already a plain, always-rendered value
+// computed fresh each frame, never its own tween, so a count-up here would
+// be the one inconsistent exception rather than matching its neighbours.
+function drawContractResultRow(panelR,hasObjectives){
+  if(activeContract<0)return; // absent: nothing below moves, no divider, no row
+  const c=CONTRACTS[activeContract];
+  const hairY=hasObjectives?panelR.y+282:panelR.y+140;
+  const cy=hasObjectives?panelR.y+306:panelR.y+164;
+  const labelY=hasObjectives?panelR.y+310:panelR.y+168;
+  const valueY=hasObjectives?panelR.y+311:panelR.y+169;
+  ctx.strokeStyle=d2haze(0.16); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(panelR.x+1,hairY); ctx.lineTo(panelR.x+panelR.w-1,hairY); ctx.stroke();
+  contractGlyph(c.glyph,panelR.x+22,cy,6.5,d2gold(0.85),6,'rgba(21,28,58,0.98)');
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
+  ctx.fillStyle='rgba(230,217,188,0.90)';
+  // c.name (short: "COLLECTOR"), not c.full ("COLLECTOR'S NIGHT") -- the
+  // handoff's own reference used c.full here, but that genuinely overflows
+  // into the value column at this panel width (measured live: real bug,
+  // not a placeholder-content quirk). Matches the chip's own choice of the
+  // short name for exactly the same reason.
+  ctx.fillText('CONTRACT · '+c.name,panelR.x+40,labelY);
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  ctx.textAlign='right'; ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.95);
+  ctx.fillText(c.tokenReward?'✦ TOKEN':('+'+contractPayoutCoins()),panelR.x+panelR.w-18,valueY);
+}
+
 // Night Complete tips: one shown per round-end, picked at random (see the
 // S.tip assignment beside S.misses>=5 in update()). Each line is checked
 // against the actual mechanic it describes, not guessed -- e.g. "avoid
@@ -5710,7 +6214,14 @@ function drawOver(){
   // existing whitespace per the spec's own "net +18" reasoning applied to
   // this file's real base numbers rather than the spec's screenshot-
   // measured approximation of them).
-  const objExtra=hasObjectives?130:0;
+  // D3 (C5): when a contract ran this completed night, the CONTRACT RESULT
+  // row (drawContractResultRow(), called below) needs the panel to grow by
+  // the same +46 in both the with- and without-objectives cases -- folded
+  // directly into objExtra so panelR.h absorbs it once, correctly, for
+  // both (150+0+46=196 without objectives; 150+130+46=326 with, matching
+  // the handoff's own NP3.h=326 exactly).
+  const contractExtra=activeContract>=0?46:0;
+  const objExtra=(hasObjectives?130:0)+contractExtra;
   const panelR={x:W/2-160,y:H*0.34,w:320,h:150+objExtra};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
   rows.forEach((row,i)=>{
@@ -5763,6 +6274,7 @@ function drawOver(){
       ctx.fillText('+'+bonus,panelR.x+panelR.w-20,boy);
     }
   }
+  drawContractResultRow(panelR,hasObjectives); // D3 (C5): no-ops entirely if no contract ran this night
 
   // Lumora 2.0 Phase 1: playBtn/SHOP_BTN_OVER/DOUBLE_COINS_BTN are shared,
   // module-level objects also read by the pointerdown hit-test below (same
@@ -5776,10 +6288,21 @@ function drawOver(){
   // D1: shifted by the same +14 the taller objective rows (objExtra
   // 116->130) added, keeping the original proportional gaps between these
   // three and the panel bottom.
-  playBtn.y=hasObjectives?642:512;
-  SHOP_BTN_OVER.y=hasObjectives?697:567;
-  DOUBLE_COINS_BTN.y=hasObjectives?910:830;
-  const tipY=hasObjectives?SHOP_BTN_OVER.y+67:H*0.66;
+  // D3 (C5 reflow): both buttons take the same contractExtra shift as the
+  // panel itself grew by. DOUBLE_COINS_BTN is the one exception -- WITH
+  // objectives it's explicitly clamped to its original 910 (a straight +46
+  // there would put it at 956, clipping its own content off a 960 frame);
+  // WITHOUT objectives it has 130px of headroom by construction, so the
+  // full shift is safe.
+  playBtn.y=(hasObjectives?642:512)+contractExtra;
+  SHOP_BTN_OVER.y=(hasObjectives?697:567)+contractExtra;
+  DOUBLE_COINS_BTN.y=hasObjectives?910:(830+contractExtra);
+  // hasObjectives: tipY already inherits the shift via SHOP_BTN_OVER.y
+  // above -- adding contractExtra again here would double it. No-objectives:
+  // tipY is an independent H*0.66 constant with no relation to
+  // SHOP_BTN_OVER.y, so it needs the explicit add or it would end up
+  // overlapping SHOP_BTN_OVER's own new (lower) position.
+  const tipY=hasObjectives?(SHOP_BTN_OVER.y+67):(H*0.66+contractExtra);
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
@@ -8013,6 +8536,8 @@ function draw(){
     if(S.extraLifeOfferOpen)drawExtraLifeOffer(); // shown INSTEAD of drawOver() the instant the normal 5-miss ending is reached -- S.over is still false while this is up
     if(paused)drawPaused();
     if(tutorialPanelOpen)drawTutorialPanel(); // topmost overlay, same precedent as drawPaused()/drawOver() above
+  } else if(screen==='contract'){
+    drawContractScreen();
   } else if(screen==='shop'){
     drawShop();
   } else if(screen==='village'){
@@ -8046,6 +8571,14 @@ function loop(now){
   // S.newNightT straight to the 4.30 keyframe (see the pointerdown guard),
   // so this increment is the ONLY normal path that advances it otherwise.
   if(screen==='play')S.newNightT+=dt;
+  // D3: the contract screen's own clock -- see contractScreenAt's own
+  // comment. Not part of S, not gated by paused/tutorial (none of those
+  // apply on this screen), so it advances unconditionally while shown.
+  // Once the 280ms ACCEPT exit finishes, hand off to actual play.
+  if(screen==='contract'){
+    contractScreenAt+=dt;
+    if(contractExitAt>=0&&contractScreenAt-contractExitAt>=0.28)finishContractAccept();
+  }
   if(!paused&&!tutorialPanelOpen&&!S.extraLifeOfferOpen&&!newNightCardActive())update(dt);
   draw(); // renders the title screen (our splash/main-menu) on the very first call
 
