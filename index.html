@@ -225,10 +225,16 @@ const WEATHER_INFO={
 // never replacing it, so the two systems can never fight over the same
 // variable's meaning.
 const EVENT_TYPES=['moonlight','fireflyRain','mothSwarm'];
-const EVENT_INFO={
-  moonlight:   {msg:'🌕 Moonlight — rare fireflies grow bold tonight'},
-  fireflyRain: {msg:'🌧️ Firefly Rain — the sky fills with light'},
-  mothSwarm:   {msg:'🦋 Moth Swarm — danger rises, but so does the reward'}
+// D4 (Claude Design spec): replaces the old EVENT_INFO (a single emoji
+// banner string) -- the announcement/chip now need per-event glyph kind,
+// name, placeholder body line, tint RGB and bloom intensity. Keyed by the
+// SAME S.eventActive strings the gameplay side already uses -- no parallel
+// int index introduced. name/line are PLACEHOLDER content per the handoff's
+// own instruction; glyph/rgb/bloom are final.
+const EVENT_UI={
+  moonlight:   {glyph:'moon', name:'MOONLIGHT',     line:'Rare fireflies drift closer, all night',   rgb:'250,246,225', bloom:0.12},
+  fireflyRain: {glyph:'rain', name:'FIREFLY RAIN',  line:'The sky is thick with light, all night',    rgb:'251,210,107', bloom:0.15}, // same RGB as D2_GOLD_RGB -- hardcoded, not referenced, since D2_GOLD_RGB is declared much later in the file and this object literal evaluates immediately (the exact ordering hazard KEYS/JAR_SKINS hit before)
+  mothSwarm:   {glyph:'moth', name:'MOTH SWARM',    line:'More moths, more rares — richer coin',      rgb:'251,181,65',  bloom:0.20}
 };
 
 // ---------- audio ----------
@@ -282,6 +288,10 @@ function sScatter(){ tone(300,0.12,0.04,'triangle',0,240); tone(430,0.1,0.03,'tr
 function sShyFlee(){ tone(700,0.15,0.03,'sine',0,900); }
 function sMagnet(){ [660,830,990,1320].forEach((f,i)=>tone(f,0.3,0.08,'triangle',i*0.07)); }
 function sOver(){ tone(392,1.6,0.08,'sine'); tone(294,1.8,0.07,'sine',0.15); }
+// D4: the event announcement's one-shot chime -- rarer and quieter than
+// sDeliver()/sMilestone() (max once per night, and most nights don't even
+// have an event), same soft register as the D1 goals-card reveal.
+function sEventAnnounce(){ tone(720,1.0,0.05,'sine'); tone(540,1.2,0.03,'sine',0.12); }
 function sCricket(){ const base=rand(4100,4500); for(let i=0;i<4;i++)tone(base,0.03,0.012,'sine',i*0.055); }
 function sOwl(){ tone(340,0.5,0.03,'sine',0,300); tone(330,0.7,0.03,'sine',0.65,290); }
 function sFirework(){ tone(rand(180,260),0.5,0.05,'triangle',0,90); }
@@ -1737,7 +1747,11 @@ const NIGHT_EVENT_CHANCE=0.35;
 function generateNightEvent(){
   if(rand(0,1)<NIGHT_EVENT_CHANCE){
     S.eventActive=EVENT_TYPES[Math.floor(rand(0,EVENT_TYPES.length))];
-    S.eventBannerT=4.5; S.eventMsg=EVENT_INFO[S.eventActive].msg;
+    // D4: the announcement itself is no longer armed here -- it's driven
+    // entirely by S.isNewNight (already correctly set by
+    // ensureNightObjectives(), which always runs before this) plus
+    // S.newNightT, see eventAnnounceElapsed(). Genuinely new night ==
+    // S.isNewNight true == the announcement will play; nothing else to set.
     // Recorded the moment it's rolled, with its own save call -- mirrors
     // objectivesCompleted's own discipline (saved at the moment something
     // real happens, not merely relying on continueFromOver()'s earlier
@@ -1747,17 +1761,18 @@ function generateNightEvent(){
     if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens})); }catch(e){} }
     saveProgress();
   } else {
-    S.eventActive=null; S.eventBannerT=0; S.eventMsg='';
+    S.eventActive=null;
   }
 }
 function ensureNightEvent(){
-  if(!upgrades.tutorialDone){ S.eventActive=null; S.eventBannerT=0; S.eventMsg=''; return; } // tutorial stays completely event-free, same as objectives
+  if(!upgrades.tutorialDone){ S.eventActive=null; return; } // tutorial stays completely event-free, same as objectives
   if(cachedNightEventFor===nightNumber){
+    // Restarting the SAME night restores the SAME event (no reroll) but --
+    // since S.isNewNight is already false for a restart by the time this
+    // runs -- does NOT replay the announcement, per eventAnnounceElapsed()'s
+    // own gate. The chip still shows immediately (the event IS active),
+    // just without the flight-in; see drawEventChip()'s own comment.
     S.eventActive=cachedNightEvent;
-    // Restarting the SAME night restores the SAME event (no reroll) but
-    // does NOT replay the announcement banner -- that's a one-time "the
-    // night begins" cue, not a persistent readout re-shown on every retry.
-    S.eventBannerT=0; S.eventMsg='';
   } else {
     generateNightEvent();
     cachedNightEventFor=nightNumber;
@@ -2632,12 +2647,13 @@ function reset(){
     // treatment -- capMsg/capMsgT themselves are unchanged, still the same
     // one shared slot, same "only one message at a time" rule.
     capMsgKind:'generic', capMsgData:null,
-    // Lumora 2.0 Phase 4: eventBannerT/eventMsg is a DEDICATED slot, not a
-    // reuse of S.weatherBannerT/S.capMsgT -- a Night Event is announced
-    // exactly once, at the moment the night begins (see ensureNightEvent()),
-    // and must not be silently clobbered by (or clobber) an unrelated
-    // weather roll or milestone banner landing in the same window.
-    eventBannerT:0, eventMsg:'',
+    // D4 (Claude Design spec): eventBannerT/eventMsg (a generic banner-slot
+    // timer/string) are RETIRED -- the announcement is now its own field
+    // composite (drawEventAnnouncement()), timed off S.newNightT (see
+    // eventAnnounceElapsed()) rather than its own countdown, so there is no
+    // separate timer field to carry any more. eventAnnounceFired guards the
+    // one-shot chime the same way S.newNightMotesFired guards D1's mote burst.
+    eventAnnounceFired:false,
     flies:[], moths:[], magnet:null, parts:[], sparks:[], fireworks:[], balloons:[], deliverWaves:[],
     jar:{x:W/2,y:H-320,tx:W/2,ty:H-320,px:W/2,py:H-320,spd:0,pulse:0,wob:0},
     carried:[], restT:0, cap:jarCapacityForRun(), capMsg:'', capMsgT:0, wasDelivering:false, batchPerfect:false,
@@ -3798,7 +3814,6 @@ function update(dt){
     }
   }
   if(S.weatherBannerT>0)S.weatherBannerT=Math.max(0,S.weatherBannerT-dt);
-  if(S.eventBannerT>0)S.eventBannerT=Math.max(0,S.eventBannerT-dt);
   if(S.score>=30)S.constA=Math.min(1,S.constA+dt*0.15); // 100->30, same reasoning as the shooting-star threshold above
   LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr)S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
   // milestone "awaken" fades — cat/windmill used to pop in instantly at their
@@ -5432,17 +5447,18 @@ function drawHUD(){
   // under the pause button at ×10+ (see drawChainHUD() in the D2 rendering
   // section, right after drawFullJarAlert()).
   drawChainHUD();
+  drawEventChip(); // D4: persistent active-event chip -- hides itself (no event, or S.over), same discipline as the D3 contract chip
+  drawEventAnnouncement(); // D4: the once-a-night reveal composite, own field position -- draws regardless of the hint chain below
   if(S.magnetT>0)banner('✨ glow magnet '+Math.ceil(S.magnetT)+'s',148,'#fff3cf',0.85);
-  if(S.deliverExplainT>0)banner('jar\'s empty — go catch more fireflies!',96,'#ffe9b8',Math.min(1,S.deliverExplainT));
+  // D4 (Claude Design spec, decision 1): the event announcement claims the
+  // field for its own ~3.9s and SUPPRESSES the entire shared hint chain
+  // below for that window (not merely one more entry racing for the slot)
+  // -- the same courtesy D1's goals card already takes. The old single-line
+  // banner (S.eventBannerT/eventMsg, '#e9c8ff') this replaced is retired.
+  if(eventAnnounceActive()){
+    // suppressed -- nothing in the shared slot this frame
+  } else if(S.deliverExplainT>0)banner('jar\'s empty — go catch more fireflies!',96,'#ffe9b8',Math.min(1,S.deliverExplainT));
   else if(S.missHintT>0)banner('a firefly drifted away — don\'t keep them waiting',96,'#f2b98e',Math.min(1,S.missHintT));
-  // Lumora 2.0 Phase 4: a Night Event's own announcement -- own dedicated
-  // slot (S.eventBannerT/eventMsg), so it can't be clobbered by (or
-  // clobber) capMsg/weatherBannerT. Placed above bloomBanner/weather/hints
-  // so a special night is genuinely hard to miss right when it begins,
-  // but below the two immediate contextual hints just above (those are
-  // tutorial-only anyway -- see missHintShown/refillHintShown's own
-  // "first round only" comments -- so real collisions are rare).
-  else if(S.eventBannerT>0)banner(S.eventMsg,96,'#e9c8ff',Math.min(1,S.eventBannerT));
   else if(S.bloomBanner>0)banner('a firefly bloom!',96,'#ffe9b8',S.bloomBanner);
   else if(S.mothFlash>0)banner('a moth startled your firefly!',96,'#dcb0d0',S.mothFlash);
   else if(jarNearAnyMoth())banner('⚠ moth nearby — keep your jar away',96,'#f2c199',0.75+0.2*Math.sin(S.t*3));
@@ -6156,6 +6172,154 @@ function drawContractResultRow(panelR,hasObjectives){
   try{ ctx.letterSpacing='0px'; }catch(e){}
   ctx.textAlign='right'; ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.95);
   ctx.fillText(c.tokenReward?'✦ TOKEN':('+'+contractPayoutCoins()),panelR.x+panelR.w-18,valueY);
+}
+
+// ---------- Lumora 2.0 D4 (Claude Design spec): Night Event UI ----------
+// Like D2/D3's own rendering, ported function-for-function where the
+// numbers were genuinely new work. The handoff itself flags the one thing
+// that made this phase different from D1-D3: the PLAN assumed an event has
+// a visible duration you could count down ("MOONLIGHT 08s") and a distinct
+// ending ("MOONLIGHT COMPLETE") -- the real system does neither. An event
+// is rolled once in reset() and holds the WHOLE night; there is no timer,
+// no expiry, no lump-sum reward to reveal (Moth Swarm's x1.2 is a silent,
+// continuous per-delivery multiplier, already folded into nightEventCoinMult()
+// and every coin figure the player already sees). So: no countdown, no
+// progress ring, no "ending" moment -- exactly as the handoff insists.
+//
+// t0 (when the announcement starts) is 400ms after the D1 goals card's own
+// dismissal keyframe (4.30), i.e. S.newNightT===4.70 -- reusing that
+// EXISTING clock rather than adding a new timestamp field, since it already
+// counts up continuously from reset() and never resets until the next one.
+const EVENT_ANNOUNCE_T0=4.70;
+function eventAnnounceElapsed(){ return S.newNightT-EVENT_ANNOUNCE_T0; }
+// Active precisely while the composite OR its flight-to-chip is visible.
+// Gated on S.isNewNight (already the exact "this is a genuine new night,
+// not a restart" signal ensureNightObjectives() sets) -- a restart
+// restores the SAME event but must NOT replay the announcement, per
+// ensureNightEvent()'s own comment. Also used by drawHUD() to suppress the
+// shared hint slot for this same window (decision 1 in the handoff).
+function eventAnnounceActive(){
+  if(!S.eventActive||!S.isNewNight)return false;
+  const t=eventAnnounceElapsed();
+  return t>=0&&t<3.92;
+}
+function d4RainGlyph(cx,cy,r,col,blur){
+  ctx.save(); if(blur){ ctx.shadowColor=col; ctx.shadowBlur=blur; }
+  const off=[[-0.66,-0.46,0.78],[0,-0.80,1.06],[0.66,-0.30,0.70]];
+  ctx.lineCap='round'; ctx.lineWidth=Math.max(0.9,r*0.15); ctx.strokeStyle=col;
+  off.forEach(o=>{
+    const x=cx+o[0]*r, y=cy+o[1]*r, ex=x-r*0.10, ey=y+o[2]*r;
+    ctx.save(); ctx.globalAlpha=0.5;
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(ex,ey); ctx.stroke(); ctx.restore();
+    ctx.beginPath(); ctx.arc(ex,ey,r*0.19,0,6.28); ctx.fillStyle=col; ctx.fill();
+  });
+  ctx.restore();
+}
+// crescent/moth are D1's and D3's own existing glyphs, called directly per
+// the handoff's own instruction -- rainGlyph (above) is D4's only new one.
+function eventGlyph(kind,cx,cy,r,col,blur,carve){
+  if(kind==='moon')d3CrescentGlyph(cx,cy,r,col,carve);
+  else if(kind==='rain')d4RainGlyph(cx,cy,r,col,blur);
+  else d3MothGlyph(cx,cy,r,col,blur);
+}
+const EVENT_CHIP_RIGHT=526, EVENT_CHIP_Y=208, EVENT_CHIP_H=30; // right edge mirrors D2's chain pill; same row as D3's chip, opposite column
+function eventChipMetrics(){
+  const e=EVENT_UI[S.eventActive];
+  ctx.font='600 9.5px Georgia,serif'; try{ ctx.letterSpacing='1.2px'; }catch(err){}
+  const lw=ctx.measureText(e.name).width;
+  try{ ctx.letterSpacing='0px'; }catch(err){}
+  const w=Math.round(13+13+8+lw+13);
+  return {e,lw,w,x:EVENT_CHIP_RIGHT-w};
+}
+// D4 (E3): persistent, ambient, not tappable -- identical fill/border/
+// radius/label styling to D3's contract chip (deliberately: "a fact, not
+// an event," per the handoff's own decision 4). Zero draw calls with no
+// event active, or once Night Complete has its own summary.
+// Deviation from a literal "chip only ever enters via the announcement's
+// flight" (the handoff's own stated rule): on a RESTART of the same night,
+// S.isNewNight is false so the announcement never replays, but the event
+// itself is still genuinely active -- the chip must still show (there is
+// no state where an event is active and the player sees no indicator of
+// it at all), just without a flight-in. Documented here since the handoff
+// itself doesn't anticipate the restart case explicitly.
+function drawEventChip(){
+  if(!S.eventActive||S.over)return;
+  let alpha=1;
+  if(S.isNewNight){
+    const t=eventAnnounceElapsed();
+    if(t<3.62)return; // the announcement's own flight hasn't landed yet -- see drawEventAnnouncement()
+    alpha=clamp((t-3.62)/0.30,0,1);
+  }
+  const m=eventChipMetrics();
+  ctx.save(); ctx.globalAlpha=alpha;
+  ctx.beginPath(); ctx.roundRect(m.x,EVENT_CHIP_Y,m.w,EVENT_CHIP_H,EVENT_CHIP_H/2);
+  ctx.fillStyle='rgba(25,33,67,0.55)'; ctx.fill();
+  ctx.strokeStyle=d2haze(0.14); ctx.lineWidth=1; ctx.stroke();
+  eventGlyph(m.e.glyph,m.x+19.5,EVENT_CHIP_Y+15,6.5,'rgba('+m.e.rgb+','+(S.eventActive==='mothSwarm'?0.88:0.78)+')',0,'rgba(10,13,33,0.92)');
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 9.5px Georgia,serif'; try{ ctx.letterSpacing='1.2px'; }catch(err){}
+  ctx.fillStyle=d2haze(0.62);
+  ctx.fillText(m.e.name,m.x+34,EVENT_CHIP_Y+19);
+  try{ ctx.letterSpacing='0px'; }catch(err){}
+  ctx.restore();
+}
+// D4 (E1): the once-a-night reveal -- its own field composite (270,306-444),
+// NOT the shared hint slot (see drawHUD()'s own suppression guard). Never a
+// modal: no hit-test, doesn't pause, taps pass through to the field.
+function drawEventAnnouncement(){
+  if(!S.eventActive||!S.isNewNight)return;
+  const t=eventAnnounceElapsed();
+  if(t<0||t>=3.92)return;
+  const e=EVENT_UI[S.eventActive];
+  if(!S.eventAnnounceFired){ S.eventAnnounceFired=true; sEventAnnounce(); }
+  const tint=a=>'rgba('+e.rgb+','+a+')';
+  const inA=easeOutCubic(clamp(t/0.26,0,1));
+  const outA=clamp((t-3.20)/0.24,0,1);
+  const base=clamp(inA-outA,0,1);
+  const flightP=clamp((t-3.44)/0.42,0,1);
+  if(base>0){
+    ctx.save(); ctx.globalAlpha=base;
+    d2bloom(270,336,150,e.rgb,e.bloom*easeOutCubic(clamp(t/0.32,0,1)));
+    const ruleW=lerp(0,132,easeOutCubic(clamp((t-0.12)/0.22,0,1)));
+    if(ruleW>0){
+      const rg=ctx.createLinearGradient(270-ruleW/2,0,270+ruleW/2,0);
+      rg.addColorStop(0,'rgba(174,184,203,0)'); rg.addColorStop(0.5,d2haze(0.26)); rg.addColorStop(1,'rgba(174,184,203,0)');
+      ctx.fillStyle=rg; ctx.fillRect(270-ruleW/2,382,ruleW,1);
+    }
+    const np=easeOutCubic(clamp((t-0.18)/0.24,0,1));
+    if(np>0){
+      ctx.save(); ctx.globalAlpha=base*np;
+      ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      ctx.font='600 13px Georgia,serif'; try{ ctx.letterSpacing='3px'; }catch(err){}
+      ctx.shadowColor=tint(0.30); ctx.shadowBlur=14; ctx.fillStyle=tint(0.95);
+      ctx.fillText(e.name,270,408+lerp(5,0,np));
+      try{ ctx.letterSpacing='0px'; }catch(err){}
+      ctx.restore();
+    }
+    const lp=easeOutCubic(clamp((t-0.26)/0.26,0,1));
+    if(lp>0){
+      ctx.save(); ctx.globalAlpha=base*lp;
+      ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      ctx.font='italic 500 14.5px Georgia,serif'; ctx.shadowColor=d2gold(0.18); ctx.shadowBlur=12; ctx.fillStyle='rgba(230,217,188,0.90)';
+      ctx.fillText(e.line,270,436);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+  if(flightP>=1)return;
+  const m=eventChipMetrics();
+  const k=easeInOutCubic(flightP);
+  const cx=lerp(270,m.x+19.5,k), cy=lerp(336,EVENT_CHIP_Y+15,k);
+  const entryScale=easeOutCubic(clamp(t/0.26,0,1));
+  const sc=lerp(1,6.5/14,k)*lerp(0.82,1,entryScale);
+  ctx.save(); ctx.globalAlpha=entryScale;
+  if(flightP>0)d2bloom(cx,cy,34,e.rgb,0.26*Math.sin(Math.PI*flightP));
+  if(flightP<0.02){
+    ctx.beginPath(); ctx.arc(cx,cy,28*sc,0,6.28); ctx.fillStyle='rgba(10,13,33,0.92)'; ctx.fill();
+    ctx.lineWidth=1; ctx.strokeStyle=tint(0.28); ctx.stroke();
+  }
+  eventGlyph(e.glyph,cx,cy,14*sc,tint(0.95),12,'rgba(10,13,33,0.92)');
+  ctx.restore();
 }
 
 // Night Complete tips: one shown per round-end, picked at random (see the
