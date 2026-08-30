@@ -1786,6 +1786,17 @@ function ensureNightEvent(){
 // shared/LOCKED coinMultiplierForRun() -- kept completely separate so a
 // Night Event can never quietly touch the persistent Coin Value economy.
 function nightEventCoinMult(){ return S.eventActive==='mothSwarm'?1.2:1; }
+// D5 (Claude Design spec): the EVENT row's own payout, derived the exact
+// same way contractPayoutCoins() already is -- algebraic backout from
+// S.coinsEarnedThisNight, never a second tracked/granted value. Moth Swarm
+// is the only event with a coin effect at all; Moonlight/Firefly Rain
+// correctly return 0 here, which the row itself renders as an em dash,
+// never a fabricated number.
+function eventPayoutCoins(){
+  const mult=nightEventCoinMult();
+  if(mult<=1)return 0;
+  return Math.round(S.coinsEarnedThisNight*(1-1/mult));
+}
 
 // ---------- Lumora 2.0 Phase 9: Weekly Progression ----------
 // "Glowkeeper Journal" weekly checklist -- reuses the daily-quest system's
@@ -2044,6 +2055,7 @@ function advanceChain(){
     if(newW!==priorW){ S.d2ChainWidthFrom=priorW; S.d2ChainWidthT=0.18; }
   }
   if(S.chain>=3)S.d2ChainLastN=S.chain; // held for the exit/break fade after a miss zeroes S.chain
+  if(S.chain>S.bestChainThisRound)S.bestChainThisRound=S.chain; // D5: round-scoped peak, survives the chain itself resetting to 0 on a miss
   const m=CHAIN_MILESTONES.find(m=>m.n===S.chain);
   if(m){
     coins+=m.reward;
@@ -2108,11 +2120,15 @@ function rarestCarriedType(){
 // so a test can assert on it without re-deriving the math.
 function resolveDeliveryBonuses(){
   let bonus=0; const rows=[];
-  if(S.batchPerfect){ bonus+=10; rows.push({kind:'perfect',label:'perfect delivery',value:'+10'}); }
+  // D5: round-scoped OCCURRENCE counts (how many trips qualified), not
+  // firefly counts -- incremented here, before anything about this trip's
+  // bonus is otherwise discarded, per direct spec ("counts, not booleans").
+  if(S.batchPerfect){ bonus+=10; rows.push({kind:'perfect',label:'perfect delivery',value:'+10'}); S.perfectDeliveryCount++; }
   if(S.batchRareCount>=2){
     const r=5*S.batchRareCount; bonus+=r;
     rows.push({kind:'rare',label:'rare delivery ×'+S.batchRareCount,value:'+'+r});
     S.d2DeliveryTintRGB=S.batchRarestType?toRgbTriple(TYPES[S.batchRarestType].glow):D2_COOL_RGB;
+    S.rareDeliveryCount++;
   }
   if(bonus>0){
     coins+=bonus;
@@ -2662,6 +2678,14 @@ function reset(){
     // at the moment the CURRENT delivery trip began (see batchRareCount's own
     // assignment next to S.batchPerfect's, for Rare Delivery -- resolveDeliveryBonuses()).
     chain:0, batchRareCount:0, batchRarestType:null,
+    // D5 (Claude Design spec): the BONUSES row on Night Complete needs
+    // round-scoped facts that were never tracked before -- S.chain itself
+    // keeps resetting to 0 on every miss and has no memory of its own
+    // peak, and each delivery trip's Perfect/Rare bonus was resolved and
+    // discarded immediately (see resolveDeliveryBonuses()). These three
+    // are display-only counters, read fresh by the Night Complete row,
+    // never fed back into any gameplay decision.
+    bestChainThisRound:0, perfectDeliveryCount:0, rareDeliveryCount:0,
     // D2 (Claude Design spec): Glow Chain HUD pill + delivery composite +
     // rare-carry ring state -- see drawChainHUD()/drawDeliveryComposite()/
     // drawJarRarity() in the rendering section. Every "*T" is a countdown
@@ -6141,37 +6165,113 @@ function drawContractChip(){
   ctx.restore();
 }
 
-// ---- C5: one row appended to the Night Complete panel, after whichever
-// section currently ends last (the objective bonus row, or the 3 stat rows
-// if tonight had none). Static, drawn at the panel's own shared alpha
-// (drawOver()'s own single top-level S.overT fade) -- a deliberate
-// simplification against the mockup's own bespoke fade+count-up timer:
-// every OTHER row on this exact screen (including the pre-existing
+// ---- C5/D5: the tail rows appended to the Night Complete panel, after the
+// objective bonus row (or the 3 stat rows if tonight had none). Static,
+// drawn at the panel's own shared alpha (drawOver()'s own single top-level
+// S.overT fade) -- a deliberate simplification against the D5 handoff's own
+// bespoke per-row reveal/count-up timers (1.52-2.42s staggered): every
+// OTHER row on this exact screen (the stat rows, the objective rows, the
 // OBJECTIVE BONUS figure) is already a plain, always-rendered value
-// computed fresh each frame, never its own tween, so a count-up here would
-// be the one inconsistent exception rather than matching its neighbours.
-function drawContractResultRow(panelR,hasObjectives){
-  if(activeContract<0)return; // absent: nothing below moves, no divider, no row
+// computed fresh each frame, never its own tween -- adding staggered
+// reveals to JUST these new rows would be the one inconsistent exception
+// rather than matching every sibling row already on this screen.
+//
+// D5 (Claude Design spec): CONTRACT/EVENT/BONUS now stack in this fixed
+// order, sharing ONE hairline -- an absent row costs nothing, the next
+// present row simply lands in its slot. Each row's `b` is the glyph's own
+// cy (panel-y-relative); label/value baselines are always b+4/b+5, matching
+// the existing CONTRACT row's own +4 relationship exactly.
+function nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus){
+  let base=hasObjectives?306:164;
+  const rows=[];
+  if(hasContract){ rows.push({kind:'contract',b:base}); base+=26; }
+  if(hasEvent){ rows.push({kind:'event',b:base}); base+=26; }
+  if(hasBonus){ rows.push({kind:'bonus',b:base}); base+=26; }
+  return rows;
+}
+function drawContractResultRow(panelR,b){
   const c=CONTRACTS[activeContract];
-  const hairY=hasObjectives?panelR.y+282:panelR.y+140;
-  const cy=hasObjectives?panelR.y+306:panelR.y+164;
-  const labelY=hasObjectives?panelR.y+310:panelR.y+168;
-  const valueY=hasObjectives?panelR.y+311:panelR.y+169;
-  ctx.strokeStyle=d2haze(0.16); ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(panelR.x+1,hairY); ctx.lineTo(panelR.x+panelR.w-1,hairY); ctx.stroke();
-  contractGlyph(c.glyph,panelR.x+22,cy,6.5,d2gold(0.85),6,'rgba(21,28,58,0.98)');
+  contractGlyph(c.glyph,panelR.x+22,panelR.y+b,6.5,d2gold(0.85),6,'rgba(21,28,58,0.98)');
   ctx.textAlign='left'; ctx.textBaseline='middle';
   ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
   ctx.fillStyle='rgba(230,217,188,0.90)';
   // c.name (short: "COLLECTOR"), not c.full ("COLLECTOR'S NIGHT") -- the
-  // handoff's own reference used c.full here, but that genuinely overflows
-  // into the value column at this panel width (measured live: real bug,
-  // not a placeholder-content quirk). Matches the chip's own choice of the
-  // short name for exactly the same reason.
-  ctx.fillText('CONTRACT · '+c.name,panelR.x+40,labelY);
+  // D3 handoff's own reference used c.full here, but that genuinely
+  // overflows into the value column at this panel width (measured live: a
+  // real bug, not a placeholder-content quirk). Matches the chip's own
+  // choice of the short name for exactly the same reason.
+  ctx.fillText('CONTRACT · '+c.name,panelR.x+40,panelR.y+b+4);
   try{ ctx.letterSpacing='0px'; }catch(e){}
   ctx.textAlign='right'; ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.95);
-  ctx.fillText(c.tokenReward?'✦ TOKEN':('+'+contractPayoutCoins()),panelR.x+panelR.w-18,valueY);
+  ctx.fillText(c.tokenReward?'✦ TOKEN':('+'+contractPayoutCoins()),panelR.x+panelR.w-18,panelR.y+b+5);
+}
+// D5 (R2): same grammar as the contract row above, exactly -- one glyph
+// dispatcher, one draw shape. The figure is derived (eventPayoutCoins(),
+// the same algebraic backout contractPayoutCoins() uses) and display-only;
+// Moonlight/Firefly Rain have no coin effect at all, so they get an em
+// dash, never a fabricated number. This row is D4's own "event ending" --
+// nothing else is drawn anywhere for that.
+function drawEventResultRow(panelR,b){
+  const e=EVENT_UI[S.eventActive];
+  eventGlyph(e.glyph,panelR.x+22,panelR.y+b,6.5,'rgba('+e.rgb+',0.88)',6,'rgba(21,28,58,0.98)');
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e2){}
+  ctx.fillStyle='rgba(230,217,188,0.90)';
+  ctx.fillText('EVENT · '+e.name,panelR.x+40,panelR.y+b+4);
+  try{ ctx.letterSpacing='0px'; }catch(e2){}
+  ctx.textAlign='right'; ctx.font='600 15px Georgia,serif';
+  const payout=eventPayoutCoins();
+  if(payout>0){ ctx.fillStyle=d2gold(0.95); ctx.fillText('+'+payout,panelR.x+panelR.w-18,panelR.y+b+5); }
+  else{ ctx.fillStyle=d2haze(0.45); ctx.fillText('—',panelR.x+panelR.w-18,panelR.y+b+5); }
+}
+// D5 (R3): chain left (D2's own tier glyph/colour, so the row agrees with
+// whatever the player watched escalate mid-round), delivery marks right --
+// each independently present, no heading (the marks already self-identify).
+// Floor: chain only shows at >=3, matching D2's own live-readout floor, so
+// this panel never reports a "chain" the in-round pill never showed.
+const BONUS_ROW_CHAIN_FLOOR=3;
+function nightCompleteHasBonusRow(){
+  return S.bestChainThisRound>=BONUS_ROW_CHAIN_FLOOR||S.perfectDeliveryCount>0||S.rareDeliveryCount>0;
+}
+function drawBonusRow(panelR,b){
+  const L=panelR.x+22, R=panelR.x+panelR.w-18, ch=S.bestChainThisRound, pf=S.perfectDeliveryCount, ra=S.rareDeliveryCount;
+  const T=d2TierOf(ch);
+  const marks=[];
+  if(pf>0)marks.push({g:'star',s:pf>1?'PERFECT ×'+pf:'PERFECT'});
+  if(ra>0)marks.push({g:'mote',s:ra>1?'RARE ×'+ra:'RARE'});
+  ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
+  let word=ch>=BONUS_ROW_CHAIN_FLOOR?'BEST CHAIN':'';
+  const num=ch>=BONUS_ROW_CHAIN_FLOOR?'×'+ch:'';
+  const wordW=()=>{ const w=ctx.measureText(word).width; return w; };
+  ctx.font='600 12.5px Georgia,serif'; const numW=ctx.measureText(num).width;
+  const marksW=()=>marks.reduce((s,m)=>{ ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){} return s+15+ctx.measureText(m.s).width+16; },0)-16;
+  ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
+  const lw=()=>word?(wordW()+6+numW):0;
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  if(word&&lw()+20+Math.max(0,marksW())>R-(L+18))word='CHAIN'; // overflow rung 1: drop "BEST "
+  if(ch>=BONUS_ROW_CHAIN_FLOOR){
+    d2TierGlyph(T.glyph,L,panelR.y+b,T.gr,T.gc,T.gb?6:0);
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
+    ctx.fillStyle='rgba(230,217,188,0.9)';
+    ctx.fillText(word,L+18,panelR.y+b+4);
+    const ww=ctx.measureText(word).width;
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    ctx.font='600 12.5px Georgia,serif'; ctx.fillStyle=T.num;
+    ctx.fillText(num,L+18+ww+6,panelR.y+b+4.5);
+  }
+  let x=R-Math.max(0,marksW());
+  marks.forEach(m=>{
+    if(m.g==='star')star4Glyph(x+6,panelR.y+b,5.5,d2cream(0.95),d2gold(0.4),8);
+    else d2RareMote(x+6,panelR.y+b,1.05,1,0,null);
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
+    ctx.fillStyle='rgba(230,217,188,0.88)';
+    ctx.fillText(m.s,x+15,panelR.y+b+4);
+    const mw=ctx.measureText(m.s).width;
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    x+=15+mw+16;
+  });
 }
 
 // ---------- Lumora 2.0 D4 (Claude Design spec): Night Event UI ----------
@@ -6378,15 +6478,18 @@ function drawOver(){
   // existing whitespace per the spec's own "net +18" reasoning applied to
   // this file's real base numbers rather than the spec's screenshot-
   // measured approximation of them).
-  // D3 (C5): when a contract ran this completed night, the CONTRACT RESULT
-  // row (drawContractResultRow(), called below) needs the panel to grow by
-  // the same +46 in both the with- and without-objectives cases -- folded
-  // directly into objExtra so panelR.h absorbs it once, correctly, for
-  // both (150+0+46=196 without objectives; 150+130+46=326 with, matching
-  // the handoff's own NP3.h=326 exactly).
-  const contractExtra=activeContract>=0?46:0;
-  const objExtra=(hasObjectives?130:0)+contractExtra;
-  const panelR={x:W/2-160,y:H*0.34,w:320,h:150+objExtra};
+  // D5 (Claude Design spec): CONTRACT/EVENT/BONUSES now stack as one
+  // unified tail -- nightCompleteTailRows() decides which rows exist and
+  // where, each present row costing +26 after whichever came before it
+  // (the contract row's own historical +46 total contribution is already
+  // baked into its py+306/py+164 anchor, not a special case here). An
+  // absent row costs nothing; the next present row simply lands in its slot.
+  const hasContract=activeContract>=0;
+  const hasEvent=!!S.eventActive;
+  const hasBonus=nightCompleteHasBonusRow();
+  const tailRows=nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus);
+  const panelH=tailRows.length?(tailRows[tailRows.length-1].b+20):(hasObjectives?280:150);
+  const panelR={x:W/2-160,y:H*0.34,w:320,h:panelH};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
   rows.forEach((row,i)=>{
     const ry=panelR.y+30+i*44;
@@ -6438,7 +6541,18 @@ function drawOver(){
       ctx.fillText('+'+bonus,panelR.x+panelR.w-20,boy);
     }
   }
-  drawContractResultRow(panelR,hasObjectives); // D3 (C5): no-ops entirely if no contract ran this night
+  // D5: one shared hairline for the whole tail (no second divider per row),
+  // then each present row in its own slot.
+  if(tailRows.length){
+    const hairY=panelR.y+tailRows[0].b-24;
+    ctx.strokeStyle=d2haze(0.16); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(panelR.x+1,hairY); ctx.lineTo(panelR.x+panelR.w-1,hairY); ctx.stroke();
+    tailRows.forEach(row=>{
+      if(row.kind==='contract')drawContractResultRow(panelR,row.b);
+      else if(row.kind==='event')drawEventResultRow(panelR,row.b);
+      else drawBonusRow(panelR,row.b);
+    });
+  }
 
   // Lumora 2.0 Phase 1: playBtn/SHOP_BTN_OVER/DOUBLE_COINS_BTN are shared,
   // module-level objects also read by the pointerdown hit-test below (same
@@ -6449,33 +6563,21 @@ function drawOver(){
   // single-threaded; a pointerdown is only ever handled between frames).
   // Nothing outside drawOver()/this screen's own pointerdown branch ever
   // reads these three objects (verified), so no other screen is affected.
-  // D1: shifted by the same +14 the taller objective rows (objExtra
-  // 116->130) added, keeping the original proportional gaps between these
-  // three and the panel bottom.
-  // D3 (C5 reflow): both buttons take the same contractExtra shift as the
-  // panel itself grew by. DOUBLE_COINS_BTN is the one exception -- WITH
-  // objectives it's explicitly clamped to its original 910 (a straight +46
-  // there would put it at 956, clipping its own content off a 960 frame);
-  // WITHOUT objectives it has 130px of headroom by construction, so the
-  // full shift is safe.
-  playBtn.y=(hasObjectives?642:512)+contractExtra;
-  SHOP_BTN_OVER.y=(hasObjectives?697:567)+contractExtra;
-  DOUBLE_COINS_BTN.y=hasObjectives?910:(830+contractExtra);
-  // hasObjectives: tipY already inherits the shift via SHOP_BTN_OVER.y
-  // above -- adding contractExtra again here would double it. No-objectives:
-  // tipY is an independent H*0.66 constant with no relation to
-  // SHOP_BTN_OVER.y, so it needs the explicit add or it would end up
-  // overlapping SHOP_BTN_OVER's own new (lower) position.
-  // Bug found live (not part of D3's own spec): the original +67 offset
-  // left only ~30px before the Double-the-Glow eyebrow (DOUBLE_COINS_BTN.y-54,
-  // itself deliberately fixed/unshifted) once a contract was active --
-  // every real NIGHT_TIPS string wraps to exactly 2 lines at this width
-  // (confirmed against all 8, live), and a 2-line tip's own rendered
-  // height already exceeded that budget, overlapping the ad copy below it.
-  // +52 (real ctx.measureText-verified) restores a genuine ~12px clearance
-  // in the tightest case (objectives + contract both present) without
-  // touching the no-objectives branch, which already had ample room.
-  const tipY=hasObjectives?(SHOP_BTN_OVER.y+52):(H*0.66+contractExtra);
+  // D5: playBtn/SHOP_BTN_OVER are now derived from the panel's own real
+  // bottom edge by one formula, replacing the old hand-maintained
+  // hasObjectives/contractExtra branch table -- verified to reproduce
+  // every one of the old shipped values exactly (511.4≈512, 641.4≈642,
+  // 687.4≈688, 696.4≈697, 742.4≈743) before trusting it going forward.
+  const panelBottom=panelR.y+panelH;
+  playBtn.y=panelBottom+35;
+  SHOP_BTN_OVER.y=playBtn.y+55;
+  // DOUBLE_COINS_BTN is the one anchor that does NOT follow the panel --
+  // WITH objectives it stays clamped at its original 910 (a straight
+  // shift would put it past y956, clipping its own content off a 960
+  // frame); WITHOUT objectives it still has headroom, so it takes
+  // whatever the tail added (only ever the bonus row in practice, since a
+  // no-objectives night is tutorial-only and never has a contract/event).
+  DOUBLE_COINS_BTN.y=hasObjectives?910:(830+(panelH-150));
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
@@ -6486,28 +6588,42 @@ function drawOver(){
   // variant), so it actually reads as a tappable button and its hit-test
   // (inRect, in the pointerdown handler) covers exactly what's drawn.
   lumButton(SHOP_BTN_OVER,'Visit the Workshop','outline');
-  // Night Complete tips: one line of actionable advice, picked once at the
-  // moment the round ended (see S.tip's assignment next to S.misses>=5
-  // above), not re-rolled every frame. Sits well clear of SHOP_BTN_OVER's
-  // own hit region -- this is display-only text, no hit-test of its own.
-  if(S.tip){
-    ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-    lumEyebrow('✦ Tip ✦',W/2,tipY,'center');
-    ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
-    wrapText(S.tip,W/2,tipY+16,340,17,'center');
+  // D5 (R4): the footer re-budget. Two copy lines are retired outright
+  // (the ad's own restated-the-button copy line, and the tip's "✦ TIP ✦"
+  // eyebrow -- two centred italic lines under the workshop button already
+  // read unmistakably as a tip without it) freeing exactly the 40px the
+  // two new tail rows need. The ad's own eyebrow moves from -54 to -34 to
+  // fill the vacated baseline; DOUBLE_COINS_BTN itself never moves.
+  // Reads S.coinsEarnedThisNight (frozen in finalizeNight()), NOT a live
+  // coins-coinsAtRoundStart recompute -- see requestDoubleNightCoins() for
+  // why a live value would double-count a Workshop favor claimed mid-Night-
+  // Complete.
+  const adEye=DOUBLE_COINS_BTN.y-34;
+  // The tip yields when the band between the workshop button and the ad
+  // eyebrow drops under 40px -- which only happens once BOTH new tail rows
+  // are present. A single new row still leaves comfortable room and the
+  // tip stays, re-centred on whatever band remains (not just shifted by a
+  // fixed offset) -- a measured predicate, not a case list.
+  const tipBandTop=SHOP_BTN_OVER.y+34, tipBandBot=adEye-18, tipBand=tipBandBot-tipBandTop;
+  if(S.tip&&tipBand>=40){
+    const mid=(tipBandTop+tipBandBot)/2;
+    ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    // NIGHT_TIPS' own 8 strings all wrap to exactly 2 lines at this 340px
+    // width (verified live with real ctx.measureText()) -- drawn directly
+    // at fixed +/-9 offsets around the band's own centre rather than
+    // through the shared wrapText() helper, since that helper only knows
+    // how to grow downward from a top baseline, not centre a KNOWN line count.
+    const words=S.tip.split(' '); let line='', lines=[];
+    for(let i=0;i<words.length;i++){ const test=line+words[i]+' '; if(ctx.measureText(test).width>340&&line){ lines.push(line); line=words[i]+' '; } else line=test; }
+    lines.push(line);
+    ctx.fillText(lines[0]||'',W/2,mid-9);
+    if(lines[1])ctx.fillText(lines[1],W/2,mid+9);
   }
   // "Double the Glow" -- hidden entirely during the first-night tutorial,
   // whenever the SDK doesn't offer rewarded ads on this host, or when this
   // night earned nothing worth doubling (never a dead/greyed button for a
   // meaningless 0-coin claim, per direct instruction to prefer hiding it) --
-  // it just doesn't exist there. Restrained footprint: one small eyebrow +
-  // one line of copy (the real, authoritative earned-this-night amount,
-  // never reconstructed from firefly counts) + one pill, sitting well clear
-  // of the tip block above it.
-  // Reads S.coinsEarnedThisNight (frozen in finalizeNight()), NOT a live
-  // coins-coinsAtRoundStart recompute -- see requestDoubleNightCoins() for
-  // why a live value would double-count a Workshop favor claimed mid-Night-
-  // Complete.
+  // it just doesn't exist there.
   {
     const nightEarned=S.coinsEarnedThisNight;
     if(upgrades.tutorialDone&&rewardedAdsAvailable()&&nightEarned>0){
@@ -6517,9 +6633,7 @@ function drawOver(){
         ctx.fillText('✦ +'+S.rewardedDoubleCoinsAmount+' coins added ✦',W/2,DOUBLE_COINS_BTN.y);
       } else {
         ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-        lumEyebrow('✦ Double the Glow ✦',W/2,DOUBLE_COINS_BTN.y-54,'center');
-        ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='italic 12px Georgia,serif';
-        ctx.fillText('Watch a short ad to double tonight\'s +'+nightEarned+' coins',W/2,DOUBLE_COINS_BTN.y-34);
+        lumEyebrow('✦ Double the Glow ✦',W/2,adEye,'center');
         ctx.textAlign='center'; ctx.textBaseline='middle';
         lumButton(DOUBLE_COINS_BTN,S.rewardedDoubleCoinsPending?'Watching…':'Watch Ad · 2× Coins','outline',S.rewardedDoubleCoinsPending);
       }
