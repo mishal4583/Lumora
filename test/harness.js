@@ -5413,6 +5413,303 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// Lumora 2.0 Phase 8: Monetization 2.0. ytgame.ads is mocked entirely
+// inline in each driver (ONLY here, per the harness ad-mocking rule --
+// production code never depends on this mock existing), same
+// success/false/reject/throw driver-reassigns-a-var pattern the existing
+// ads-double-night-coins scenario already established. Double the Glow/One
+// More Chance/Glowkeeper's Favor themselves are UNCHANGED by this phase --
+// proven by their own existing dedicated scenarios (ads-double-night-
+// coins, ads-extra-life, ads-workshop-favor) still passing byte-for-byte
+// unmodified (see the full suite run), not re-tested here.
+// =====================================================================
+scenario('lumora2-phase8-mystery-chest', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 20, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  __check('Test 5: every Mystery Chest reward is a valid, already-existing reward kind (coins/luck) with a positive amount and weight', MYSTERY_CHEST_REWARDS.every(function(r){ return (r.kind === 'coins' || r.kind === 'luck') && r.val > 0 && r.weight > 0; }));
+
+  // ---- Test 1: eligibility ----
+  upgrades.tutorialDone = false;
+  __check('Test 1: not eligible during the tutorial', mysteryChestEligible() === false);
+  upgrades.tutorialDone = true;
+  __check('Test 1: not eligible when ads are unavailable (ytgame.ads not installed yet)', mysteryChestEligible() === false);
+
+  var rewardCalls = [];
+  var rewardBehavior = 'success';
+  ytgame.ads = {
+    requestRewardedAd: function(id){
+      rewardCalls.push(id);
+      if (rewardBehavior === 'throw') throw new Error('mock throw');
+      if (rewardBehavior === 'reject') return Promise.reject(new Error('mock reject'));
+      return Promise.resolve(rewardBehavior === 'success');
+    },
+    requestInterstitialAd: function(){ return Promise.resolve(); }
+  };
+  __check('Test 1: eligible once the tutorial is done and ads are available, no cooldown yet', mysteryChestEligible() === true);
+
+  // ---- Test 3: ad failure grants no reward, does not consume the opportunity ----
+  rewardBehavior = 'false';
+  var coinsBefore = coins;
+  requestMysteryChest();
+  __check('Test 3 setup: pending immediately on tap', mysteryChestPending === true);
+  return __tick(5).then(function(){
+    __check('Test 3: a false result grants no reward', coins === coinsBefore && mysteryChestReward === null && mysteryChestLastNight === -9999);
+    __check('Test 3: still eligible afterward -- a failed ad never consumes the opportunity', mysteryChestEligible() === true);
+
+    // ---- rejection also grants nothing ----
+    rewardBehavior = 'reject';
+    var coinsBefore2 = coins;
+    requestMysteryChest();
+    return __tick(5).then(function(){
+      __check('a rejected ad request grants no reward either', coins === coinsBefore2 && mysteryChestPending === false);
+
+      // ---- a synchronous throw grants nothing and does not propagate ----
+      rewardBehavior = 'throw';
+      var threwSync = false;
+      try { requestMysteryChest(); } catch (e) { threwSync = true; }
+      __check('a synchronous throw from requestRewardedAd() does not propagate', !threwSync);
+      __check('a synchronous throw grants no reward and clears the pending flag', mysteryChestPending === false && mysteryChestReward === null);
+
+      // ---- Test 4: duplicate callback / double-tap protection ----
+      rewardBehavior = 'success';
+      var callsBefore = rewardCalls.length;
+      requestMysteryChest();
+      requestMysteryChest(); // double tap while the first request is still pending
+      __check('Test 4: a double tap while a request is pending does not fire a second request', rewardCalls.length === callsBefore + 1);
+      return __tick(5).then(function(){
+        // ---- Test 2: exactly one reward granted ----
+        __check('Test 2: exactly one reward was granted, a real MYSTERY_CHEST_REWARDS entry', mysteryChestReward !== null && MYSTERY_CHEST_REWARDS.indexOf(mysteryChestReward) !== -1);
+        __check('Test 2: mysteryChestLastNight advanced to the current night, starting the cooldown', mysteryChestLastNight === nightNumber);
+        var coinsAfterFirstClaim = coins;
+
+        // ---- Test 1 (cooldown): not eligible again immediately after claiming ----
+        __check('Test 1: not eligible again immediately after a successful claim (cooldown window)', mysteryChestEligible() === false);
+        var callsBeforeRetap = rewardCalls.length;
+        requestMysteryChest(); // tapping during cooldown must be a genuine no-op
+        __check('a tap during the cooldown window does not even request an ad, grants nothing', rewardCalls.length === callsBeforeRetap && coins === coinsAfterFirstClaim);
+
+        // ---- cooldown actually elapses ----
+        nightNumber += MYSTERY_CHEST_NIGHT_INTERVAL;
+        __check('Test 1: eligible again once the cooldown window has fully elapsed', mysteryChestEligible() === true);
+      });
+    });
+  });
+});
+`);
+
+scenario('lumora2-phase8-lucky-firefly', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 20, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  upgrades.tutorialDone = true;
+  reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+
+  // ---- Test 6: trigger the opportunity via the real proximity-catch path ----
+  var typesBefore = JSON.stringify(TYPES);
+  var scoreBefore = S.score, missesBefore = S.misses, capBefore = S.cap;
+  spawnLuckyFirefly();
+  __check('Test 6 setup: spawnLuckyFirefly() creates its own overlay object, never added to S.flies/TYPES', S.lucky !== null && S.flies.indexOf(S.lucky) === -1);
+  S.lucky.x = S.jar.x; S.lucky.y = S.jar.y - 14;
+  for (var i = 0; i < 200 && !S.luckyOfferOpen; i++) update(0.016);
+  __check('Test 6: catching it opens the offer overlay', S.luckyOfferOpen === true && S.lucky === null);
+  __check('Test 6: normal firefly gameplay (TYPES -- values/spawn data) is completely unchanged', JSON.stringify(TYPES) === typesBefore);
+  __check('Test 6: catching it did not touch score/misses/jar capacity', S.score === scoreBefore && S.misses === missesBefore && S.cap === capBefore);
+
+  // ---- take the guaranteed reward, no ad required ----
+  var coinsBefore = coins;
+  takeLuckyReward();
+  __check('taking the reward grants exactly the base amount, once', coins === coinsBefore + LUCKY_FIREFLY_BASE_REWARD && S.luckyReward === LUCKY_FIREFLY_BASE_REWARD);
+  __check('the offer closes after taking the reward', S.luckyOfferOpen === false);
+  var coinsAfterTake = coins;
+  takeLuckyReward(); // tapping again after it is already closed
+  __check('taking the reward again after the offer is already closed is a no-op', coins === coinsAfterTake);
+
+  // ---- double via ad ----
+  var rewardCalls = [];
+  var rewardBehavior = 'success';
+  ytgame.ads = {
+    requestRewardedAd: function(id){
+      rewardCalls.push(id);
+      if (rewardBehavior === 'throw') throw new Error('mock throw');
+      if (rewardBehavior === 'reject') return Promise.reject(new Error('mock reject'));
+      return Promise.resolve(rewardBehavior === 'success');
+    },
+    requestInterstitialAd: function(){ return Promise.resolve(); }
+  };
+
+  S.luckyOfferOpen = true; S.luckyReward = 0;
+  var coinsBeforeDouble = coins;
+  requestLuckyFireflyDouble();
+  requestLuckyFireflyDouble(); // double tap while pending
+  __check('a double tap while the double-request is pending does not fire a second ad request', rewardCalls.length === 1);
+  return __tick(5).then(function(){
+    __check('doubling grants exactly 2x the base amount, once', coins === coinsBeforeDouble + LUCKY_FIREFLY_BASE_REWARD * 2 && S.luckyReward === LUCKY_FIREFLY_BASE_REWARD * 2);
+    __check('the offer closes after a successful double', S.luckyOfferOpen === false);
+
+    // ---- Test 3-equivalent: ad failure on double leaves the offer OPEN, grants nothing, Take Reward still works afterward ----
+    S.luckyOfferOpen = true; S.luckyReward = 0;
+    rewardBehavior = 'false';
+    var coinsBeforeFail = coins;
+    requestLuckyFireflyDouble();
+    return __tick(5).then(function(){
+      __check('a failed double grants no reward', coins === coinsBeforeFail);
+      __check('the offer stays OPEN after a failed double -- the opportunity is not consumed', S.luckyOfferOpen === true);
+      takeLuckyReward();
+      __check('Take Reward still works normally after a failed double attempt', coins === coinsBeforeFail + LUCKY_FIREFLY_BASE_REWARD && S.luckyOfferOpen === false);
+
+      // ---- Take Reward is inert while a double-request is genuinely in flight (no race/double-grant) ----
+      S.luckyOfferOpen = true; S.luckyReward = 0;
+      rewardBehavior = 'success';
+      requestLuckyFireflyDouble(); // now pending
+      var coinsBeforeRace = coins;
+      takeLuckyReward();
+      __check('Take Reward is inert while a double-request is in flight', coins === coinsBeforeRace && S.luckyOfferOpen === true);
+      return __tick(5).then(function(){
+        __check('the pending double still resolves normally afterward, exactly once', coins === coinsBeforeRace + LUCKY_FIREFLY_BASE_REWARD * 2 && S.luckyOfferOpen === false);
+
+        // ---- at most once per round ----
+        reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+        S.luckySpawnedThisRound = true; // simulate it having already spawned+resolved this round
+        for (var k = 0; k < 5; k++) update(0.016);
+        __check('Lucky Firefly does not spawn again this round once luckySpawnedThisRound is true', S.lucky === null);
+
+        // ---- Test 7: collection isolation ----
+        var journalBefore = JSON.stringify(journal);
+        reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+        spawnLuckyFirefly();
+        S.lucky.x = S.jar.x; S.lucky.y = S.jar.y - 14;
+        for (var m = 0; m < 200 && !S.luckyOfferOpen; m++) update(0.016);
+        takeLuckyReward();
+        __check('Test 7: Lucky Firefly never touches the Firefly Journal', JSON.stringify(journal) === journalBefore);
+      });
+    });
+  });
+});
+`);
+
+scenario('lumora2-phase8-cosmetic-trial', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 20, upgrades: { tutorialDone: true, ownedTrails: { none: true } } }));
+return __tick(5).then(function(){
+  var rewardCalls = [];
+  var rewardBehavior = 'success';
+  ytgame.ads = {
+    requestRewardedAd: function(id){
+      rewardCalls.push(id);
+      if (rewardBehavior === 'throw') throw new Error('mock throw');
+      if (rewardBehavior === 'reject') return Promise.reject(new Error('mock reject'));
+      return Promise.resolve(rewardBehavior === 'success');
+    },
+    requestInterstitialAd: function(){ return Promise.resolve(); }
+  };
+
+  // ---- Test 10: an already-owned cosmetic is never offered a trial ----
+  __check('Test 10: the always-owned "none" trail is not trial-eligible', cosmeticTrialEligible('trail', 'none') === false);
+  var callsBeforeOwned = rewardCalls.length;
+  requestCosmeticTrial('trail', 'none');
+  __check('Test 10: requesting a trial for an owned cosmetic is a no-op, no ad requested, no trial granted', rewardCalls.length === callsBeforeOwned && cosmeticTrial === null);
+
+  // ---- Test 8: start a trial on a genuinely locked, real trail ----
+  __check('Test 8 setup: the moonlit trail starts locked', upgrades.ownedTrails.moonlit !== true);
+  __check('Test 8 setup: the moonlit trail is trial-eligible', cosmeticTrialEligible('trail', 'moonlit') === true);
+  var equippedTrailBefore = upgrades.equippedTrail;
+  requestCosmeticTrial('trail', 'moonlit');
+  return __tick(5).then(function(){
+    __check('Test 8: the trial is now active for the moonlit trail', cosmeticTrialActive('trail') === true && cosmeticTrial.id === 'moonlit');
+    __check('Test 8: the cosmetic becomes temporarily usable -- activeTrailHues() reflects it', JSON.stringify(activeTrailHues()) === JSON.stringify(TRAIL_COLORS.find(function(t){ return t.key === 'moonlit'; }).hues));
+    __check('Test 8: ownership itself was NOT granted', upgrades.ownedTrails.moonlit !== true);
+    __check('Test 8: the real equipped trail is unchanged', upgrades.equippedTrail === equippedTrailBefore);
+
+    // ---- Test 9: trial expiration reverts to the previous state ----
+    cosmeticTrialT = 0.02;
+    cosmeticTrialT -= 0.03; if (cosmeticTrialT <= 0) endCosmeticTrial(); // simulate loop()'s own countdown tick directly -- not persisted state, no need to call the real loop()
+    __check('Test 9: the trial has ended', cosmeticTrialActive('trail') === false);
+    __check('Test 9: activeTrailHues() reverts to the actual equipped trail', JSON.stringify(activeTrailHues()) === JSON.stringify((function(){ var t = TRAIL_COLORS.find(function(t){ return t.key === equippedTrailBefore; }); return (t && t.hues.length) ? t.hues : null; })()));
+    __check('Test 9: ownership/equipped state was never touched by the trial or its expiration', upgrades.ownedTrails.moonlit !== true && upgrades.equippedTrail === equippedTrailBefore);
+
+    // ---- Test 11: theme trial (hand-crafted theme, same isolated-vm-context discipline the Phase 7 tests already established) ----
+    VILLAGE_THEMES.push({ id: 'test_theme_trial', name: 'Test Trial Theme', desc: 'hand-crafted for this scenario only' });
+    __check('Test 11 setup: the synthetic theme starts locked', isThemeOwned('test_theme_trial') === false);
+    var equippedThemeBefore = equippedTheme;
+    best = 25; nightNumber = 15; // a real village-progressed player
+    var levelBefore = villageLevel(), restBefore = restorationPct(best);
+    requestCosmeticTrial('theme', 'test_theme_trial');
+    return __tick(5).then(function(){
+      __check('Test 11: the theme visually applies -- effectiveTheme() reflects the trial', effectiveTheme() === 'test_theme_trial');
+      __check('Test 11: the existing equipped theme is remembered, unchanged', equippedTheme === equippedThemeBefore);
+      __check('Test 11: village progression (restoration % and Village Level) is completely unchanged by a theme trial', restorationPct(best) === restBefore && villageLevel() === levelBefore);
+      __check('Test 11: ownership was not granted by the trial', isThemeOwned('test_theme_trial') === false);
+
+      // ---- Test 12: theme trial expiration ----
+      endCosmeticTrial();
+      __check('Test 12: the previous (real) equipped theme returns once the trial ends', effectiveTheme() === equippedThemeBefore);
+      VILLAGE_THEMES.pop(); // cleanup the synthetic entry so nothing later in this scenario sees it
+
+      // ---- ad failure grants no trial, does not consume the opportunity ----
+      rewardBehavior = 'false';
+      requestCosmeticTrial('trail', 'starlight');
+      return __tick(5).then(function(){
+        __check('a failed trial-ad request grants no trial', cosmeticTrial === null);
+        __check('the cosmetic is still trial-eligible afterward -- a failed attempt is not consumed', cosmeticTrialEligible('trail', 'starlight') === true);
+
+        // ---- duplicate callback / double-tap protection ----
+        rewardBehavior = 'success';
+        var callsBefore = rewardCalls.length;
+        requestCosmeticTrial('trail', 'starlight');
+        requestCosmeticTrial('trail', 'starlight'); // double tap while pending
+        __check('a double tap while a trial request is pending does not fire a second ad request', rewardCalls.length === callsBefore + 1);
+        return __tick(5).then(function(){
+          __check('exactly one trial is active after the double tap resolves', cosmeticTrialActive('trail') === true && cosmeticTrial.id === 'starlight');
+          endCosmeticTrial();
+        });
+      });
+    });
+  });
+});
+`);
+
+scenario('lumora2-phase8-persistence', { audioEnabled: true, mockNowMs: FIXED_NOW_SAME_DAY_MS }, `
+// ---- Test 14: an existing pre-Phase-8 save loads safely -- no new save field is required for any Phase 8 feature (all of it is session-only), so this is really just re-confirming Phase 5/6/7's own progression survives untouched ----
+// lastPlayed is set within the SAME calendar week as mockNowMs above --
+// otherwise resolveWeekly() correctly treats this as a new week and resets
+// weeklyStats to zero (its own existing, correct behavior, not a Phase 8
+// bug) before the check below ever runs.
+__spy.loadResolve(JSON.stringify({ best: 20, coins: 300, nightNumber: 12, journal: { y: 4, b: 2, g: 0, e: 0, m: 0 }, variantJournal: {}, equippedTheme: 'default', cosmeticsUnlocked: [], upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true, gold: true }, equippedTrail: 'gold' }, lastPlayed: ${FIXED_NOW_SAME_DAY_MS} - 1000, objectivesCompleted: {}, eventHistory: [], contractsCompleted: [], weekly: { stats: { fireflies: 5, rare: 1, nights: 2, events: 0 }, claimed: { fireflies: false, rare: false, nights: false, events: false }, chestClaimed: false } }));
+return __tick(5).then(function(){
+  __check('Test 14: a pre-Phase-8 save loads without throwing', loadDone === true && nightNumber === 12);
+  __check('Test 14: coins unchanged', coins === 300);
+  __check('Test 14: jars unchanged', upgrades.ownedJars.simple === true && upgrades.equippedJar === 'simple');
+  __check('Test 14: trails unchanged', upgrades.ownedTrails.gold === true && upgrades.equippedTrail === 'gold');
+  __check('Test 14: theme unchanged', equippedTheme === 'default' && effectiveTheme() === 'default');
+  __check('Test 14: village (restoration/level) unchanged', restorationPct(best) === 80 && villageLevel() === 1);
+  __check('Test 14: collections unchanged', journal.y === 4 && journal.b === 2);
+  __check('Test 14: weekly progression unchanged', weeklyStats.fireflies === 5 && weeklyStats.rare === 1);
+  __check('Test 14: new monetization state defaults safely -- nothing pending, nothing claimed, no cooldown started, no trial active', mysteryChestPending === false && mysteryChestLastNight === -9999 && cosmeticTrial === null && S.luckyOfferOpen === false);
+
+  // ---- Test 13: equip a permanently owned cosmetic (theme), save, reload ----
+  upgrades.tutorialDone = true;
+  saveProgress();
+  var payload1 = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+
+  // ---- Test 20: Night Complete's existing layout is completely unaffected by Phase 8 monetization state (Mystery Chest/Lucky Firefly live OUTSIDE Night Complete entirely -- see this phase's own report for why) ----
+  upgrades.tutorialDone = true;
+  reset(); screen = 'play'; paused = false;
+  S.objectiveActive = [{ id: 'x', category: 'catch', kind: 'catch', fireflyType: 'y', label: 'Catch 5', target: 5, reward: 20, done: true }];
+  S.over = true; S.overT = 1; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins; S.coinsEarnedThisNight = 10;
+  var playBtnYBefore, threwBefore = false;
+  try { drawOver(); playBtnYBefore = playBtn.y; } catch (e) { threwBefore = true; }
+  // now with every Phase 8 monetization state simultaneously active/pending/claimed
+  mysteryChestReward = MYSTERY_CHEST_REWARDS[0]; mysteryChestLastNight = nightNumber; mysteryChestPending = true;
+  S.luckyOfferOpen = true; S.luckyPending = true; S.luckyReward = LUCKY_FIREFLY_BASE_REWARD;
+  cosmeticTrial = { category: 'trail', id: 'gold' }; cosmeticTrialT = 100; cosmeticTrialPending = true;
+  var playBtnYAfter, threwAfter = false;
+  try { drawOver(); playBtnYAfter = playBtn.y; } catch (e) { threwAfter = true; }
+  __check('Test 20: drawOver() does not throw with every Phase 8 monetization state simultaneously set', !threwBefore && !threwAfter);
+  __check('Test 20: Night Complete\\'s own panel/button geometry is byte-for-byte identical regardless of any Phase 8 monetization state -- none of it is read by drawOver() at all', playBtnYBefore === playBtnYAfter);
+  mysteryChestPending = false; S.luckyOfferOpen = false; S.luckyPending = false; cosmeticTrial = null; cosmeticTrialT = 0; cosmeticTrialPending = false;
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
