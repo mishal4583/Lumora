@@ -7111,14 +7111,21 @@ reset(); S.over = true; S.overT = 1;
 var coinsBeforeMilestone3 = coins;
 continueFromOver();
 __check('a third consecutive calendar day continues the streak to 3', nightStreak === 3, 'nightStreak=' + nightStreak);
-__acceptAnyContract();
-
 // ---- 10: milestone reward (3) granted exactly once, via the existing coin reward path ----
+// Checked HERE, immediately after continueFromOver() itself, and BEFORE
+// __acceptAnyContract() runs -- accepting the contract calls reset(),
+// which can legitimately roll a random Night Event and, through it,
+// legitimately cross an unrelated pre-existing Weekly/Season milestone
+// (its own real reward, nothing to do with Night Streak). Checking before
+// that keeps this assertion isolated to exactly what Night Streak itself
+// granted.
 __check('reaching the 3-night milestone granted exactly the +15 coin bonus, through the existing coins balance', coins === coinsBeforeMilestone3 + 15, 'coins=' + coins + ' expected=' + (coinsBeforeMilestone3 + 15));
 var coinsAfterMilestone3 = coins;
-// a same-day duplicate never re-grants the milestone it already paid out
+// a same-day duplicate never re-grants the milestone it already paid out --
+// checked BEFORE __acceptAnyContract() below, for the same isolation reason
 commitNightStreak();
 __check('a duplicate commit on the milestone day does not re-grant the streak-3 bonus', coins === coinsAfterMilestone3);
+__acceptAnyContract();
 
 // ---- 7: missing a calendar day resets the streak to 1 ----
 Date.now = function(){ return day0 + DAY_MS*5; }; // skips days 3 and 4 entirely
@@ -7173,6 +7180,111 @@ __spy.loadResolve(JSON.stringify({ best: 5, coins: 0, nightStreak: 4, lastNightC
 return __tick(5).then(function(){
   __check('a reloaded save restores nightStreak exactly as persisted, not recomputed', nightStreak === 4);
   __check('a reloaded save restores lastNightCompletionDay exactly as persisted', lastNightCompletionDay === '2026-0-15');
+});
+`);
+
+// E8: Objective Completion Bonus. Drives the REAL objectiveProgress()
+// function against a manually-controlled, deterministic 3-objective set
+// (one distinct kind each -- catch/deliver/score -- so each can be
+// completed independently, one real call at a time) rather than relying
+// on generateNightObjectives()'s own randomized category/template pick,
+// which would make "complete exactly 1, then exactly 2, then exactly 3"
+// impossible to script deterministically.
+scenario('lumora2-e8-objective-completion-bonus', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+
+function setupThreeObjectives(){
+  reset();
+  S.objectiveActive = [
+    { id: 'e8_catch', category: 'catch', kind: 'catch', fireflyType: 'y', target: 1, reward: 5, done: false },
+    { id: 'e8_deliver', category: 'delivery', kind: 'deliver', fireflyType: null, target: 1, reward: 6, done: false },
+    { id: 'e8_score', category: 'score', kind: 'score', fireflyType: null, target: 5, reward: 7, done: false }
+  ];
+  S.objectiveProgress = { e8_catch: 0, e8_deliver: 0, e8_score: 0 };
+  S.score = 0;
+}
+
+// ---- 1: 0/3 -> no bonus ----
+setupThreeObjectives();
+var coins0 = coins;
+__check('0/3 objectives complete: no completion bonus, no individual rewards either', coins === coins0 && !S.objectiveActive.every(function(o){ return o.done; }));
+
+// ---- 2: 1/3 -> no bonus (only the individual reward for that one) ----
+objectiveProgress('catch', 'y');
+__check('1/3 objectives complete: the individual reward is granted (+5)', coins === coins0 + 5, 'coins=' + coins);
+__check('1/3 objectives complete: no completion bonus yet', S.objectiveBonusGranted === false);
+
+// ---- 3: 2/3 -> still no bonus ----
+objectiveProgress('deliver', null);
+__check('2/3 objectives complete: the second individual reward is granted (+6 more)', coins === coins0 + 5 + 6, 'coins=' + coins);
+__check('2/3 objectives complete: still no completion bonus', S.objectiveBonusGranted === false);
+
+// ---- 4: 3/3 -> +10 completion bonus, on top of the third individual reward ----
+S.score = 5;
+objectiveProgress('score', null);
+__check('3/3 objectives complete: the third individual reward (+7) AND the +10 completion bonus are both granted', coins === coins0 + 5 + 6 + 7 + 10, 'coins=' + coins + ' expected=' + (coins0 + 5 + 6 + 7 + 10));
+__check('S.objectiveBonusGranted flips true exactly when all 3 become done', S.objectiveBonusGranted === true);
+
+// ---- 5/6: bonus granted only once -- neither a duplicate objectiveProgress() call nor repeatedly redrawing Night Complete grants it again ----
+var coinsAfterFull = coins;
+objectiveProgress('score', null); // duplicate completion call -- all objectives already done, o.done guards skip every one
+objectiveProgress('catch', 'y');
+__check('duplicate objectiveProgress() calls after all 3 are already done grant nothing further', coins === coinsAfterFull);
+S.over = true; S.overT = 1;
+var threwReopen = false;
+try { for (var __i = 0; __i < 5; __i++) { screen = 'play'; draw(); } } catch (e) { threwReopen = true; }
+__check('repeatedly redrawing Night Complete (reopening it) never re-grants the bonus and never throws', !threwReopen && coins === coinsAfterFull);
+
+// ---- 7: Continue -> no second reward ----
+// Checked immediately around continueFromOver() itself, BEFORE
+// __acceptAnyContract() runs -- reset() (called once the contract is
+// accepted) can legitimately roll a random Night Event, which can in turn
+// legitimately cross an unrelated pre-existing Weekly Progression /
+// Season milestone and grant ITS OWN coins (real, correct, unrelated
+// behavior -- not something E8 should assert never happens). So this
+// check isolates exactly "did Continue itself re-grant the objective
+// bonus", and everything below re-baselines from the LIVE coins value
+// rather than a value computed before any reset() could have rolled one
+// of those unrelated systems.
+var coinsBeforeContinue = coins;
+continueFromOver();
+__check('tapping Continue does not itself grant a second objective completion bonus', coins === coinsBeforeContinue);
+if (screen === 'contract') __acceptAnyContract();
+
+// ---- 9: Restart Night resets eligibility -- the SAME 3 objectives must be completed again from scratch ----
+setupThreeObjectives(); // simulates Restart Night: reset() clears S.objectiveBonusGranted, objectives start fresh
+__check('after Restart Night, the bonus guard is cleared', S.objectiveBonusGranted === false);
+__check('after Restart Night, the previous night\\'s bonus cannot simply carry over -- all 3 read as not done', !S.objectiveActive.some(function(o){ return o.done; }));
+var coinsBeforeRestartRun = coins; // re-baselined live, right after this reset() -- not a stale formula computed before it
+objectiveProgress('catch', 'y'); objectiveProgress('deliver', null); S.score = 5; objectiveProgress('score', null);
+__check('completing all 3 again on the NEW (post-restart) attempt grants the completion bonus again -- restart genuinely re-arms it, not a one-time-ever lock', coins === coinsBeforeRestartRun + 5 + 6 + 7 + 10, 'coins=' + coins);
+
+// ---- 10: tutorial night never grants the bonus (structurally -- 0 active objectives, never 3) ----
+upgrades.tutorialDone = false;
+reset();
+__check('the tutorial round always has 0 active objectives -- the completion bonus can structurally never fire (S.objectiveActive.length is never 3)', S.objectiveActive.length === 0);
+var coinsBeforeTutorialProbe = coins;
+objectiveProgress('catch', 'y'); objectiveProgress('deliver', null); objectiveProgress('score', null);
+__check('calling objectiveProgress() during the tutorial (0 active objectives) is a safe no-op', coins === coinsBeforeTutorialProbe);
+upgrades.tutorialDone = true;
+
+// ---- 11: existing objective rewards are exactly what OBJECTIVE_POOL already specifies -- untouched by E8 ----
+__check('OBJECTIVE_POOL itself was not modified by E8 (spot check a real entry\\'s reward)', OBJECTIVE_POOL.find(function(o){ return o.id === 'deliver_total'; }).early.reward === 15);
+
+// ---- 12/13/14/15: Night Streak, Daily Deal, Almost Affordable, and existing ads are all untouched ----
+setupThreeObjectives();
+var streakBefore = nightStreak;
+S.over = true; S.overT = 1;
+continueFromOver();
+if (screen === 'contract') __acceptAnyContract();
+__check('Night Streak still advances normally on a real completed night alongside the objective bonus', nightStreak === streakBefore + 1 || nightStreak === 1, 'nightStreak=' + nightStreak);
+__check('Daily Deal\\'s own price formula is untouched by the objective completion bonus', dailyDealPrice(500) === 400);
+upgrades.jarCapTiers.simple = 5;
+__check('Almost Affordable\\'s own real cost function is untouched by the objective completion bonus', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
+upgrades.jarCapTiers.simple = 0;
+__check('existing rewarded-ad entry points remain present and distinct from the objective completion bonus', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function');
 });
 `);
 

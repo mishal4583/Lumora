@@ -2768,6 +2768,12 @@ function hudOnObjectiveComplete(){
     S.hudCollapsed=true;
   }
 }
+// E8: Objective Completion Bonus -- a small, FIXED coin reward for
+// completing all 3 of tonight's objectives, on top of (never instead of,
+// never multiplying) their existing individual rewards. One named
+// constant, referenced here and by the one Night Complete display line
+// that shows it, per direct instruction never to duplicate the number.
+const OBJECTIVE_COMPLETION_BONUS=10;
 function objectiveProgress(kind,type){
   if(!S.objectiveActive||!S.objectiveActive.length)return;
   let changed=false;
@@ -2806,6 +2812,25 @@ function objectiveProgress(kind,type){
       hudOnObjectiveProgress();
     }
   });
+  // E8: the completion bonus fires live, right here, the instant the LAST
+  // of tonight's 3 objectives becomes done -- the exact same "grant once,
+  // at the moment of completion" discipline every individual objective
+  // reward right above already follows, not deferred to Night Complete
+  // (which stays purely DISPLAY, same as the existing OBJECTIVE BONUS
+  // line's own comment already establishes). S.objectiveActive.length===3
+  // is the existing, real "3 real objectives generated" signal (0 during
+  // the tutorial, see ensureNightObjectives()) -- no separate tutorial
+  // check needed, and no new "objectivesCompletedForBonus" duplicate state:
+  // S.objectiveActive.every(o=>o.done) IS the completion signal, read
+  // directly. S.objectiveBonusGranted (per-round, cleared by reset()) is
+  // the one-shot guard so this can never fire twice in one round even if
+  // objectiveProgress() is ever called again after all 3 are already done.
+  if(!S.objectiveBonusGranted&&S.objectiveActive.length===3&&S.objectiveActive.every(o=>o.done)){
+    S.objectiveBonusGranted=true;
+    coins+=OBJECTIVE_COMPLETION_BONUS;
+    if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+    changed=true;
+  }
   if(changed)saveProgress();
 }
 // evaluateMissObjectives() used to live here -- the miss-category
@@ -3804,6 +3829,11 @@ function reset(){
     // top-level state instead -- see objectivesCompleted/eventHistory/
     // contractsCompleted near `let trackerOn=` above).
     objectiveActive:[], objectiveProgress:{}, eventActive:null, contractActive:null,
+    // E8: Objective Completion Bonus's one-shot guard -- per-round like
+    // every other flag here, so Restart Night (a fresh reset()) always
+    // requires the new night's 3 objectives to be completed again before
+    // this can grant.
+    objectiveBonusGranted:false,
     // D1 (Night Objectives UI, Claude Design spec): new-night reveal card --
     // S.newNightT is elapsed seconds since THIS reset() (a genuine new night
     // or a restart, doesn't matter which -- only S.isNewNight decides
@@ -8162,7 +8192,24 @@ function drawOver(){
       // of a fraction, a failed row shows an em dash (nothing is deducted).
       drawObjectiveRow(o,panelR.x,panelR.y+180+i*28,28,panelR.x+38,panelR.w-20+panelR.x,false);
     });
-    if(bonus>0){
+    // E8: on a night all 3 objectives are done, this EXACT existing line
+    // relabels to "OBJECTIVES COMPLETE" and shows the fixed completion
+    // bonus alone (never combined with the sum above -- each individual
+    // reward is already itemized inline on its own row via
+    // drawObjectiveRow()'s own "+reward" per direct comment above, so
+    // repeating that sum here would just be a redundant second total).
+    // Same position, same style, same one-line extension of the existing
+    // row -- no new row, no popup, no layout shift. Purely DISPLAY, reading
+    // S.objectiveActive live -- the real grant already happened once, mid-
+    // round, in objectiveProgress() above.
+    const allObjectivesDone=S.objectiveActive.length===3&&S.objectiveActive.every(o=>o.done);
+    if(allObjectivesDone){
+      const boy=panelR.y+180+S.objectiveActive.length*28+10;
+      ctx.textAlign='left'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.85)';
+      ctx.fillText('OBJECTIVES COMPLETE',panelR.x+20,boy);
+      ctx.textAlign='right'; ctx.fillStyle=WS_GOLD_PRICE; ctx.font='600 13px Georgia,serif';
+      ctx.fillText('+'+OBJECTIVE_COMPLETION_BONUS,panelR.x+panelR.w-20,boy);
+    } else if(bonus>0){
       const boy=panelR.y+180+S.objectiveActive.length*28+10;
       ctx.textAlign='left'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.85)';
       ctx.fillText('OBJECTIVE BONUS',panelR.x+20,boy);
