@@ -1817,7 +1817,7 @@ function migrateEconomyV2(){
 // tutorialPanelOpen, see below) is deliberately NOT persisted here or
 // anywhere else -- it's session-only, same precedent as
 // villageHintShown/refillHintShown.
-let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}};
+let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, dailyDeal:null};
 if(!YT){
   try{
     const u=JSON.parse(localStorage.getItem('gk2_upgrades')||'{}');
@@ -1881,6 +1881,15 @@ if(!YT){
     migrateSharedStatTier('reach',legacyShared.jarReachTier,upgrades);
     migrateSharedStatTier('magnetReach',legacyShared.magnetReachTier,upgrades);
     migrateSharedStatTier('duration',legacyShared.durationTier,upgrades);
+    // E6 Daily Deal: restore verbatim only if well-formed for a real day --
+    // kind/key === null is itself a valid "nothing was eligible that day"
+    // result, not a malformed value. Anything else leaves the default null
+    // in place, which ensureDailyDeal() safely treats as "pick fresh" the
+    // next time the Shop is opened -- never a crash, same defensive-parsing
+    // bar as every other field above.
+    if(u.dailyDeal&&typeof u.dailyDeal==='object'&&typeof u.dailyDeal.day==='string'&&(u.dailyDeal.kind===null||u.dailyDeal.kind==='decor'||u.dailyDeal.kind==='trail')){
+      upgrades.dailyDeal={day:u.dailyDeal.day, kind:u.dailyDeal.kind, key:typeof u.dailyDeal.key==='string'?u.dailyDeal.key:null};
+    }
   }catch(e){}
 }
 // E2 Shop Economy 2.0: guarded by if(!YT) -- a REAL bug caught before this
@@ -3508,6 +3517,10 @@ if(YT&&YT.game&&YT.game.loadData){
         migrateSharedStatTier('reach',legacyShared.jarReachTier,upgrades);
         migrateSharedStatTier('magnetReach',legacyShared.magnetReachTier,upgrades);
         migrateSharedStatTier('duration',legacyShared.durationTier,upgrades);
+        // E6 Daily Deal: same defensive restore as the non-YT load path above.
+        if(d.upgrades.dailyDeal&&typeof d.upgrades.dailyDeal==='object'&&typeof d.upgrades.dailyDeal.day==='string'&&(d.upgrades.dailyDeal.kind===null||d.upgrades.dailyDeal.kind==='decor'||d.upgrades.dailyDeal.kind==='trail')){
+          upgrades.dailyDeal={day:d.upgrades.dailyDeal.day, kind:d.upgrades.dailyDeal.kind, key:typeof d.upgrades.dailyDeal.key==='string'?d.upgrades.dailyDeal.key:null};
+        }
       }
       // E2 Shop Economy 2.0: unconditional, same reasoning as the non-YT
       // load path's own call -- runs as a safe no-op for a fresh player
@@ -4426,6 +4439,20 @@ function cosmeticTrialCardRect(){
   if(y+h>H-50)return null;
   return {x:16,y,w:W-32,h};
 }
+// E6: Daily Deal -- slot 3 in the shared stack above, same fixed-index
+// discipline (never overlaps Favor/Chest/Cosmetic Trial even when one of
+// those is hidden for lack of room on this particular tab). Hidden during
+// the tutorial (per direct instruction) and whenever ensureDailyDeal()
+// finds nothing eligible today -- never a fake offer. Taller than the
+// other three (104 vs 84) to fit the extra price line -- it's the last
+// slot in the stack, so nothing below it depends on its exact height.
+function dailyDealCardRect(){
+  if(!upgrades.tutorialDone)return null;
+  if(!ensureDailyDeal())return null;
+  const y=workshopAdCardY(3), h=104;
+  if(y+h>H-50)return null;
+  return {x:16,y,w:W-32,h};
+}
 // value formatting for the upgrade cards -- base+step*tier, matching the
 // Lumora UI prototype's valueAtTier()/formatValue() exactly. Capacity is
 // shown as the BONUS itself (0,1,2...), not the jar's total -- the jar's own
@@ -4621,6 +4648,126 @@ function tryBuyOrEquipTrail(key){
   persistUpgradesLocal(); saveProgress();
   return true;
 }
+// ---------- E6: Daily Deal ----------
+// One rotating, deterministic-by-calendar-day discount on an EXISTING
+// purchasable item -- never a new item, never a new currency, never a new
+// purchase/ownership mechanism. Deliberately drawn from only two existing
+// catalogs: SHOP_ITEMS' two plain one-shot decor items (deco/fountain --
+// the Statue is excluded: it's locked behind restorationPct, carries its
+// own owned/equipped distinction, and reads as a late-game landmark, not a
+// casual daily discount) and TRAIL_COLORS' five real purchasable trails
+// ('none' excluded, price 0, nothing to discount). JARS are deliberately
+// NOT included -- jar skins above a price floor carry a real +1 capacity
+// bonus while equipped (see the Shop Restructure phase), so discounting
+// jar prices would be a backdoor economy change, not a pure cosmetic
+// coin sink; decor+trails are the only candidates with zero gameplay stat
+// attached to their price.
+const DAILY_DEAL_CANDIDATES=[
+  {kind:'decor', key:'deco'},
+  {kind:'decor', key:'fountain'},
+  {kind:'trail', key:'gold'},
+  {kind:'trail', key:'violet'},
+  {kind:'trail', key:'moonlit'},
+  {kind:'trail', key:'starlight'},
+  {kind:'trail', key:'celestial'}
+];
+// today's calendar day, device-local -- reuses the EXACT existing
+// localDayKey() the daily-quest boundary already established above,
+// per direct instruction to use existing local-date conventions rather
+// than a new one. Read fresh every call (not cached), same as
+// localDayKey(lastPlayed) elsewhere, so it always reflects the CURRENT
+// local day the Shop is actually open in, not the day the session began.
+function todayKey(){ return localDayKey(Date.now()); }
+// A small deterministic string hash (not cryptographic, doesn't need to
+// be) -- turns a day key like "2026-7-28" into a stable index, so "same
+// day -> same offer" holds without needing Math.random() or any seeded
+// RNG state. Same "deterministic day seed" approach direct instruction
+// explicitly allows.
+function simpleDayHash(str){ let h=0; for(let i=0;i<str.length;i++){ h=((h<<5)-h+str.charCodeAt(i))|0; } return Math.abs(h); }
+function dailyDealCandidateInfo(c){
+  if(!c)return null;
+  if(c.kind==='decor'){
+    const item=SHOP_ITEMS[c.key];
+    if(!item)return null;
+    return {name:item.name, price:item.price, owned:shopItemOwned(item)};
+  }
+  if(c.kind==='trail'){
+    const t=TRAIL_COLORS.find(t=>t.key===c.key);
+    if(!t)return null;
+    return {name:t.name, price:t.price, owned:!!upgrades.ownedTrails[c.key]};
+  }
+  return null;
+}
+// Walks the FIXED candidate list starting at today's hashed index, wrapping
+// around, and returns the first one the player doesn't already own -- pure
+// function of (today, current ownership), never persisted state, so it's
+// only ever called at the moment a NEW day's offer needs picking (see
+// ensureDailyDeal() below), not every time the offer is read. Returns null
+// if every single candidate is already owned -- "no eligible items -> no
+// fake offer", handled by the caller.
+function pickDailyDealCandidate(){
+  const day=todayKey();
+  const startIdx=simpleDayHash(day)%DAILY_DEAL_CANDIDATES.length;
+  for(let i=0;i<DAILY_DEAL_CANDIDATES.length;i++){
+    const c=DAILY_DEAL_CANDIDATES[(startIdx+i)%DAILY_DEAL_CANDIDATES.length];
+    const info=dailyDealCandidateInfo(c);
+    if(info&&!info.owned)return c;
+  }
+  return null;
+}
+// The one canonical function that decides today's offer -- read by draw
+// code, the pointerdown hit-test, AND buyDailyDeal(), so all three can
+// never disagree about which item is showing (same discipline as
+// jarCanAcceptCatch()/almostAffordableEligible() elsewhere in this file).
+// Persists {day,kind,key} in upgrades.dailyDeal ONLY when the calendar day
+// actually changes -- picking is deliberately NOT re-run on every access,
+// specifically so that buying today's offered item doesn't cause it to
+// silently swap to a different item for the rest of the same day (it
+// would, if re-picked live, since the just-bought item would now read as
+// owned and pickDailyDealCandidate() would walk past it). Once an item is
+// selected for a day it stays that day's Daily Deal, shown as claimed
+// (not swapped) after purchase -- existing ownership is still the ONLY
+// source of truth for whether it's actually owned; this just remembers
+// WHICH item was offered.
+function ensureDailyDeal(){
+  const day=todayKey();
+  if(!upgrades.dailyDeal||upgrades.dailyDeal.day!==day){
+    const picked=pickDailyDealCandidate();
+    upgrades.dailyDeal={day:day, kind:picked?picked.kind:null, key:picked?picked.key:null};
+    persistUpgradesLocal(); // local fallback only, same as rollQuests()/persistQuests() -- the real cloud save still rides the existing saveProgress() triggers, not forced here
+  }
+  if(!upgrades.dailyDeal.kind)return null; // every candidate was already owned the day this was picked -- gracefully nothing to offer
+  return {kind:upgrades.dailyDeal.kind, key:upgrades.dailyDeal.key};
+}
+// basePrice = existingPrice, discountedPrice = floor(basePrice*0.80), per
+// direct instruction -- never a duplicate hardcoded price. Floored at 1 so
+// a hypothetical very-low-price future item could never round to 0/free.
+function dailyDealPrice(basePrice){ const p=Math.floor(basePrice*0.8); return (isFinite(p)&&p>=1)?p:1; }
+function buyDailyDeal(){
+  const deal=ensureDailyDeal();
+  if(!deal)return false;
+  const info=dailyDealCandidateInfo(deal);
+  if(!info||info.owned)return false; // already claimed today (or already owned some other way) -- no double purchase, no re-grant
+  const discounted=dailyDealPrice(info.price);
+  if(coins<discounted)return false;
+  // Reuse the EXISTING purchase function for this item type byte-for-byte
+  // -- never a second grant/ownership code path -- by temporarily pointing
+  // the SAME price field it already reads at the discounted amount, then
+  // restoring it immediately after. Synchronous, single-threaded, no ad
+  // involved -- there is no window for anything else to observe (or get
+  // stuck with) the temporarily-discounted price.
+  let ok=false;
+  if(deal.kind==='decor'){
+    const item=SHOP_ITEMS[deal.key], realPrice=item.price;
+    item.price=discounted;
+    try{ ok=tryPurchase(deal.key); } finally { item.price=realPrice; }
+  } else if(deal.kind==='trail'){
+    const t=TRAIL_COLORS.find(t=>t.key===deal.key), realPrice=t.price;
+    t.price=discounted;
+    try{ ok=tryBuyOrEquipTrail(deal.key); } finally { t.price=realPrice; }
+  }
+  return ok;
+}
 cv.addEventListener('pointerdown',e=>{
   const p=toGame(e);
   if(paused){ // pause overlay swallows ALL input; only the resume/restart/gohome targets (and the confirm modal over them) act, only for user pauses
@@ -4800,6 +4947,15 @@ cv.addEventListener('pointerdown',e=>{
       const trialCard=cosmeticTrialCardRect();
       const candidate=trialCard&&cosmeticTrialCandidate();
       if(trialCard&&candidate&&inRect(p.x,p.y,hitRectH(workshopFavorBtnRect(trialCard)))){ requestCosmeticTrial('trail',candidate.key); return; }
+    }
+    // E6: Daily Deal -- same priority/pattern as Favor/Chest/Cosmetic Trial
+    // above. No ad involved (never rewardedAdsAvailable()-gated) -- a pure
+    // discounted coin-sink purchase, and the button is only even present
+    // once ensureDailyDeal()'s own info reads unowned.
+    {
+      const dealCard=dailyDealCardRect();
+      const dealInfo=dealCard&&dailyDealCandidateInfo(ensureDailyDeal());
+      if(dealCard&&dealInfo&&!dealInfo.owned&&inRect(p.x,p.y,hitRectH(workshopFavorBtnRect(dealCard)))){ buyDailyDeal(); return; }
     }
     if(shopTab==='jars'){
       // Aurora shop-presentation pass: the ONLY trigger for the comparison
@@ -9521,6 +9677,45 @@ function drawMysteryChestCard(card){
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }
+// E6: Daily Deal card -- same glass-card language as Favor/Mystery Chest
+// above, but a warm amber edge accent instead of their violet ("ads stay
+// secondary" doesn't apply here -- this isn't an ad at all, just a real
+// discounted purchase, so it reads distinctly). Only ever called when
+// dailyDealCardRect() itself is non-null, so ensureDailyDeal() here is
+// guaranteed to return a real candidate, not null.
+function drawDailyDealCard(card){
+  const deal=ensureDailyDeal();
+  if(!deal)return; // defensive only -- the caller already checked dailyDealCardRect()
+  const info=dailyDealCandidateInfo(deal);
+  if(!info)return;
+  lumGlassPanel(card.x,card.y,card.w,card.h,16);
+  lumEdgeAccent(card,'rgba(255,205,130,1)');
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  lumEyebrow('✦ Daily Deal ✦',card.x+card.w/2,card.y+22,'center',11,WS_GOLD_HEADER);
+  if(info.owned){
+    ctx.fillStyle='rgba(212,235,200,0.85)'; ctx.font='italic 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText('✦ '+info.name+' claimed today ✦',card.x+card.w/2,card.y+44);
+  } else {
+    const discounted=dailyDealPrice(info.price);
+    ctx.fillStyle=LUM_LAVENDER; ctx.font='italic 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText(info.name+' · 20% off today only',card.x+card.w/2,card.y+40);
+    // Manual strikethrough on the base price -- no native canvas strike, so
+    // it's drawn with the same raw-primitive discipline as every other
+    // custom UI element in this file (pips, edge accents, milestone lines).
+    const baseTxt=''+info.price, discTxt='· '+discounted, priceY=card.y+64;
+    ctx.font='12px Georgia,serif'; const baseW=ctx.measureText(baseTxt).width;
+    ctx.font='700 14px Georgia,serif'; const discW=ctx.measureText(discTxt).width;
+    const gap=8, startX=card.x+card.w/2-(baseW+gap+discW)/2;
+    ctx.font='12px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.55)'; ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillText(baseTxt,startX,priceY);
+    ctx.beginPath(); ctx.moveTo(startX-2,priceY); ctx.lineTo(startX+baseW+2,priceY); ctx.strokeStyle='rgba(174,184,203,0.55)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.font='700 14px Georgia,serif'; ctx.fillStyle=WS_GOLD_BRIGHT;
+    ctx.fillText(discTxt,startX+baseW+gap,priceY);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    lumButton(workshopFavorBtnRect(card),'Buy · '+discounted,'glass',coins<discounted);
+  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+}
 // Phase 8: Cosmetic Trial card -- same glass-card language/violet accent
 // as Favor/Mystery Chest above. Only ever rendered when
 // cosmeticTrialCardRect() itself returns non-null (Trails tab, at least
@@ -9755,6 +9950,15 @@ function drawShop(){
     // one trail is still locked (see cosmeticTrialCardRect()).
     const trialCard=cosmeticTrialCardRect();
     if(trialCard)drawCosmeticTrialCard(trialCard);
+  }
+  // E6: Daily Deal -- deliberately its OWN gate, not folded into the
+  // rewardedAdsAvailable() block above: it's not an ad and must never
+  // depend on ad availability (per direct instruction, no Daily Deal +
+  // Watch Ad combination). Still gated on tutorialDone alone, matching the
+  // "hide entirely during the tutorial" requirement.
+  {
+    const dealCard=dailyDealCardRect();
+    if(dealCard)drawDailyDealCard(dealCard);
   }
   // coin balance footer -- Shop UI Visual Redesign (section 18): wrapped in
   // a dark translucent pill. Same anchor point/data source as before

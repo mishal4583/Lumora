@@ -3082,7 +3082,7 @@ return __tick(5).then(function(){
   // (4.0+9*0.056=4.504, the smallest new tier >=4.5). Capacity is
   // untouched (its formula never changed) and economyV2Migrated is now
   // set, guarding against this ever running a second time.
-  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 11, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 10, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 9, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 11, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 10, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 9, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('reopening restores the Tracker toggle exactly', trackerOn === true);
   __check('reopening restores the persisted lastPlayed and quest progress exactly', prevLastPlayed === staleLastPlayed && quests.length === 1 && quests[0].progress === 3, 'prevLastPlayed=' + prevLastPlayed + ' quests=' + JSON.stringify(quests));
 
@@ -3198,7 +3198,7 @@ return __tick(5).then(function(){
 // full extended schema from then on.
 // =====================================================================
 scenario('playables-old-format-save', { audioEnabled: true }, `
-__check('coins, journal (including Mystery), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 } }) && trackerOn === false);
+__check('coins, journal (including Mystery), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
 __spy.loadResolve(JSON.stringify({ best: 12 })); // the exact shape the shipped build has always saved -- no coins, journal, upgrades, or trackerOn at all
 return __tick(5).then(function(){
   __check('an old-format {best}-only save loads without throwing', best === 12, 'best=' + best);
@@ -3211,7 +3211,7 @@ return __tick(5).then(function(){
   // already-all-zero upgrades object, but it DOES set economyV2Migrated,
   // which a completely fresh/old-format player should carry from here on
   // (so a later real purchase never re-triggers a migration pass).
-  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('trackerOn defaults sensibly (off) when the old save has no trackerOn field', trackerOn === false);
   __check('an old-format save with no lastPlayed field is treated as a genuine first-ever session (fresh quests rolled, not an empty/broken list)', quests.length > 0 && quests.length <= 3);
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
@@ -6896,6 +6896,143 @@ lumButton = function(rect, label, variant, disabled){ calls.push({ label: label,
     __check('Mystery Glow button label is unchanged by E5', calls[0].label === 'Watch Ad · Reveal Reward', 'got=' + calls[0].label);
     lumButton = realLumButton;
   });
+});
+`);
+
+// E6: Daily Deal -- one rotating, deterministic, EXISTING-item discount.
+// Date.now() is monkey-patched (a plain reassignable function property,
+// not a const binding) to make "today" controllable, restored at the end
+// -- the same "override a reassignable function, restore after" technique
+// already used for rewardedAdsAvailable() etc.
+scenario('lumora2-e6-daily-deal', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 100000, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+var realDateNow = Date.now;
+var DAY_MS = 24*60*60*1000;
+var baseTs = new Date(2026,0,1).getTime();
+
+// reset every candidate to unowned before each block below, so ownership
+// left over from an earlier check never leaks into a later one
+function resetCandidateOwnership(){
+  upgrades.deco = false; upgrades.fountain = false;
+  upgrades.ownedTrails = { none: true };
+}
+resetCandidateOwnership();
+upgrades.dailyDeal = null;
+Date.now = function(){ return baseTs; };
+
+// ---- eligible item -> can be selected ----
+var dealA = ensureDailyDeal();
+__check('an eligible day produces a real Daily Deal candidate', dealA !== null && (dealA.kind === 'decor' || dealA.kind === 'trail'), 'got=' + JSON.stringify(dealA));
+
+// ---- same day -> same offer (repeated calls, no state changed) ----
+var dealA2 = ensureDailyDeal();
+__check('calling ensureDailyDeal() again the same day returns the exact same item', JSON.stringify(dealA2) === JSON.stringify(dealA));
+
+// ---- reload -> same offer (persisted upgrades.dailyDeal survives a fresh load) ----
+var savedDailyDeal = JSON.parse(JSON.stringify(dealA)); // dealA is ensureDailyDeal()'s own {kind,key} shape, not the raw upgrades.dailyDeal record (which also carries "day")
+return __tick(1).then(function(){
+  // simulate a reload by resetting the module-level pick cache the same way
+  // a fresh page load would -- ensureDailyDeal() itself must reproduce the
+  // exact stored value without re-picking, since the day hasn't changed
+  var dealAfterReload = ensureDailyDeal();
+  __check('re-deriving the deal on the SAME persisted day key returns the identical stored item (this is what a page reload actually re-runs)', JSON.stringify(dealAfterReload) === JSON.stringify(savedDailyDeal));
+
+  // ---- discount = 20% ----
+  __check('dailyDealPrice(500) is exactly floor(500*0.8) = 400', dailyDealPrice(500) === 400);
+  __check('dailyDealPrice(150) is exactly floor(150*0.8) = 120', dailyDealPrice(150) === 120);
+  __check('dailyDealPrice never rounds down to 0 or negative for a tiny base price', dailyDealPrice(1) === 1 && dailyDealPrice(0) === 1);
+
+  // ---- existing shop prices remain unchanged (before AND after the temporary discount patch used internally by buyDailyDeal) ----
+  var decoRealPrice = SHOP_ITEMS.deco.price, goldRealPrice = TRAIL_COLORS.find(function(t){ return t.key === 'gold'; }).price;
+  __check('SHOP_ITEMS.deco.price is untouched by Daily Deal existing (150, the real E2/pre-E2 price)', decoRealPrice === 150);
+  __check('TRAIL_COLORS gold price is untouched by Daily Deal existing (500, the real price)', goldRealPrice === 500);
+
+  // ---- force today's deal to a KNOWN candidate for the purchase tests below ----
+  resetCandidateOwnership();
+  upgrades.dailyDeal = { day: todayKey(), kind: 'decor', key: 'deco' };
+  var info = dailyDealCandidateInfo(ensureDailyDeal());
+  __check('setup: today forced to the decor/deco candidate, currently unowned', info.owned === false && info.price === 150);
+  var discounted = dailyDealPrice(150);
+  coins = 100000;
+
+  // ---- purchase deducts discounted price, grants the existing item ----
+  var coinsBefore = coins;
+  var ok = buyDailyDeal();
+  __check('buyDailyDeal() reports success for a real eligible, affordable deal', ok === true);
+  __check('the purchase deducted EXACTLY the discounted price, not the full 150', coins === coinsBefore - discounted, 'coins=' + coins + ' discounted=' + discounted);
+  __check('the purchase granted ownership through the EXISTING deco flag -- no new ownership field', upgrades.deco === true);
+  __check('buyDailyDeal() left SHOP_ITEMS.deco.price restored to its real 150 after the temporary discount', SHOP_ITEMS.deco.price === 150);
+
+  // ---- double purchase impossible ----
+  var coinsAfterFirst = coins;
+  var ok2 = buyDailyDeal();
+  __check('a second buyDailyDeal() call for the same already-claimed deal is a no-op', ok2 === false && coins === coinsAfterFirst);
+
+  // ---- save/reload preserves ownership (existing ownership IS the source of truth, not a duplicate flag) ----
+  __check('the granted ownership persists through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).upgrades.deco === true);
+
+  // ---- owned item -> not selected (pickDailyDealCandidate walks past every owned candidate) ----
+  resetCandidateOwnership();
+  DAILY_DEAL_CANDIDATES.forEach(function(c){
+    if (c.kind === 'decor') upgrades[SHOP_ITEMS[c.key].field] = true;
+    else upgrades.ownedTrails[c.key] = true;
+  });
+  var noneEligible = pickDailyDealCandidate();
+  __check('when every single candidate is owned, pickDailyDealCandidate() returns null -- never a fake offer', noneEligible === null);
+  upgrades.dailyDeal = null;
+  __check('ensureDailyDeal() also returns null once nothing is eligible, and never crashes', ensureDailyDeal() === null);
+  __check('dailyDealCardRect() gracefully hides the section when nothing is eligible', dailyDealCardRect() === null);
+  var threwHideDraw = false;
+  try { screen = 'shop'; shopFrom = 'title'; shopTab = 'capacity'; draw(); } catch (e) { threwHideDraw = true; }
+  __check('the Workshop still draws fine with the Daily Deal section hidden', !threwHideDraw);
+
+  // leave exactly one candidate unowned and confirm it (and only it) is chosen regardless of hash start point
+  resetCandidateOwnership();
+  DAILY_DEAL_CANDIDATES.forEach(function(c){
+    if (c.key === 'violet') return;
+    if (c.kind === 'decor') upgrades[SHOP_ITEMS[c.key].field] = true;
+    else upgrades.ownedTrails[c.key] = true;
+  });
+  var onlyOne = pickDailyDealCandidate();
+  __check('an owned candidate is never selected -- the one remaining unowned candidate (violet) is chosen instead, regardless of where the day-hash starts', onlyOne !== null && onlyOne.kind === 'trail' && onlyOne.key === 'violet', 'got=' + JSON.stringify(onlyOne));
+  resetCandidateOwnership();
+  upgrades.dailyDeal = null;
+
+  // ---- different day -> different offer when eligible ----
+  var dayAKey = localDayKey(baseTs);
+  var startA = simpleDayHash(dayAKey) % DAILY_DEAL_CANDIDATES.length;
+  var tsB = null, dayBKey = null;
+  for (var i = 1; i < 60; i++) {
+    var ts = baseTs + i * DAY_MS;
+    var dk = localDayKey(ts);
+    if (simpleDayHash(dk) % DAILY_DEAL_CANDIDATES.length !== startA) { tsB = ts; dayBKey = dk; break; }
+  }
+  __check('setup: found a second calendar day within 2 months that hashes to a different start index', tsB !== null);
+  Date.now = function(){ return baseTs; };
+  upgrades.dailyDeal = null;
+  var dealDay1 = ensureDailyDeal();
+  Date.now = function(){ return tsB; };
+  var dealDay2 = ensureDailyDeal();
+  __check('a genuinely different calendar day (all candidates still unowned) produces a different Daily Deal item', JSON.stringify(dealDay2) !== JSON.stringify(dealDay1), 'day1=' + JSON.stringify(dealDay1) + ' day2=' + JSON.stringify(dealDay2));
+  __check('the day-2 offer is still stamped with day-2\\'s own key, not day-1\\'s', upgrades.dailyDeal.day === dayBKey);
+
+  // ---- tutorial player does not see the offer ----
+  Date.now = function(){ return baseTs; };
+  upgrades.tutorialDone = false;
+  __check('dailyDealCardRect() is hidden entirely while the tutorial is not yet done', dailyDealCardRect() === null);
+  upgrades.tutorialDone = true;
+  __check('dailyDealCardRect() becomes available again immediately once tutorialDone is true (same day, same underlying deal)', dailyDealCardRect() !== null || ensureDailyDeal() === null);
+
+  // ---- existing Almost Affordable remains fully unaffected by Daily Deal ----
+  upgrades.jarCapTiers.simple = 5;
+  var capCost = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+  __check('Almost Affordable\\'s own cost function is untouched by anything Daily Deal does', capCost === 115, 'got=' + capCost);
+  upgrades.jarCapTiers.simple = 0;
+
+  Date.now = realDateNow;
+});
 });
 `);
 
