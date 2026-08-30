@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1176,7 +1176,7 @@ function continueFromOver(){
     // introduces or is scoped to fix -- but the streak/reward specifically
     // must be protected per direct instruction, hence this one flag).
     if(!S.streakCommitted){ S.streakCommitted=true; commitNightStreak(); }
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
     weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
@@ -1944,6 +1944,19 @@ let nightNumber=1; // "Which night is the player on" -- distinct from the existi
 // entirely different questions ("how many nights ever" vs "how many days
 // in a row").
 let nightStreak=0, lastNightCompletionDay='';
+// E9 Night Variety: relocated up here from their original declaration
+// spots (right above generateNightObjectives()/generateNightEvent()) for
+// the EXACT ordering-hazard reason CLAUDE.md documents -- the non-YT
+// load-restoration block a little further down this file (see
+// "if(!YT){ const l2=...") now reads/assigns these at TOP LEVEL, before
+// most of the file has executed, so the let declarations themselves must
+// live above that point or a real save containing these fields would
+// throw "Cannot access before initialization" and silently kill the
+// script on load. This bit KEYS/JAR_SKINS/COIN_VALUE_STEP before it; same
+// class of bug, caught before shipping this time by actually tracing the
+// call chain rather than trusting where the code "logically" belongs.
+let cachedNightObjectives=null, cachedNightObjectivesFor=-1;
+let cachedNightEventFor=-1, cachedNightEvent=null;
 // Night Streak milestone coin bonuses -- small and fixed, only 3/5/7 per
 // direct instruction, nothing beyond. Reuses the EXISTING
 // applyCoinsOrLuckReward('coins', val) helper (the daily quests' and
@@ -2167,7 +2180,7 @@ function seasonProgressAdd(n){
   seasonProgress=Math.min(seasonProgress+(n||1),currentSeason().milestones);
   for(let lvl=prev+1;lvl<=seasonProgress;lvl++)grantSeasonLevel(lvl);
   if(seasonProgress>prev){
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
     saveProgress();
   }
 }
@@ -2243,7 +2256,7 @@ function activatePrestige(){
   if(!prestigeEligible())return false;
   prestigeLevel+=1;
   grantPrestigeReward(prestigeLevel);
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -2257,6 +2270,17 @@ if(!YT){
     // decrease). typeof+>=0 is the only defensive bar needed.
     if(typeof l2.nightStreak==='number'&&l2.nightStreak>=0)nightStreak=Math.floor(l2.nightStreak);
     if(typeof l2.lastNightCompletionDay==='string')lastNightCompletionDay=l2.lastNightCompletionDay;
+    // E9: restore the CURRENT night's cached objectives/event so a genuine
+    // page reload mid-night restores the exact same configuration instead
+    // of ensureNightObjectives()/ensureNightEvent() treating it as a brand
+    // new night to reroll. Plain restore (not ratcheted) -- these track
+    // "which night is cached", not a monotonic counter. Array/type checks
+    // only; a malformed value just leaves the safe -1/null default, which
+    // both ensure* functions already treat as "nothing cached yet".
+    if(typeof l2.cachedNightObjectivesFor==='number')cachedNightObjectivesFor=Math.floor(l2.cachedNightObjectivesFor);
+    if(Array.isArray(l2.cachedNightObjectives))cachedNightObjectives=l2.cachedNightObjectives;
+    if(typeof l2.cachedNightEventFor==='number')cachedNightEventFor=Math.floor(l2.cachedNightEventFor);
+    if(typeof l2.cachedNightEvent==='string'||l2.cachedNightEvent===null)cachedNightEvent=l2.cachedNightEvent;
     if(l2.objectivesCompleted&&typeof l2.objectivesCompleted==='object')objectivesCompleted=l2.objectivesCompleted;
     if(Array.isArray(l2.eventHistory))eventHistory=l2.eventHistory;
     if(Array.isArray(l2.contractsCompleted))contractsCompleted=l2.contractsCompleted;
@@ -2550,14 +2574,25 @@ function nightObjectiveTier(){ return nightNumber<=3?'early':'later'; }
 // objectives instead of rerolling them, while a genuine new night (detected
 // by nightNumber having actually advanced) still gets a fresh set. Mirrors
 // the exact "session-level, not persisted" precedent nightsCompletedThisSession
-// already established in Phase 0.
-let cachedNightObjectives=null, cachedNightObjectivesFor=-1;
+// already established in Phase 0. (cachedNightObjectives/
+// cachedNightObjectivesFor themselves are declared much earlier now --
+// see the E9 ordering-hazard comment near nightStreak's own declaration.)
 // Picks tonight's 3 objectives: 3 distinct categories (always possible --
 // catch/delivery/score/miss each have at least one always-eligible
 // template), one eligible template per chosen category, tier-resolved into
 // a concrete instance. Uses the project's own rand() helper -- no new
 // randomization primitive.
-function generateNightObjectives(){
+// E9: `prevObjectives` is last night's own cached set (or null for the
+// very first night ever, or the first night after a reload finds no prior
+// cache) -- reused AS-IS from the EXISTING cachedNightObjectives, not a
+// new duplicate "lastNight*" field. Only affects WHICH TEMPLATE gets
+// picked within an already-eligible category pool; never changes which
+// categories get chosen, never changes target/reward/difficulty, and
+// never forces a pick when a category has only one eligible template
+// (e.g. 'score' has exactly one) -- per direct instruction not to
+// guarantee variety the pool can't actually provide.
+function generateNightObjectives(prevObjectives){
+  const prevIds=(prevObjectives||[]).map(o=>o.id);
   const tier=nightObjectiveTier();
   const categories=['catch','delivery','score','miss'];
   for(let i=categories.length-1;i>0;i--){ const j=Math.floor(rand(0,i+1)); const tmp=categories[i]; categories[i]=categories[j]; categories[j]=tmp; }
@@ -2571,7 +2606,16 @@ function generateNightObjectives(){
   const active=[], progress={};
   chosen.forEach(cat=>{
     const eligible=OBJECTIVE_POOL.filter(o=>o.category===cat&&o[tier]);
-    const tmpl=eligible[Math.floor(rand(0,eligible.length))];
+    let tmpl=eligible[Math.floor(rand(0,eligible.length))];
+    // E9 Night Variety: if this exact template also appeared last night,
+    // and this category actually offers a different eligible template,
+    // reroll among the alternatives -- same "reroll on collision, uniform
+    // among what's left" technique used for events below. A category with
+    // only one eligible template (eligible.length===1) is left alone.
+    if(eligible.length>1&&prevIds.indexOf(tmpl.id)>=0){
+      const alternatives=eligible.filter(o=>o.id!==tmpl.id);
+      tmpl=alternatives[Math.floor(rand(0,alternatives.length))];
+    }
     const resolved=tmpl[tier];
     active.push({id:tmpl.id, category:tmpl.category, kind:tmpl.kind, fireflyType:tmpl.fireflyType||null, missLimit:tmpl.missLimit,
       label:tmpl.label.replace('{t}',resolved.target), target:resolved.target, reward:resolved.reward, done:false});
@@ -2600,43 +2644,70 @@ function ensureNightObjectives(){
     // persistent state re-shown on every retry.
     S.isNewNight=false;
   } else {
-    generateNightObjectives();
+    // E9: the OUTGOING cache (last night's set, or null) is captured as
+    // the argument BEFORE it gets overwritten below -- this is the exact
+    // "reuse existing state" signal generateNightObjectives()'s own
+    // anti-repeat check reads, not a separate persisted "last night" field.
+    generateNightObjectives(cachedNightObjectives);
     cachedNightObjectivesFor=nightNumber;
     cachedNightObjectives=S.objectiveActive.map(o=>Object.assign({},o));
+    // E9: persisted immediately (same "save the moment something real
+    // happens" discipline objectivesCompleted/eventHistory already use) --
+    // this is what makes a genuine page reload mid-night restore the SAME
+    // 3 objectives instead of silently rerolling a different set for what
+    // the player experiences as the same night.
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+    saveProgress();
     S.isNewNight=true; // a genuine new night -- show the reveal card
   }
 }
 
 // ---------- Lumora 2.0 Phase 4: Night Events ----------
 // See EVENT_TYPES/EVENT_INFO's own comment (near WEATHER_INFO) for why this
-// is a separate system from weather, not a reskin of it. Session-level
-// cache keyed on nightNumber, same "restart never rerolls, a genuine new
-// night always can" discipline ensureNightObjectives() already established
-// -- deliberately NOT part of S (reset() wipes S every call) and NOT itself
-// the persistence mechanism (eventHistory is; see generateNightEvent()).
-let cachedNightEventFor=-1, cachedNightEvent=null;
+// is a separate system from weather, not a reskin of it. Keyed on
+// nightNumber, same "restart never rerolls, a genuine new night always
+// can" discipline ensureNightObjectives() already established -- NOT part
+// of S (reset() wipes S every call). E9: now ALSO persisted (see
+// ensureNightEvent()'s generate branch) -- eventHistory remains the
+// lifetime record of every event ever rolled; this pair is specifically
+// "what did the CURRENT/most recent night roll", which a genuine page
+// reload needs in order to restore it instead of silently rerolling.
+// (cachedNightEventFor/cachedNightEvent themselves are declared much
+// earlier now -- see the E9 ordering-hazard comment near nightStreak's
+// own declaration.)
 // Roughly 1 in 3 nights gets an event, evenly split across the 3 types --
 // frequent enough to matter, rare enough that "I wonder what happens
 // tonight?" stays a real question rather than a guarantee. Tune later,
 // same "not yet human-playtested" caveat as every other number this
 // session has picked.
 const NIGHT_EVENT_CHANCE=0.35;
-function generateNightEvent(){
+// E9: `prevEvent` is last night's own cached event (string id, or null for
+// no-event/first-night/no-prior-cache) -- reused AS-IS from the EXISTING
+// cachedNightEvent, not a new duplicate field. Avoids repeating the same
+// type back-to-back when a different type is still a valid roll; never
+// forces a "no event" night to become an event night or vice versa (the
+// 35% gate above is completely untouched).
+function generateNightEvent(prevEvent){
   if(rand(0,1)<NIGHT_EVENT_CHANCE){
-    S.eventActive=EVENT_TYPES[Math.floor(rand(0,EVENT_TYPES.length))];
+    let pick=EVENT_TYPES[Math.floor(rand(0,EVENT_TYPES.length))];
+    if(pick===prevEvent&&EVENT_TYPES.length>1){
+      const alternatives=EVENT_TYPES.filter(e=>e!==prevEvent);
+      pick=alternatives[Math.floor(rand(0,alternatives.length))];
+    }
+    S.eventActive=pick;
     // D4: the announcement itself is no longer armed here -- it's driven
     // entirely by S.isNewNight (already correctly set by
     // ensureNightObjectives(), which always runs before this) plus
     // S.newNightT, see eventAnnounceElapsed(). Genuinely new night ==
     // S.isNewNight true == the announcement will play; nothing else to set.
-    // Recorded the moment it's rolled, with its own save call -- mirrors
-    // objectivesCompleted's own discipline (saved at the moment something
-    // real happens, not merely relying on continueFromOver()'s earlier
-    // save, which already ran before this executes inside reset()).
+    // Recorded the moment it's rolled -- eventHistory is the lifetime
+    // record (unrelated to this phase); weeklyProgress() saves on its own.
+    // E9: the explicit save for cachedNightEvent itself now lives in
+    // ensureNightEvent() below, AFTER this function returns, so it covers
+    // BOTH outcomes here (an event rolled, or none did) -- a "no event
+    // tonight" result needs to survive a reload just as much as a real one.
     eventHistory.push(S.eventActive);
     weeklyProgress('events',1); // Lumora 2.0 Phase 9: same "the moment it's rolled" authoritative site
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay})); }catch(e){} }
-    saveProgress();
   } else {
     S.eventActive=null;
   }
@@ -2651,9 +2722,22 @@ function ensureNightEvent(){
     // just without the flight-in; see drawEventChip()'s own comment.
     S.eventActive=cachedNightEvent;
   } else {
-    generateNightEvent();
+    // E9: the OUTGOING cache (last night's event, or null) is captured
+    // BEFORE it gets overwritten below -- only meaningful once a real
+    // previous night's cache actually exists (cachedNightEventFor>=0);
+    // -1 means "no prior night this session/save has ever cached", so
+    // there's nothing to avoid repeating yet.
+    const prevEvent=cachedNightEventFor>=0?cachedNightEvent:null;
+    generateNightEvent(prevEvent);
     cachedNightEventFor=nightNumber;
     cachedNightEvent=S.eventActive;
+    // E9: persisted here, unconditionally, covering BOTH "an event
+    // rolled" and "no event tonight" -- same "save the moment something
+    // real happens" discipline as ensureNightObjectives()'s own generate
+    // branch, so a genuine page reload mid-night restores the exact same
+    // outcome instead of silently rerolling.
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+    saveProgress();
   }
 }
 // Moth Swarm's compensating reward -- a flat, modest multiplier applied
@@ -3386,7 +3470,7 @@ function equipTheme(id){
   if(!validVillageTheme(id)||!isThemeOwned(id))return false;
   if(equippedTheme===id)return true;
   equippedTheme=id;
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -3638,6 +3722,11 @@ if(YT&&YT.game&&YT.game.loadData){
       // E7: same plain (non-ratcheted) restore as the non-YT load path above.
       if(typeof d.nightStreak==='number'&&d.nightStreak>=0)nightStreak=Math.floor(d.nightStreak);
       if(typeof d.lastNightCompletionDay==='string')lastNightCompletionDay=d.lastNightCompletionDay;
+      // E9: same defensive restore as the non-YT load path above.
+      if(typeof d.cachedNightObjectivesFor==='number')cachedNightObjectivesFor=Math.floor(d.cachedNightObjectivesFor);
+      if(Array.isArray(d.cachedNightObjectives))cachedNightObjectives=d.cachedNightObjectives;
+      if(typeof d.cachedNightEventFor==='number')cachedNightEventFor=Math.floor(d.cachedNightEventFor);
+      if(typeof d.cachedNightEvent==='string'||d.cachedNightEvent===null)cachedNightEvent=d.cachedNightEvent;
       if(d.objectivesCompleted&&typeof d.objectivesCompleted==='object')objectivesCompleted=d.objectivesCompleted;
       if(Array.isArray(d.eventHistory))eventHistory=d.eventHistory;
       if(Array.isArray(d.contractsCompleted))contractsCompleted=d.contractsCompleted;
