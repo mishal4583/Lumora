@@ -924,15 +924,12 @@ function finalizeNight(){
   // Complete screen (Workshop's own favor, a stray double-claim) can ever
   // contaminate it after the fact.
   S.coinsEarnedThisNight=coins-coinsAtRoundStart;
-  // Lumora 2.0 Phase 1: miss-based objectives are evaluated exactly once,
-  // here -- the one authoritative "the night has genuinely ended" moment.
-  // Runs AFTER S.coinsEarnedThisNight is already frozen above, so any bonus
-  // this grants is correctly excluded from "Double the Glow"'s doubling
-  // calculation (catch/deliver/score objective rewards, by contrast, are
-  // granted mid-round and DO flow into that same figure -- exactly like
-  // existing quest rewards already do; not a new exception, the same
-  // already-accepted behavior every mid-round coin gain has always had).
-  evaluateMissObjectives();
+  // Miss-category objectives no longer need anything evaluated here -- they
+  // were redefined to be live-scored (checked at the same delivery-success
+  // moment reach_score already uses, see objectiveProgress()) after the
+  // original "evaluate at night's end" design turned out to be permanently
+  // unwinnable (see the comment where evaluateMissObjectives() used to be
+  // defined, just above the D3 section header).
   // D3: record which contract ran, once, at this exact authoritative moment
   // -- same "the night has genuinely ended" site nightNumber/
   // nightsCompletedThisSession update at (in continueFromOver()). The coin
@@ -1651,12 +1648,33 @@ const OBJECTIVE_POOL=[
     early:{target:1,reward:12}, later:{target:2,reward:22} },
   { id:'reach_score', category:'score', kind:'score', label:'Reach {t} Light',
     early:{target:15,reward:10}, later:{target:30,reward:18} },
-  // Flat across tiers -- the underlying miss/difficulty curve itself doesn't
-  // scale by nightNumber (see diff()), so neither does this.
-  { id:'finish_under_3_misses', category:'miss', kind:'missUnder', missLimit:3, label:'Finish With Fewer Than 3 Misses',
-    early:{target:3,reward:15}, later:{target:3,reward:15} },
-  { id:'finish_zero_misses', category:'miss', kind:'missZero', missLimit:0, label:'Finish With 0 Misses',
-    early:{target:0,reward:25}, later:{target:0,reward:25} }
+  // Redefined (was "Finish With Fewer Than 3 Misses") -- the original
+  // wording measured something that could never actually happen: a night
+  // only ever finalizes once S.misses has already hit missLimit (5+, see
+  // the finalizeNight() call sites), which already exceeds this
+  // objective's own threshold by the time it could be checked. That made
+  // it permanently unwinnable, not just hard -- a genuine logic bug, per
+  // direct instruction to fix. Redefined to something achievable under the
+  // CURRENT rules: a live score threshold gated on a live miss budget,
+  // checked at the same delivery-success moment reach_score already uses
+  // (see objectiveProgress()'s kind==='missUnder' branch) -- no ending
+  // required. `target` is now a score threshold, not a miss count;
+  // `missLimit` is still the budget. Scaled down from reach_score's own
+  // targets (10/18 vs 15/30) since the miss budget makes it strictly
+  // harder at the same score -- reward left as-is (already tuned as a
+  // higher payout than reach_score for the added risk).
+  // Label kept short ("Reach {t} Light, <3 Misses" not "...With Fewer Than
+  // 3 Misses") -- every sibling label in this pool is a few words, and the
+  // objective row's label column (new-night card, live HUD, Night Complete)
+  // is a fixed width sized for that, not for a full sentence.
+  { id:'finish_under_3_misses', category:'miss', kind:'missUnder', missLimit:3, label:'Reach {t} Light, <3 Misses',
+    early:{target:10,reward:15}, later:{target:18,reward:15} },
+  // Same redefinition as above, tighter budget (zero misses, ever) paired
+  // with a lower score target so it stays reachable by a careful player
+  // who hasn't missed at all yet -- not the same target as the 3-miss
+  // version, deliberately.
+  { id:'finish_zero_misses', category:'miss', kind:'missZero', missLimit:0, label:'Reach {t} Light, 0 Misses',
+    early:{target:8,reward:25}, later:{target:14,reward:25} }
 ];
 // nightNumber is a persistent counter, not a live difficulty signal (the
 // in-round catch/spawn curve in diff() is identical every night) -- it's
@@ -1893,10 +1911,23 @@ function objectiveProgress(kind,type){
   if(!S.objectiveActive||!S.objectiveActive.length)return;
   let changed=false;
   S.objectiveActive.forEach(o=>{
-    if(o.done||o.category==='miss')return; // miss-category objectives are only ever evaluated at night's end, see evaluateMissObjectives()
-    if(o.kind==='score'){
+    if(o.done)return;
+    if(o.kind==='score'||o.kind==='missUnder'||o.kind==='missZero'){
+      // Redefined miss objectives ride the exact same live delivery-success
+      // hook reach_score already uses -- 'target' is a score threshold for
+      // all three kinds now. missUnder/missZero additionally require the
+      // miss budget to still be intact AT THIS MOMENT before the score
+      // progress is allowed to complete the objective; if the budget's
+      // already blown, progress is still recorded (so the HUD shows how
+      // close the player got) but it can never mark done -- misses only
+      // ever increase, so once blown it stays blown for the rest of the
+      // round, matching objectiveDisplayFailed()'s own live read.
       if(kind!=='score')return;
       S.objectiveProgress[o.id]=S.score;
+      if(o.kind!=='score'){
+        const withinBudget=o.kind==='missZero'?S.misses===0:S.misses<o.missLimit;
+        if(!withinBudget){ changed=true; return; }
+      }
     } else {
       if(o.kind!==kind)return;
       if(o.fireflyType&&o.fireflyType!==type)return;
@@ -1916,26 +1947,15 @@ function objectiveProgress(kind,type){
   });
   if(changed)saveProgress();
 }
-// Miss-based objectives ("Finish With Fewer Than X Misses"/"Finish With 0
-// Misses") are evaluated exactly once, here -- the one authoritative moment
-// the night has genuinely ended -- never mid-round. A player temporarily
-// under the threshold is NOT complete until finalizeNight() actually runs;
-// failing to meet it here leaves the objective incomplete (o.done stays
-// false), never marked complete, per direct instruction.
-function evaluateMissObjectives(){
-  if(!S.objectiveActive||!S.objectiveActive.length)return;
-  S.objectiveActive.forEach(o=>{
-    if(o.done||o.category!=='miss')return;
-    S.objectiveProgress[o.id]=S.misses;
-    const passed=o.kind==='missZero'?S.misses===0:S.misses<o.missLimit;
-    if(passed){
-      o.done=true;
-      coins+=o.reward;
-      if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
-      objectivesCompleted[o.id]=(objectivesCompleted[o.id]||0)+1;
-    }
-  });
-}
+// evaluateMissObjectives() used to live here -- the miss-category
+// objectives were originally evaluated exactly once, at finalizeNight(),
+// "the night has genuinely ended." That was the actual bug (user-caught,
+// live): a night can only ever finalize once S.misses>=missLimit (5+), which
+// already exceeds both objectives' own thresholds by the time this ran, so
+// neither could ever pass. Removed rather than patched-in-place once the
+// objectives themselves were redefined to be live-scored (see
+// objectiveProgress()'s missUnder/missZero branch above) -- there is no
+// longer anything left for an end-of-night pass to evaluate.
 
 // ---------- Lumora 2.0 Phase 3: Night Contracts ----------
 // D3 (Claude Design spec): the underlying gameplay system this UI needed
@@ -2014,8 +2034,8 @@ function contractPayoutCoins(){
 // "deliver safely or risk one more catch" decision visible without any
 // further UI. Both functions below have exactly one real call site each
 // (the catch-success site and the miss site) but are pulled out on their
-// own, mirroring objectiveProgress()/evaluateMissObjectives()'s own
-// discipline, so the harness can drive them directly without simulating
+// own, mirroring objectiveProgress()'s own "one canonical increment
+// function" discipline, so the harness can drive them directly without simulating
 // full catch/miss physics.
 const CHAIN_MILESTONES=[
   { n:5,  reward:5,  label:'🔥 Glow Chain ×5' },
@@ -5217,15 +5237,15 @@ function drawNewNightCard(){
   }
   ctx.restore();
 }
-// D1: display-only reads -- neither of these touches objectiveProgress()/
-// evaluateMissObjectives()'s own evaluation timing (still exactly once, at
-// finalizeNight(), per Phase 1's explicit design). A miss-category
-// objective's real S.objectiveProgress entry stays at 0 all round (see
-// objectiveProgress()'s own miss-category skip) since it's only ever
-// written at night's end -- these two helpers read S.misses LIVE instead,
-// purely so the HUD can show the player their actual current count/status
-// instead of a frozen "0/3" all night.
-function objectiveDisplayProgress(o){ return o.category==='miss'?S.misses:(S.objectiveProgress[o.id]||0); }
+// Progress display is now unified across every category -- the redefined
+// missUnder/missZero objectives write S.objectiveProgress[o.id]=S.score on
+// every delivery just like reach_score does (see objectiveProgress()), so
+// there's no longer a separate "read S.misses live" case to special-case
+// here. objectiveDisplayFailed() below is the one that still reads S.misses
+// live -- that's a different question ("has the miss budget been blown"),
+// unrelated to score progress, and still needs a live read since the budget
+// can be blown well before or after the score target is ever reached.
+function objectiveDisplayProgress(o){ return S.objectiveProgress[o.id]||0; }
 function objectiveDisplayFailed(o){
   if(o.done||o.category!=='miss')return false;
   return o.kind==='missZero'?S.misses>0:S.misses>=o.missLimit;
@@ -5292,8 +5312,14 @@ function drawObjectiveRow(o,x,rowTop,rowH,trackX1,trackX2,showTrack){
     ctx.fillStyle='rgba(174,184,203,0.16)'; ctx.fill();
     const fillW=Math.max(2,(trackX2-trackX1)*frac);
     ctx.beginPath(); ctx.roundRect(trackX1,rowTop+21,fillW,2,1);
-    if(o.category==='miss'){
-      ctx.fillStyle='rgba(240,150,56,0.85)'; // ember -- counts UP toward failure, not success
+    if(failed){
+      // Redefined miss objectives can now fail LIVE, mid-round (the instant
+      // the miss budget is blown, well before night's end) -- once that
+      // happens there's no more "toward failure" direction left to show
+      // (was the old category==='miss' ember-always fill, back when p was
+      // literally the live miss count); dim the bar to match the failed
+      // glyph/text above instead.
+      ctx.fillStyle='rgba(174,184,203,0.30)';
     } else {
       const g=ctx.createLinearGradient(trackX1,0,trackX2,0);
       g.addColorStop(0,LUM_GOLD); g.addColorStop(1,LUM_AMBER);
@@ -6504,13 +6530,13 @@ function drawOver(){
   // Objectives sub-section -- same panel, smaller/tighter type than the 3
   // main stat rows above (this is a "compact section," not a second full
   // panel). Only completed objectives ever contribute to the bonus total;
-  // a failed miss-based objective (o.done still false after
-  // evaluateMissObjectives()) shows as incomplete, no reward, per direct
+  // a failed miss-based objective (o.done still false because its live
+  // miss budget got blown before the score target was reached, see
+  // objectiveDisplayFailed()) shows as incomplete, no reward, per direct
   // instruction. The bonus figure is DISPLAY-ONLY (derived fresh from
   // S.objectiveActive every frame) -- rewards themselves were already
-  // granted exactly once, at completion time, by objectiveProgress()/
-  // evaluateMissObjectives(); re-rendering this screen any number of times
-  // cannot re-grant anything.
+  // granted exactly once, at completion time, by objectiveProgress();
+  // re-rendering this screen any number of times cannot re-grant anything.
   if(hasObjectives){
     const divY=panelR.y+140;
     // D1: a "slightly stronger" divider (haze .20 vs the existing stat-row
