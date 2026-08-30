@@ -4481,6 +4481,64 @@ weeklyChestClaimed = false;
 persistWeeklyLocal();
 var savedWeekly = JSON.parse(localStorage.getItem('gk2_weekly') || 'null');
 __check('persistWeeklyLocal() writes weeklyStats/weeklyMilestonesClaimed/weeklyChestClaimed to gk2_weekly', savedWeekly && JSON.stringify(savedWeekly.stats) === JSON.stringify(weeklyStats) && JSON.stringify(savedWeekly.claimed) === JSON.stringify(weeklyMilestonesClaimed) && savedWeekly.chestClaimed === false, 'saved=' + JSON.stringify(savedWeekly));
+
+// =====================================================================
+// Phase 9 audit: the above (pre-existing, from an earlier out-of-sequence
+// pass) already covers weekKey()/resolveWeekly()'s 3 branches, exact-once
+// milestone+chest granting, all 4 real hook sites via genuine gameplay,
+// and the raw persistence write. These few checks close the specific
+// gaps the Phase 9 spec calls out that weren't already asserted:
+// double-count-from-rendering, previous-week-reward-not-regranted, and
+// Daily-Quest/Weekly independence. No production code changed -- the
+// audit found the existing system correct for its own already-decided
+// scope (4 goals: fireflies/rare/nights/events; no contracts/chain
+// category was ever part of this design, so Tests 14/16 in the spec's own
+// list are N/A here, not a gap).
+// =====================================================================
+
+// ---- Test 2: a fresh player (module-load defaults, before any resolveWeekly() call) has valid initial weekly state ----
+__check('Test 2: WEEKLY_MILESTONES itself is a stable, non-empty goal set', Array.isArray(WEEKLY_MILESTONES) && WEEKLY_MILESTONES.length === 4 && WEEKLY_MILESTONES.every(function(m){ return typeof m.key === 'string' && m.target > 0 && m.reward > 0 && typeof m.label === 'string'; }));
+
+// ---- Test 5: no double count from a duplicate render/reopen flow -- weeklyProgress() is never called from any draw function, only from real gameplay hooks, so re-rendering Night Complete or the Weekly Journal tab any number of times must never move weeklyStats ----
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false;
+weeklyStats = { fireflies: 3, rare: 1, nights: 2, events: 1 };
+weeklyMilestonesClaimed = { fireflies: false, rare: false, nights: false, events: true };
+weeklyChestClaimed = false;
+S.over = true; S.overT = 1; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins; S.objectiveActive = [];
+var weeklyBeforeRenders = JSON.stringify(weeklyStats);
+var coinsBeforeRenders = coins;
+var threwOnRepeatedRender = false;
+try {
+  for (var wri = 0; wri < 50; wri++) { drawOver(); journalTab = 'weekly'; drawJournalScreen(); }
+} catch (e) { threwOnRepeatedRender = true; }
+__check('Test 5 setup: repeated Night Complete / Weekly Journal renders do not throw', !threwOnRepeatedRender);
+__check('Test 5: weeklyStats is byte-for-byte unchanged after 50 repeated renders of both the completion screen and the Weekly tab -- rendering never calls weeklyProgress()', JSON.stringify(weeklyStats) === weeklyBeforeRenders);
+__check('Test 5: no coins were granted merely from re-rendering', coins === coinsBeforeRenders);
+
+// ---- Test 11: a previous week's already-claimed reward is never re-granted once a new week is detected ----
+weeklyStats = { fireflies: 999, rare: 999, nights: 999, events: 999 }; // last week: everything long since completed
+weeklyMilestonesClaimed = { fireflies: true, rare: true, nights: true, events: true };
+weeklyChestClaimed = true; // the chest bonus was already claimed last week too
+var coinsBeforeNewWeek = coins;
+prevLastPlayed = 1000; lastPlayed = 1000 + oneWeekMs; // a genuine new week has begun
+resolveWeekly({ stats: { fireflies: 999, rare: 999, nights: 999, events: 999 }, claimed: { fireflies: true, rare: true, nights: true, events: true }, chestClaimed: true });
+__check('Test 11: loading into a new week does not grant any coins from last week\\'s already-claimed rewards', coins === coinsBeforeNewWeek);
+__check('Test 11: the new week starts with fresh, unclaimed milestones -- last week\\'s claimed flags do not carry over', JSON.stringify(weeklyMilestonesClaimed) === JSON.stringify({ fireflies: false, rare: false, nights: false, events: false }) && weeklyChestClaimed === false);
+__check('Test 11: the new week\\'s progress starts at zero, not carried over from last week\\'s totals', JSON.stringify(weeklyStats) === JSON.stringify({ fireflies: 0, rare: 0, nights: 0, events: 0 }));
+
+// ---- Test 12: Daily Quest reset (rollQuests()) does not touch weekly state, and resolveWeekly() does not touch quests -- fully independent, separately-keyed systems ----
+weeklyStats = { fireflies: 12, rare: 2, nights: 1, events: 0 };
+weeklyMilestonesClaimed = { fireflies: false, rare: false, nights: false, events: false };
+var weeklyBeforeQuestReset = JSON.stringify(weeklyStats);
+var claimedBeforeQuestReset = JSON.stringify(weeklyMilestonesClaimed);
+rollQuests(); // a genuine daily quest reroll, same function a new calendar day triggers
+__check('Test 12: rollQuests() (a Daily Quest reset) does not change weeklyStats', JSON.stringify(weeklyStats) === weeklyBeforeQuestReset);
+__check('Test 12: rollQuests() does not change weeklyMilestonesClaimed either', JSON.stringify(weeklyMilestonesClaimed) === claimedBeforeQuestReset);
+var questsBeforeWeeklyResolve = JSON.stringify(quests);
+prevLastPlayed = 1000; lastPlayed = 1000 + 5000; // same-week resolveWeekly call
+resolveWeekly({ stats: weeklyStats, claimed: weeklyMilestonesClaimed, chestClaimed: false });
+__check('Test 12: resolveWeekly() does not touch the quests array in the other direction either', JSON.stringify(quests) === questsBeforeWeeklyResolve);
 `);
 
 // =====================================================================
