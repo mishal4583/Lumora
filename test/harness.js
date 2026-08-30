@@ -6521,6 +6521,95 @@ return __tick(5).then(function(){
 });
 `);
 
+scenario('lumora2-e3-milestones', null, `
+// ---- progressionMilestones(): Coin Value's own 60-level line reproduces the exact 5/15/30/45/60 example from the spec ----
+__check('progressionMilestones(60) reproduces the spec\\'s own worked example (5/15/30/45/60)', JSON.stringify(progressionMilestones(60)) === JSON.stringify([5, 15, 30, 45, 60]), 'got=' + JSON.stringify(progressionMilestones(60)));
+// ---- a short ladder (Simple Capacity, 8 levels) still gets a sensible, non-degenerate milestone set, always ending at its own max ----
+var shortMs = progressionMilestones(8);
+__check('progressionMilestones(8) is non-empty, strictly ascending, and always ends at the line\\'s own max', shortMs.length > 0 && shortMs[shortMs.length - 1] === 8 && shortMs.every(function(v, i){ return i === 0 || v > shortMs[i - 1]; }), 'got=' + JSON.stringify(shortMs));
+// ---- every milestone for every real E2 tier count (8-60) is a valid level in range, unique, ascending, and terminates at max ----
+[8, 10, 12, 15, 19, 20, 21, 24, 25, 26, 27, 28, 31, 32, 60].forEach(function(max){
+  var ms = progressionMilestones(max);
+  var ok = ms.length > 0 && ms[ms.length - 1] === max && ms.every(function(v){ return v >= 1 && v <= max; }) && ms.every(function(v, i){ return i === 0 || v > ms[i - 1]; });
+  __check('progressionMilestones(' + max + ') is valid (ascending, in-range, ends at max)', ok, 'got=' + JSON.stringify(ms));
+});
+
+// ---- nextProgressionMilestone(): the spec's own worked example -- level 37 of 60 -> next milestone 45 ----
+__check('nextProgressionMilestone(37, 60) is 45, exactly the spec\\'s own worked example', nextProgressionMilestone(37, 60) === 45);
+// ---- landing exactly on a milestone: next is the FOLLOWING one, not the one just reached ----
+__check('nextProgressionMilestone(45, 60) looks strictly forward -- the next one after 45 is 60, not 45 again', nextProgressionMilestone(45, 60) === 60);
+// ---- at the final milestone (max itself), there is no next one ----
+__check('nextProgressionMilestone(60, 60) returns null -- already at the final milestone, nothing further to name', nextProgressionMilestone(60, 60) === null);
+// ---- before the very first milestone ----
+__check('nextProgressionMilestone(0, 60) is 5 -- the first real milestone', nextProgressionMilestone(0, 60) === 5);
+
+// ---- isProgressionMilestone(): the spec's own "if the player reaches 45/60, show MILESTONE 45" case ----
+__check('isProgressionMilestone(45, 60) is true -- landing exactly on a real milestone', isProgressionMilestone(45, 60) === true);
+__check('isProgressionMilestone(37, 60) is false -- 37 is not one of Coin Value\\'s own milestones', isProgressionMilestone(37, 60) === false);
+__check('isProgressionMilestone(60, 60) is true -- the final level is always a milestone (the max itself)', isProgressionMilestone(60, 60) === true);
+
+// ---- drawProgressionMilestoneLine() does not throw for every real E2 line/level combination, maxed or not ----
+(function(){
+  var threw = false;
+  try {
+    [8, 20, 32, 60].forEach(function(max){
+      for (var lvl = 0; lvl <= max; lvl += Math.max(1, Math.floor(max / 7))) drawProgressionMilestoneLine(20, 100, lvl, max);
+      drawProgressionMilestoneLine(20, 100, max, max); // the maxed level itself
+    });
+  } catch (e) { threw = true; }
+  __check('drawProgressionMilestoneLine() does not throw across every real E2 level/max combination', !threw);
+})();
+
+// ---- economy integrity: the milestone helpers are pure display functions -- calling them must never change coins, upgrade tiers, or any economy state ----
+(function(){
+  var savedCoins = coins, savedLightTier = upgrades.lightTier, savedCap = JSON.stringify(upgrades.jarCapTiers);
+  progressionMilestones(60); nextProgressionMilestone(30, 60); isProgressionMilestone(30, 60);
+  __check('calling the milestone helpers never mutates coins, Coin Value level, or any jar tier -- pure display, no side effects', coins === savedCoins && upgrades.lightTier === savedLightTier && JSON.stringify(upgrades.jarCapTiers) === savedCap);
+})();
+`);
+
+scenario('lumora2-e3-card-labels', null, `
+// ---- economy integrity: the new LEVEL/MAX LEVEL labels and milestone line are pure UI -- the underlying E2 cost/stat functions this phase must not touch are unchanged ----
+upgrades.tutorialDone = true;
+var simpleJar = JARS.find(function(j){ return j.key === 'simple'; });
+__check('jarCapUpgradeCost is still exactly the E2 formula (tier 0 = 25, unchanged by E3)', jarCapUpgradeCost(simpleJar) === 25);
+__check('Coin Value tier-0 price is still exactly 60, unchanged by E3', TIER_LINES.light.prices[0] === 60);
+__check('Coin Value still has exactly 60 levels, unchanged by E3', TIER_LINES.light.prices.length === 60);
+
+// ---- drawing every upgrade card (Coin Value, Capacity, and all four per-jar stats) does not throw, for a fresh player and a near-maxed player, on every one of the six jars ----
+(function(){
+  var threw = false;
+  try {
+    JARS.forEach(function(jar){
+      upgrades.ownedJars[jar.key] = true; upgrades.equippedJar = jar.key;
+      screen = 'shop'; shopFrom = 'title';
+      ['jars', 'trails', 'capacity', 'range', 'magnet', 'light-value', 'decor'].forEach(function(tab){ shopTab = tab; drawShop(); });
+      // near-maxed: push every per-jar line to one below its own max, and Coin Value to level 59
+      upgrades.jarCapTiers[jar.key] = (jar.maxCapacity - jar.capacity) - 1;
+      upgrades.reachTiers[jar.key] = jarStatTierCount('reach', jar) - 1;
+      upgrades.magnetReachTiers[jar.key] = jarStatTierCount('magnetReach', jar) - 1;
+      upgrades.durationTiers[jar.key] = jarStatTierCount('duration', jar) - 1;
+      upgrades.lightValueTiers[jar.key] = jarStatTierCount('lightValue', jar) - 1;
+      upgrades.lightTier = 59;
+      ['capacity', 'range', 'magnet', 'light-value'].forEach(function(tab){ shopTab = tab; drawShop(); });
+      // fully maxed
+      upgrades.jarCapTiers[jar.key] = jar.maxCapacity - jar.capacity;
+      upgrades.reachTiers[jar.key] = jarStatTierCount('reach', jar);
+      upgrades.magnetReachTiers[jar.key] = jarStatTierCount('magnetReach', jar);
+      upgrades.durationTiers[jar.key] = jarStatTierCount('duration', jar);
+      upgrades.lightValueTiers[jar.key] = jarStatTierCount('lightValue', jar);
+      upgrades.lightTier = 60;
+      ['capacity', 'range', 'magnet', 'light-value'].forEach(function(tab){ shopTab = tab; drawShop(); });
+      // reset this jar's tiers before moving to the next one
+      upgrades.jarCapTiers[jar.key] = 0; upgrades.reachTiers[jar.key] = 0; upgrades.magnetReachTiers[jar.key] = 0; upgrades.durationTiers[jar.key] = 0; upgrades.lightValueTiers[jar.key] = 0;
+      upgrades.lightTier = 0;
+    });
+  } catch (e) { threw = true; }
+  __check('drawing every upgrade card (fresh/near-maxed/maxed) does not throw, for every one of the six jars', !threw);
+})();
+upgrades.equippedJar = 'simple';
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;

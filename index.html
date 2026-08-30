@@ -4334,6 +4334,58 @@ function cosmeticTrialCardRect(){
 function lineBaseValue(key){ return key==='light'?1:0; }
 function lineValueAtTier(key,tier){ const line=TIER_LINES[key]; let v=lineBaseValue(key); for(let i=0;i<tier;i++)v+=line.steps[i]; return v; }
 function formatLineValue(key,v){ return key==='light'?v.toFixed(2)+'x':Math.round(v)+''; }
+// E3 Shop Progression UI: lightweight progression markers for E2's long
+// upgrade ladders -- pure display, no reward/currency/popup attached (per
+// direct instruction). Expressed as FRACTIONS of a line's own max level,
+// not the literal absolute numbers 5/15/30/45/60 -- those only made
+// literal sense for Coin Value's specific 60-level line; expressing them
+// as ~8%/25%/50%/75%/100% instead means every line, from Coin Value's 60
+// levels down to Simple Capacity's 8, gets the same proportional milestone
+// rhythm rather than a hardcoded number that wouldn't fit a short ladder.
+// Reads no new persisted state -- purely a function of a level/max pair
+// the caller already has.
+const PROGRESSION_MILESTONE_FRACTIONS=[1/12,1/4,1/2,3/4,1];
+function progressionMilestones(maxLevel){
+  const seen={}, out=[];
+  PROGRESSION_MILESTONE_FRACTIONS.forEach(f=>{
+    const lvl=Math.max(1,Math.min(maxLevel,Math.round(f*maxLevel)));
+    if(!seen[lvl]){ seen[lvl]=true; out.push(lvl); }
+  });
+  return out;
+}
+// The smallest milestone strictly above `level`, or null if none remain
+// (already at or past the final milestone -- the max-level state already
+// communicates completion on its own, so there's deliberately no "next
+// milestone" text once maxed).
+function nextProgressionMilestone(level,maxLevel){
+  const ms=progressionMilestones(maxLevel);
+  for(let i=0;i<ms.length;i++)if(ms[i]>level)return ms[i];
+  return null;
+}
+// Whether `level` itself lands exactly on one of this line's own
+// milestones (section 10's "if the player reaches 45/60, show MILESTONE
+// 45" case) -- distinct from nextProgressionMilestone(), which only ever
+// looks forward.
+function isProgressionMilestone(level,maxLevel){
+  return progressionMilestones(maxLevel).indexOf(level)>=0;
+}
+// One shared line, used identically by all three upgrade card functions
+// below (Coin Value, Capacity, the four per-jar stats) -- "consistency is
+// more important than redesigning each stat differently" (E3 section 13).
+// Drawn only while NOT maxed (the max-level state already communicates
+// completion; showing "next milestone" alongside it would be redundant/
+// contradictory). `y` is the text's own baseline (alphabetic).
+function drawProgressionMilestoneLine(x,y,level,maxLevel){
+  if(isProgressionMilestone(level,maxLevel)){
+    ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='italic 11px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.fillText('✦ Milestone reached · Level '+level,x,y);
+    return;
+  }
+  const next=nextProgressionMilestone(level,maxLevel);
+  if(next===null)return; // no milestone left to name (shouldn't happen while not maxed, but defensive)
+  ctx.fillStyle='rgba(174,184,203,0.65)'; ctx.font='italic 11px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText('Next milestone · Level '+next,x,y);
+}
 // Shop Restructure: Capacity and Collection Range/Magnet Duration moved out
 // of SHOP_ITEMS into TIER_LINES (see up near the top of the file) -- they're multi-tier
 // now, not a one-shot boolean buy. The Decor shop's two items are genuinely
@@ -9091,11 +9143,16 @@ function drawUpgradeCard(key,rect){
     ctx.fillText(formatLineValue(key,nextVal),nx,descEnd+48);
   }
   lumTierPips(tx,descEnd+60,n,max,15,4,rect.w-pad*2);
+  // E3 Shop Progression UI: a long ladder (Coin Value: 60 levels) needs a
+  // named "how far to my next real checkpoint" cue beyond the raw tier
+  // count -- drawn in the same slack between the pip row and the bottom
+  // line every card already has, only while not maxed.
+  if(!maxed)drawProgressionMilestoneLine(tx,descEnd+92,n,max);
   ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='12px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
-  ctx.fillText('TIER '+n+' / '+max,tx,rect.y+rect.h-26);
+  ctx.fillText('LEVEL '+n+' / '+max,tx,rect.y+rect.h-26);
   if(maxed){
     ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right';
-    ctx.fillText('FULLY TUNED',rect.x+rect.w-pad,rect.y+rect.h-26);
+    ctx.fillText('MAX LEVEL',rect.x+rect.w-pad,rect.y+rect.h-26);
   } else {
     const price=line.prices[n], afford=coins>=price;
     lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
@@ -9132,11 +9189,14 @@ function drawJarCapacityCard(rect){
   ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   ctx.fillText(jar.maxCapacity+'',mx,descEnd+48);
   lumTierPips(tx,descEnd+60,owned,totalSteps,15,4,rect.w-pad*2);
+  // E3 Shop Progression UI: same milestone cue as every other upgrade card
+  // (see its own comment on drawUpgradeCard()).
+  if(!maxed)drawProgressionMilestoneLine(tx,descEnd+92,owned,totalSteps);
   ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='12px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
-  ctx.fillText('UPGRADE '+owned+' / '+totalSteps,tx,rect.y+rect.h-26);
+  ctx.fillText('LEVEL '+owned+' / '+totalSteps,tx,rect.y+rect.h-26);
   if(maxed){
     ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right';
-    ctx.fillText('MAX CAPACITY',rect.x+rect.w-pad,rect.y+rect.h-26);
+    ctx.fillText('MAX LEVEL',rect.x+rect.w-pad,rect.y+rect.h-26);
   } else {
     const price=jarCapUpgradeCost(jar), afford=coins>=price;
     lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
@@ -9188,11 +9248,14 @@ function drawJarStatCard(statKey,label,desc,rect,fmt,accent){
   ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   ctx.fillText(fmt(maxVal),mx,descEnd+48);
   lumTierPips(tx,descEnd+60,owned,totalSteps,15,4,rect.w-pad*2);
+  // E3 Shop Progression UI: same milestone cue as every other upgrade card
+  // (see its own comment on drawUpgradeCard()).
+  if(!maxed)drawProgressionMilestoneLine(tx,descEnd+92,owned,totalSteps);
   ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='12px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
-  ctx.fillText('UPGRADE '+owned+' / '+totalSteps,tx,rect.y+rect.h-26);
+  ctx.fillText('LEVEL '+owned+' / '+totalSteps,tx,rect.y+rect.h-26);
   if(maxed){
     ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right';
-    ctx.fillText('MAXED',rect.x+rect.w-pad,rect.y+rect.h-26);
+    ctx.fillText('MAX LEVEL',rect.x+rect.w-pad,rect.y+rect.h-26);
   } else {
     const price=jarStatUpgradeCost(statKey,jar), afford=coins>=price;
     lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
