@@ -949,6 +949,23 @@ function requestDoubleNightCoins(){
 // Both are per-round (see reset()) and are NEVER persisted -- this is not
 // permanent progression.
 function finalizeNight(){
+  // E15: re-entry guard. The miss-detection loop (see the S.flies for-loop
+  // above) never breaks/returns after a single miss, so if MORE THAN ONE
+  // firefly independently crosses patience<=0 in the SAME frame -- entirely
+  // realistic under a high-spawn contract/event (Rush, Firefly Rain), where
+  // several fireflies can be drifting near expiry at once -- each one
+  // re-checks S.misses>=missLimit and, absent the Extra Life offer, would
+  // call finalizeNight() again before S.over's own early-return in update()
+  // ever gets a chance to matter (that check only guards the NEXT frame,
+  // not further iterations of the SAME for-loop pass). Without this guard,
+  // a second call would double-push contractsCompleted and, for a Collector
+  // night, double-grant its Workshop Token -- a real, reachable duplicate-
+  // reward bug, not a contrived one. This is a pure idempotency check, the
+  // same "check right before mutation" discipline jarCanAcceptCatch()
+  // already established -- the first, legitimate call always sees
+  // S.over===false (only finalizeNight() itself ever sets it true), so
+  // nothing about the real ending sequence changes.
+  if(S.over)return;
   // Frozen once, right here -- the one authoritative "gameplay earned this
   // night" figure Double the Glow reads (see requestDoubleNightCoins()).
   // Taken before S.over flips true, so nothing reachable from the Night
@@ -1157,6 +1174,23 @@ function requestMysteryChest(){
 function continueFromOver(){
   if(!S.over)return;
   if(upgrades.tutorialDone){
+    // E15: re-entry guard for the WHOLE block. A real, reachable gap: when
+    // interstitialAdsAvailable() is true (a genuine Playables environment,
+    // not this sandbox, which is exactly why no prior live test here ever
+    // caught it), the ad request below is async and `screen` does not
+    // change to 'contract' until it resolves -- so a rapid double-tap
+    // during that gap would re-enter this entire block a second time
+    // before S.over/screen have moved on. S.streakCommitted (E7) already
+    // happens to protect the streak specifically, but nightNumber,
+    // weeklyProgress('nights',1), and the interstitial request itself had
+    // no such protection -- a second pass would skip an extra night
+    // number, double-count a weekly stat, and could fire a second,
+    // unintended interstitial ad. One flag at the top of the block closes
+    // all three at once, same "check right before the mutation, not just
+    // trust an earlier gate" discipline as jarCanAcceptCatch()/
+    // finalizeNight()'s own guard.
+    if(S.continueHandled)return;
+    S.continueHandled=true;
     nightsCompletedThisSession++;
     // Lumora 2.0 Phase 0: persistent night counter, incremented in this exact
     // same tutorial-gated block as the existing session counter above -- the
@@ -3903,6 +3937,9 @@ function reset(){
     // reset() (a real new night OR a restart), so it can never leak across
     // rounds. See commitNightStreak()'s own comment for why this exists.
     streakCommitted:false,
+    // E15: continueFromOver()'s own whole-block re-entry guard -- per-round
+    // like streakCommitted right above, cleared the same way.
+    continueHandled:false,
     extraLifeOfferOpen:false, extraLifePending:false, extraLifeAvailable:false, extraLifeUsed:false,
     // Phase 8: Lucky Firefly -- an independent overlay object (NOT part of
     // TYPES/S.flies/spawnFly(), see spawnLuckyFirefly()'s own comment), at

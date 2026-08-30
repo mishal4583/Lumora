@@ -3857,6 +3857,14 @@ continueFromOver();
 __check('the first real completed night increments nightNumber exactly once, from 1 to 2', nightNumber === 2, 'nightNumber=' + nightNumber);
 
 // ---- a second real night increments exactly once more, to 3 -- no double-increment ----
+// E15: reset() between the two simulated nights -- a real second night
+// always starts with a fresh reset() (via finishContractAccept()), which
+// is what clears continueFromOver()'s own new S.continueHandled re-entry
+// guard; reusing the same S instance across two "different nights" (as
+// this check previously did) is not a shape a real playthrough can
+// produce, and would now (correctly) be treated as a duplicate call on
+// the SAME night rather than a second one.
+reset();
 S.over = true; S.overT = 1;
 continueFromOver();
 __check('a second completed night increments nightNumber exactly once more, to 3 (no double-increment)', nightNumber === 3, 'nightNumber=' + nightNumber);
@@ -7108,6 +7116,17 @@ reset(); S.over = true; S.overT = 1;
 // week, so isolating the delta around ONLY this one commit is the only way
 // to attribute a coin change to Night Streak specifically, not "nothing
 // else in the whole game is allowed to grant coins around night 3."
+// E15: this test has now driven 5 genuinely-completed real nights through
+// continueFromOver() (the earlier duplicate-call check a few lines up now
+// correctly contributes ZERO of them, thanks to E15's own
+// continueHandled fix) -- weeklyStats.nights legitimately reaches its own
+// target=5 right at this exact call, which would also legitimately
+// cascade into a Season level-up via checkWeeklyMilestones()'s own
+// seasonProgressAdd(). Both are real, correct, unrelated systems -- but
+// isolating Night Streak's OWN +15 here requires pre-empting that one
+// specific crossing, same "isolate the exact delta" discipline already
+// used for the event-roll contamination check above.
+weeklyMilestonesClaimed.nights = true;
 var coinsBeforeMilestone3 = coins;
 continueFromOver();
 __check('a third consecutive calendar day continues the streak to 3', nightStreak === 3, 'nightStreak=' + nightStreak);
@@ -7480,6 +7499,81 @@ upgrades.jarCapTiers.simple = 5;
 __check('15: Almost Affordable\\'s own real cost function is untouched by E10', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
 upgrades.jarCapTiers.simple = 0;
 __check('16: existing rewarded-ad entry points remain present and distinct from Glow Chain\\'s own reward path', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function' && requestDoubleNightCoins !== advanceChain);
+});
+`);
+
+// E15: Economy & Monetization Integrity. A real, reachable bug found during
+// this phase's audit: finalizeNight() had no re-entry guard, so if more
+// than one firefly independently crosses its miss threshold in the SAME
+// frame (realistic under a high-spawn contract/event, since the miss-
+// detection for-loop never breaks after a single miss), it could be
+// called more than once for one real night ending -- double-pushing
+// contractsCompleted and double-granting a Collector night's Workshop
+// Token. Fixed with a one-line idempotency guard (if(S.over)return;),
+// mirroring jarCanAcceptCatch()'s own "check right before mutation"
+// discipline. This test calls finalizeNight() directly, twice in a row --
+// the exact reachable double-fire shape -- rather than trying to choreograph
+// two fireflies expiring in the same real frame, which is the same
+// "drive the canonical function directly" approach objectiveProgress()/
+// advanceChain()'s own existing tests already use.
+scenario('lumora2-e15-finalizeNight-reentry', null, `
+reset();
+activeContract = 3; // Collector -- the one contract with a real, discrete token reward to duplicate
+var tokensBefore = workshopTokens, completedBefore = contractsCompleted.length;
+finalizeNight();
+var tokensAfterFirst = workshopTokens, completedAfterFirst = contractsCompleted.length;
+__check('a real (first) finalizeNight() call grants the Workshop Token exactly once', tokensAfterFirst === tokensBefore + 1);
+__check('a real (first) finalizeNight() call records the contract exactly once', completedAfterFirst === completedBefore + 1);
+finalizeNight(); // the exact double-fire shape a same-frame double-miss would produce
+__check('a second finalizeNight() call for the SAME already-ended round grants no additional Workshop Token', workshopTokens === tokensAfterFirst);
+__check('a second finalizeNight() call for the SAME already-ended round does not double-record the contract', contractsCompleted.length === completedAfterFirst);
+finalizeNight(); finalizeNight(); // a third and fourth call, for good measure
+__check('repeated finalizeNight() calls remain fully idempotent', workshopTokens === tokensAfterFirst && contractsCompleted.length === completedAfterFirst);
+`);
+
+// E15: a second real, reachable duplicate-Continue bug found during this
+// phase's audit, in continueFromOver() itself. interstitialAdsAvailable()
+// is false by default in every other test in this file (no real
+// Playables SDK to test against), which is exactly why this specific gap
+// was never caught live in this sandbox before: when it IS true (a real
+// Playables environment), the ad request is async and `screen` does not
+// move to 'contract' until it resolves, so a rapid double-tap during that
+// gap would re-enter the WHOLE tutorial-gated block a second time before
+// anything else has moved on -- double-incrementing nightNumber and
+// weeklyStats.nights, and firing a second, unintended interstitial ad
+// request. Fixed with one S.continueHandled guard (per-round, cleared by
+// reset()) at the top of the block. This test installs a REAL pending
+// (not-yet-resolved) interstitial promise -- the exact async-gap shape --
+// rather than the instantly-resolving mock every other interstitial test
+// in this file uses, specifically so a duplicate call during that live
+// gap can be driven and observed.
+scenario('lumora2-e15-continueFromOver-reentry', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+var interstitialCalls = 0, resolveInterstitial = null;
+ytgame.ads = {
+  requestRewardedAd: function(){ return Promise.resolve(false); },
+  requestInterstitialAd: function(){
+    interstitialCalls++;
+    return new Promise(function(resolve){ resolveInterstitial = resolve; }); // stays pending -- the real async gap
+  }
+};
+reset(); S.over = true; S.overT = 1;
+var nightBefore = nightNumber, weeklyNightsBefore = weeklyStats.nights;
+continueFromOver(); // starts the (still-pending) interstitial request; screen has NOT moved to 'contract' yet
+__check('the interstitial request fired exactly once so far', interstitialCalls === 1);
+__check('screen has not advanced yet -- the real async gap this bug lived in', screen !== 'contract');
+continueFromOver(); // duplicate tap during the pending ad -- the exact reachable double-fire shape
+__check('a duplicate continueFromOver() call during the pending interstitial does not request a second ad', interstitialCalls === 1);
+__check('a duplicate continueFromOver() call during the pending interstitial does not double-increment nightNumber', nightNumber === nightBefore + 1, 'nightNumber=' + nightNumber);
+__check('a duplicate continueFromOver() call during the pending interstitial does not double-count the weekly nights stat', weeklyStats.nights === weeklyNightsBefore + 1, 'weeklyStats.nights=' + weeklyStats.nights);
+resolveInterstitial();
+return __tick(5).then(function(){
+  __check('the pending ad resolving afterward still lets the night transition through normally', screen === 'contract');
+  __acceptAnyContract();
+  __check('gameplay is fully usable afterward -- nightNumber only ever advanced by exactly 1 total', nightNumber === nightBefore + 1);
+});
 });
 `);
 
