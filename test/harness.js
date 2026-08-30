@@ -982,17 +982,18 @@ __check('the Botanist decoration renders (gated on upgrades.deco) without throwi
 // checks Part B proved for the original single-item vendors, now on item #2
 // Upgrade Cost Escalation pass: Garden Lanterns 20->150, Village Fountain
 // 35->300 (flat one-shot increase, no tiers to compound -- see SHOP_ITEMS).
+// E16 Shop Economy Rebalance: Village Fountain 300->2500.
 coins = 10; upgrades.fountain = false;
 __check('fountain purchase is rejected when coins are insufficient', tryPurchase('fountain') === false && coins === 10 && upgrades.fountain === false);
-coins = 300;
-__check('fountain purchase succeeds once affordable, deducting exactly the price (300)', tryPurchase('fountain') === true && coins === 0 && upgrades.fountain === true, 'coins=' + coins);
+coins = 2500;
+__check('fountain purchase succeeds once affordable, deducting exactly the price (2500)', tryPurchase('fountain') === true && coins === 0 && upgrades.fountain === true, 'coins=' + coins);
 __check('buying the fountain again is rejected (no double-spend) once owned', tryPurchase('fountain') === false && coins === 0);
 
 // the two Botanist items must be independent -- owning one must not affect the
 // other's afford/owned state, and each item's own buy-button hit-test must only
 // ever purchase ITS OWN item (this is exactly what broke when the shop assumed
 // one item per vendor; proving it explicitly here, not just trusting the refactor)
-upgrades.deco = false; upgrades.fountain = false; coins = 500; // enough for both (150+300=450)
+upgrades.deco = false; upgrades.fountain = false; coins = 3500; // E16: enough for both (1000+2500=3500)
 // snapshot rather than assume 0 -- earlier tests in this same driver
 // legitimately leave the tier-line fields non-zero, this check only cares that
 // THIS purchase doesn't touch them, not what their residual value happens to be
@@ -1006,7 +1007,7 @@ __check('clicking item slot 1\\'s buy button purchases the fountain specifically
 __check('owning both Decor items still leaves every per-jar stat and Light Value untouched', JSON.stringify(upgrades.jarCapTiers) === jarCapTiersBefore && JSON.stringify(upgrades.reachTiers) === reachTiersBefore && JSON.stringify(upgrades.magnetReachTiers) === magnetReachTiersBefore && JSON.stringify(upgrades.durationTiers) === durationTiersBefore && upgrades.lightTier === lightTierBefore);
 
 // persistence survives reload, same defensive pattern as every other upgrade field
-upgrades.fountain = false; coins = 300;
+upgrades.fountain = false; coins = 2500;
 tryPurchase('fountain');
 if (!YT) { var reloadedUpgrades = JSON.parse(localStorage.getItem('gk2_upgrades') || '{}'); __check('fountain ownership is written to the same gk2_upgrades key as jarTier/magnetTier/deco (no parallel storage)', reloadedUpgrades.fountain === true, 'stored=' + JSON.stringify(reloadedUpgrades)); }
 
@@ -1035,16 +1036,20 @@ __check('the fountain draws without throwing in both the dry and flowing state',
 // RESTORATION_THRESH/RESTORATION_PCT), even with more than enough coins --
 // tryPurchase()'s generic item.locked&&item.locked() check, not a
 // statue-specific branch
-best = 24; coins = 5000; upgrades.statueOwned = false; upgrades.statueEquipped = false;
-__check('the statue cannot be purchased before 100% restoration, even with enough coins', tryPurchase('statue') === false && upgrades.statueOwned === false && coins === 5000, 'restorationPct=' + restorationPct(best) + ' coins=' + coins);
+// E16 Shop Economy Rebalance: Master Glowkeeper Statue 3500->12000 -- 5000
+// used to be comfortably "enough coins" against the old 3500 price; bumped
+// to 20000 so this still genuinely proves the LOCK blocks the purchase
+// even with real, sufficient funds, not merely insufficient ones.
+best = 24; coins = 20000; upgrades.statueOwned = false; upgrades.statueEquipped = false;
+__check('the statue cannot be purchased before 100% restoration, even with enough coins', tryPurchase('statue') === false && upgrades.statueOwned === false && coins === 20000, 'restorationPct=' + restorationPct(best) + ' coins=' + coins);
 
 // unlocked at exactly 100% (best=25) -- reject if unaffordable, succeed once
 // affordable, reject a double-spend once owned, same three-check discipline
 // as every other one-shot SHOP_ITEMS purchase
 best = 25; coins = 100;
 __check('the statue is unlocked at 100% restoration but still rejects an unaffordable purchase', tryPurchase('statue') === false && upgrades.statueOwned === false && coins === 100, 'restorationPct=' + restorationPct(best));
-coins = 3500;
-__check('the statue purchase succeeds once affordable at 100%, deducting exactly the price (3500)', tryPurchase('statue') === true && coins === 0 && upgrades.statueOwned === true, 'coins=' + coins);
+coins = 12000;
+__check('the statue purchase succeeds once affordable at 100%, deducting exactly the price (12000)', tryPurchase('statue') === true && coins === 0 && upgrades.statueOwned === true, 'coins=' + coins);
 __check('buying the statue again is rejected (no double-spend) once owned', tryPurchase('statue') === false && coins === 0);
 // dropping back below 100% (e.g. a hypothetical future reset) must not un-own an already-purchased statue -- ownership, once granted, isn't re-gated retroactively
 best = 24;
@@ -1111,7 +1116,7 @@ upgrades.statueOwned = false; upgrades.statueEquipped = false;
 // click path (pointerdown -> cardButtonRect(upgradeCardRect(2))), not the
 // tryPurchase()/tryEquipStatue() functions directly, since that's
 // specifically where the bug lived.
-best = 25; coins = 3500;
+best = 25; coins = 12000;
 screen = 'shop'; shopFrom = 'title'; shopTab = 'decor'; jarCompareOpen = false;
 var statueBtn = cardButtonRect(upgradeCardRect(2));
 __fire(cv, 'pointerdown', __fakeEvent(statueBtn.x, statueBtn.y));
@@ -1334,25 +1339,31 @@ upgrades.equippedJar = 'simple';
 __check('diff() is still completely unaffected by equipped cosmetics/jar choice (only capacity moves)', (function(){ reset(); S.score = 20; var d1 = diff(); upgrades.equippedJar = 'aurora'; upgrades.equippedTrail = 'violet'; var d2 = diff(); return JSON.stringify({ maxFlies: d1.maxFlies, blue: d1.blue, shy: d1.shy }) === JSON.stringify({ maxFlies: d2.maxFlies, blue: d2.blue, shy: d2.shy }); })());
 
 // purchase-flow parity with the rest of the shop: reject/succeed/no-double-spend
+// E16: Firefly Lantern 500->1500 -- coins bumped from 400/1000 to 400/2000
+// (kept the same +500-over-price overpay margin the original test used) so
+// this still exercises a genuine insufficient-then-affordable pair against
+// the real current price, not a stale one.
 upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 400;
 __check('a jar purchase is rejected when coins are insufficient', tryBuyOrEquipJar('lantern') === false && coins === 400 && !upgrades.ownedJars.lantern);
-coins = 1000;
+coins = 2000;
 __check('a jar purchase succeeds once affordable, deducting exactly the price and auto-equipping it', tryBuyOrEquipJar('lantern') === true && coins === 500 && upgrades.ownedJars.lantern === true && upgrades.equippedJar === 'lantern', 'coins=' + coins);
 var coinsAfterJarBuy = coins;
 __check('tapping an already-owned jar again just re-equips it, no charge (this is the "buy vs equip" distinction, not a bug in the buy path)', tryBuyOrEquipJar('lantern') === true && coins === coinsAfterJarBuy);
 __check('equipping simple (always owned, free) back over an owned paid jar works with no charge', tryBuyOrEquipJar('simple') === true && upgrades.equippedJar === 'simple' && coins === coinsAfterJarBuy);
 
-// Trail System Redesign: Golden 150->500 (the full new ladder is exercised
+// E16: Golden 500->2000 -- same +100-over-price overpay margin as before,
+// against the real current price (the full new ladder is exercised
 // exhaustively further down).
 upgrades.ownedTrails = { none: true }; upgrades.equippedTrail = 'none'; coins = 5;
 __check('a trail purchase is rejected when coins are insufficient', tryBuyOrEquipTrail('gold') === false && coins === 5 && !upgrades.ownedTrails.gold);
-coins = 600;
-__check('a trail purchase succeeds once affordable, deducting exactly the price (500) and auto-equipping it', tryBuyOrEquipTrail('gold') === true && coins === 100 && upgrades.ownedTrails.gold === true && upgrades.equippedTrail === 'gold', 'coins=' + coins);
+coins = 2100;
+__check('a trail purchase succeeds once affordable, deducting exactly the price (2000) and auto-equipping it', tryBuyOrEquipTrail('gold') === true && coins === 100 && upgrades.ownedTrails.gold === true && upgrades.equippedTrail === 'gold', 'coins=' + coins);
 upgrades.ownedTrails = { none: true }; upgrades.equippedTrail = 'none'; coins = 0;
 
 // ===== Trail System Redesign ================================================
 // the full LOCKED price ladder, exhaustively -- not just Golden above.
-__check('the full trail price ladder is exactly as locked (none=0, gold=500, violet=750, moonlit=1200, starlight=2000, celestial=3000)', ['none', 'gold', 'violet', 'moonlit', 'starlight', 'celestial'].map(function(k){ return TRAIL_COLORS.find(function(t){ return t.key === k; }).price; }).join(',') === '0,500,750,1200,2000,3000');
+// E16 Shop Economy Rebalance: 500/750/1200/2000/3000 -> 2000/3500/6000/10000/15000.
+__check('the full trail price ladder is exactly as locked (none=0, gold=2000, violet=3500, moonlit=6000, starlight=10000, celestial=15000)', ['none', 'gold', 'violet', 'moonlit', 'starlight', 'celestial'].map(function(k){ return TRAIL_COLORS.find(function(t){ return t.key === k; }).price; }).join(',') === '0,2000,3500,6000,10000,15000');
 __check('Aurora Trail is NOT in TRAIL_COLORS at all -- it is never purchased and never owned, per direct instruction to derive it rather than add save state', TRAIL_COLORS.find(function(t){ return t.key === 'aurora'; }) === undefined);
 
 // activeTrailHues(): Aurora wins unconditionally while equipped, WITHOUT
@@ -1792,7 +1803,10 @@ __check('jarStatUpgradeCost(lightValue) tier 0 for Aurora applies its 1.50x mult
 // The multiplier must NEVER touch jar purchase price, the shared Coin Value
 // line, or Decor/quest rewards -- an explicit negative check against the
 // locked spec boundary, not just an absence of a positive one.
-__check('JAR_COST_MULTIPLIER leaves jar PURCHASE prices completely untouched (Aurora still exactly 4000)', __auroraJarCost.price === 4000, 'price=' + __auroraJarCost.price);
+// E16 Shop Economy Rebalance: Aurora's purchase price moved from 4000 to
+// 30000 -- the assertion's own point (JAR_COST_MULTIPLIER never touches
+// jar.price at all) is unchanged, only the real current number is.
+__check('JAR_COST_MULTIPLIER leaves jar PURCHASE prices completely untouched (Aurora still exactly 30000)', __auroraJarCost.price === 30000, 'price=' + __auroraJarCost.price);
 // Coin Value's OWN price curve changed in the Upgrade Cost Escalation pass
 // (round 2), but JAR_COST_MULTIPLIER itself must still never apply to it --
 // it's the one shared/global line, the same regardless of which jar is
@@ -1829,8 +1843,9 @@ __check('compoundTierCost(base, 2) is exactly base*9 -- two genuine triples comp
 
 // Decor: flat one-shot price increase, no tiers to compound (there is no
 // "next upgrade" for a boolean-owned item) -- 20->150, 35->300, per direct instruction.
-__check('Garden Lanterns price is exactly 150 (was 20)', SHOP_ITEMS.deco.price === 150);
-__check('Village Fountain price is exactly 300 (was 35)', SHOP_ITEMS.fountain.price === 300);
+// E16 Shop Economy Rebalance: 150->1000, 300->2500.
+__check('Garden Lanterns price is exactly 1000 (E16, was 150)', SHOP_ITEMS.deco.price === 1000);
+__check('Village Fountain price is exactly 2500 (E16, was 300)', SHOP_ITEMS.fountain.price === 2500);
 
 // Remove In-Run Capacity Growth (final): purchased/upgraded capacity sets
 // S.cap for the WHOLE run now -- Elder catches, perfect delivery, and the
@@ -6953,25 +6968,26 @@ return __tick(1).then(function(){
   __check('dailyDealPrice never rounds down to 0 or negative for a tiny base price', dailyDealPrice(1) === 1 && dailyDealPrice(0) === 1);
 
   // ---- existing shop prices remain unchanged (before AND after the temporary discount patch used internally by buyDailyDeal) ----
+  // E16 Shop Economy Rebalance: Garden Lanterns 150->1000, Golden 500->2000.
   var decoRealPrice = SHOP_ITEMS.deco.price, goldRealPrice = TRAIL_COLORS.find(function(t){ return t.key === 'gold'; }).price;
-  __check('SHOP_ITEMS.deco.price is untouched by Daily Deal existing (150, the real E2/pre-E2 price)', decoRealPrice === 150);
-  __check('TRAIL_COLORS gold price is untouched by Daily Deal existing (500, the real price)', goldRealPrice === 500);
+  __check('SHOP_ITEMS.deco.price is untouched by Daily Deal existing (1000, the real E16 price)', decoRealPrice === 1000);
+  __check('TRAIL_COLORS gold price is untouched by Daily Deal existing (2000, the real E16 price)', goldRealPrice === 2000);
 
   // ---- force today's deal to a KNOWN candidate for the purchase tests below ----
   resetCandidateOwnership();
   upgrades.dailyDeal = { day: todayKey(), kind: 'decor', key: 'deco' };
   var info = dailyDealCandidateInfo(ensureDailyDeal());
-  __check('setup: today forced to the decor/deco candidate, currently unowned', info.owned === false && info.price === 150);
-  var discounted = dailyDealPrice(150);
+  __check('setup: today forced to the decor/deco candidate, currently unowned', info.owned === false && info.price === 1000);
+  var discounted = dailyDealPrice(1000);
   coins = 100000;
 
   // ---- purchase deducts discounted price, grants the existing item ----
   var coinsBefore = coins;
   var ok = buyDailyDeal();
   __check('buyDailyDeal() reports success for a real eligible, affordable deal', ok === true);
-  __check('the purchase deducted EXACTLY the discounted price, not the full 150', coins === coinsBefore - discounted, 'coins=' + coins + ' discounted=' + discounted);
+  __check('the purchase deducted EXACTLY the discounted price, not the full 1000', coins === coinsBefore - discounted, 'coins=' + coins + ' discounted=' + discounted);
   __check('the purchase granted ownership through the EXISTING deco flag -- no new ownership field', upgrades.deco === true);
-  __check('buyDailyDeal() left SHOP_ITEMS.deco.price restored to its real 150 after the temporary discount', SHOP_ITEMS.deco.price === 150);
+  __check('buyDailyDeal() left SHOP_ITEMS.deco.price restored to its real 1000 after the temporary discount', SHOP_ITEMS.deco.price === 1000);
 
   // ---- double purchase impossible ----
   var coinsAfterFirst = coins;
@@ -7574,6 +7590,201 @@ return __tick(5).then(function(){
   __acceptAnyContract();
   __check('gameplay is fully usable afterward -- nightNumber only ever advanced by exactly 1 total', nightNumber === nightBefore + 1);
 });
+});
+`);
+
+// E16: Complete Shop Economy Rebalance & Price Integrity. Only the
+// persistent-sink PURCHASE prices moved (JARS[].price, TRAIL_COLORS[].price,
+// SHOP_ITEMS{}.price) -- upgrade costs, upgrade formulas, and every coin
+// source remain byte-identical, verified explicitly below.
+scenario('lumora2-e16-shop-rebalance', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+function jarByKey(k){ return JARS.find(function(j){ return j.key === k; }); }
+function trailByKey(k){ return TRAIL_COLORS.find(function(t){ return t.key === k; }); }
+
+// ---- 1-6: jar prices ----
+__check('1: Simple Glass remains owned/free', jarByKey('simple').price === 0);
+__check('2: Firefly price = 1500', jarByKey('lantern').price === 1500);
+__check('3: Moon price = 3500', jarByKey('moon').price === 3500);
+__check('4: Crystal price = 7500', jarByKey('crystal').price === 7500);
+__check('5: Elder price = 15000', jarByKey('elder').price === 15000);
+__check('6: Aurora price = 30000', jarByKey('aurora').price === 30000);
+
+// ---- 7-12: trail prices ----
+__check('7: No Trail = free', trailByKey('none').price === 0);
+__check('8: Golden = 2000', trailByKey('gold').price === 2000);
+__check('9: Violet = 3500', trailByKey('violet').price === 3500);
+__check('10: Moonlit = 6000', trailByKey('moonlit').price === 6000);
+__check('11: Starlight = 10000', trailByKey('starlight').price === 10000);
+__check('12: Celestial = 15000', trailByKey('celestial').price === 15000);
+
+// ---- 13-15: decor prices ----
+__check('13: Garden Lanterns = 1000', SHOP_ITEMS.deco.price === 1000);
+__check('14: Village Fountain = 2500', SHOP_ITEMS.fountain.price === 2500);
+__check('15: Master Glowkeeper Statue = 12000', SHOP_ITEMS.statue.price === 12000);
+
+// ---- 16-20: purchase boundary, Firefly (early tier) ----
+upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple';
+coins = 1499;
+__check('16: 1499 coins cannot purchase Firefly', tryBuyOrEquipJar('lantern') === false && !upgrades.ownedJars.lantern);
+__check('16b: a failed purchase deducts 0', coins === 1499);
+coins = 1500;
+var okAtExact = tryBuyOrEquipJar('lantern');
+__check('17: 1500 coins CAN purchase Firefly (exact balance)', okAtExact === true && upgrades.ownedJars.lantern === true);
+__check('19: a successful purchase deducts exactly 1500, leaving 0', coins === 0);
+upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 1501;
+__check('18: 1501 coins CAN purchase Firefly (one over)', tryBuyOrEquipJar('lantern') === true && coins === 1, 'coins=' + coins);
+upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 0;
+
+// ---- boundary coverage repeated for a mid-tier item (Crystal, 7500) ----
+coins = 7499;
+__check('mid-tier (Crystal) 7499 coins cannot purchase', tryBuyOrEquipJar('crystal') === false && coins === 7499);
+coins = 7500;
+__check('mid-tier (Crystal) 7500 coins CAN purchase (exact), leaving 0', tryBuyOrEquipJar('crystal') === true && coins === 0);
+upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 7501;
+__check('mid-tier (Crystal) 7501 coins CAN purchase, leaving 1', tryBuyOrEquipJar('crystal') === true && coins === 1, 'coins=' + coins);
+upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 0;
+
+// ---- boundary coverage repeated for the endgame item (Aurora, 30000) ----
+coins = 29999;
+__check('endgame (Aurora) 29999 coins cannot purchase', tryBuyOrEquipJar('aurora') === false && coins === 29999);
+coins = 30000;
+__check('endgame (Aurora) 30000 coins CAN purchase (exact), leaving 0', tryBuyOrEquipJar('aurora') === true && coins === 0);
+upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 30001;
+__check('endgame (Aurora) 30001 coins CAN purchase, leaving 1', tryBuyOrEquipJar('aurora') === true && coins === 1, 'coins=' + coins);
+upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 0;
+
+// ---- 21-33: Daily Deal prices. Audit finding (see this phase's report):
+// JARS and the Master Statue were never, and are still not, part of
+// DAILY_DEAL_CANDIDATES (E6's own deliberate exclusion -- jar skins carry
+// a real capacity bonus, and the statue is a gated prestige landmark) --
+// E16 does not add them, since "do not change Daily Deal's deterministic
+// selection" is an explicit instruction. What CAN and must be verified is
+// the shared dailyDealPrice() formula itself, fed the real new base price
+// for every item the spec lists -- exactly what a real Daily Deal roll on
+// an eligible item would compute. ----
+__check('21: Firefly Daily Deal = 1200', dailyDealPrice(1500) === 1200);
+__check('22: Moon Daily Deal = 2800', dailyDealPrice(3500) === 2800);
+__check('23: Crystal Daily Deal = 6000', dailyDealPrice(7500) === 6000);
+__check('24: Elder Daily Deal = 12000', dailyDealPrice(15000) === 12000);
+__check('25: Aurora Daily Deal = 24000', dailyDealPrice(30000) === 24000);
+__check('26: Golden Daily Deal = 1600', dailyDealPrice(2000) === 1600);
+__check('27: Violet Daily Deal = 2800', dailyDealPrice(3500) === 2800);
+__check('28: Moonlit Daily Deal = 4800', dailyDealPrice(6000) === 4800);
+__check('29: Starlight Daily Deal = 8000', dailyDealPrice(10000) === 8000);
+__check('30: Celestial Daily Deal = 12000', dailyDealPrice(15000) === 12000);
+__check('31: Garden Lanterns Daily Deal = 800', dailyDealPrice(1000) === 800);
+__check('32: Village Fountain Daily Deal = 2000', dailyDealPrice(2500) === 2000);
+__check('33: Master Statue Daily Deal = 9600', dailyDealPrice(12000) === 9600);
+// and directly against the REAL live TRAIL_COLORS/SHOP_ITEMS prices, not
+// just the literal numbers above, so a future price edit that forgot to
+// update this test would itself be caught:
+__check('Daily Deal formula against the REAL current Golden price agrees with the worked example', dailyDealPrice(trailByKey('gold').price) === 1600);
+__check('Daily Deal formula against the REAL current Garden Lanterns price agrees with the worked example', dailyDealPrice(SHOP_ITEMS.deco.price) === 800);
+
+// ---- 34-37: Daily Deal integrity (duplicate purchase, ownership, deterministic selection, reload) ----
+rewardedAdsAvailable = function(){ return true; };
+upgrades.dailyDeal = null; upgrades.deco = false; upgrades.fountain = false; upgrades.ownedTrails = { none: true };
+var dealToday = ensureDailyDeal();
+__check('34-setup: a real Daily Deal candidate is selected today', dealToday !== null);
+var infoToday = dailyDealCandidateInfo(dealToday);
+var priceToday = dailyDealPrice(infoToday.price);
+coins = priceToday + 500;
+var firstBuy = buyDailyDeal();
+__check('34: Daily Deal purchase succeeds once', firstBuy === true);
+var coinsAfterFirstDDBuy = coins;
+var secondBuy = buyDailyDeal();
+__check('34: duplicate Daily Deal purchase remains blocked', secondBuy === false && coins === coinsAfterFirstDDBuy);
+__check('35: ownership remains respected (the real underlying field is now true)', dailyDealCandidateInfo(dealToday).owned === true);
+var dealAgain = ensureDailyDeal();
+__check('36: day-based deterministic selection is unchanged -- re-deriving today returns the SAME stored item', JSON.stringify(dealAgain) === JSON.stringify(dealToday));
+
+// ---- 37: reload preserves the Daily Deal record (fresh-context proof lives in its own scenario below) ----
+__check('37-setup: upgrades.dailyDeal carries a real day+item record ready to persist', upgrades.dailyDeal && typeof upgrades.dailyDeal.day === 'string' && !!upgrades.dailyDeal.kind);
+
+// ---- 38-42: Almost Affordable. Audit finding (see report): Almost
+// Affordable has NEVER covered jar/trail/decor PURCHASES -- its only
+// supported target kinds are 'light' (Coin Value), 'jarCap', and
+// 'jarStat' (the four per-jar UPGRADE lines). None of those cost
+// functions read jar.price/trail.price/SHOP_ITEMS price at all, so E16's
+// purchase-price changes cannot affect them -- confirmed directly below,
+// including an explicit structural check that a jar-PURCHASE target is
+// (and was always) unsupported, never silently "eligible" at a stale price. ----
+__check('38: almostAffordableCost() has no branch for a jar-purchase target -- returns Infinity, exactly as before E16 (jar purchases were never an Almost Affordable target)', almostAffordableCost({ kind: 'jarPurchase', jarKey: 'lantern' }) === Infinity);
+upgrades.jarCapTiers.simple = 5;
+var __e16CapCost = jarCapUpgradeCost(jarByKey('simple'));
+__check('39: Almost Affordable\\'s real, supported target (jarCap) computes its exact shortfall correctly and is untouched by E16', __e16CapCost === 115 && almostAffordableCost({ kind: 'jarCap', jarKey: 'simple' }) === __e16CapCost);
+coins = __e16CapCost - Math.round(__e16CapCost * 0.1);
+__check('40: the eligibility threshold (15%) is unchanged', almostAffordableEligible({ kind: 'jarCap', jarKey: 'simple' }) === true);
+var __e16Shortfall = almostAffordableShortfall({ kind: 'jarCap', jarKey: 'simple' });
+__check('41: the computed reward never exceeds the real shortfall', __e16Shortfall === __e16CapCost - coins && __e16Shortfall > 0);
+var __e16CoinsBeforeAA = coins;
+coins += __e16Shortfall;
+var __e16BoughtOk = tryUpgradeJarCap('simple');
+__check('42: purchasing right after receiving the shortfall deducts the correct (unchanged) upgrade price exactly, leaving 0', __e16BoughtOk === true && coins === 0, 'coins=' + coins);
+upgrades.jarCapTiers.simple = 0;
+
+// ---- 43-47: upgrade cost preservation, one real spot-check per jar (full ladders already exhaustively covered by pre-existing E2 tests, not duplicated here) ----
+__check('43: Firefly (lantern) capacity tier-1 upgrade cost is untouched by E16 (26)', jarCapUpgradeCost(jarByKey('lantern')) === 26);
+upgrades.jarCapTiers.moon = 0;
+__check('44: Moon capacity tier-1 upgrade cost is untouched by E16 (28)', jarCapUpgradeCost(jarByKey('moon')) === 28);
+__check('45: Crystal capacity tier-1 upgrade cost is untouched by E16 (30)', jarCapUpgradeCost(jarByKey('crystal')) === 30);
+__check('46: Elder capacity tier-1 upgrade cost is untouched by E16 (34)', jarCapUpgradeCost(jarByKey('elder')) === 34);
+__check('47: Aurora capacity tier-1 upgrade cost is untouched by E16 (38)', jarCapUpgradeCost(jarByKey('aurora')) === 38);
+__check('Coin Value (the shared line) is completely untouched by E16', TIER_LINES.light.prices.length === 60 && TIER_LINES.light.prices[0] === 60);
+
+// ---- income preservation: no E16 code path touches any existing coin source ----
+__check('firefly income (TYPES) is untouched by E16', TYPES.y.coins === 0.65 && TYPES.b.coins === 1.60 && TYPES.g.coins === 2.70 && TYPES.e.coins === 4.60 && TYPES.m.coins === 8.00);
+__check('contract rewards (CONTRACTS) are untouched by E16', CONTRACTS.find(function(c){ return c.id === 'rush'; }).coinMult === 1.40);
+__check('objective rewards (OBJECTIVE_POOL) are untouched by E16', OBJECTIVE_POOL.find(function(o){ return o.id === 'reach_score'; }).early.reward === 10);
+__check('event mechanics (NIGHT_EVENT_CHANCE/EVENT_TYPES) are untouched by E16', NIGHT_EVENT_CHANCE === 0.35 && EVENT_TYPES.length === 3);
+__check('Glow Chain rewards (CHAIN_MILESTONES) are untouched by E16', CHAIN_MILESTONES.find(function(m){ return m.n === 5; }).reward === 5);
+__check('Night Streak rewards (NIGHT_STREAK_MILESTONE_REWARDS) are untouched by E16', NIGHT_STREAK_MILESTONE_REWARDS[3] === 15 && NIGHT_STREAK_MILESTONE_REWARDS[5] === 25 && NIGHT_STREAK_MILESTONE_REWARDS[7] === 40);
+__check('the Objective Completion Bonus (E8) is untouched by E16', OBJECTIVE_COMPLETION_BONUS === 10);
+__check('Weekly Progression rewards (WEEKLY_MILESTONES) are untouched by E16', WEEKLY_MILESTONES.find(function(m){ return m.key === 'nights'; }).reward === 50);
+
+// ---- existing ownership survives (this exact code, this exact save shape -- not a migration) ----
+upgrades.jarCapTiers.simple = 0;
+});
+`);
+
+// Fresh-context save-compatibility test (E16 spec sections 10/11/20): a
+// save written with pre-E16 ownership/state must load under the new
+// prices without any retroactive charge, ownership loss, or duplication --
+// prices are code-defined, never persisted per player, so there is
+// nothing to migrate.
+scenario('lumora2-e16-save-compat', { audioEnabled: true }, `
+var preE16Save = {
+  best: 25, coins: 4321, nightNumber: 12, nightStreak: 4,
+  lastNightCompletionDay: '2026-7-30',
+  upgrades: {
+    tutorialDone: true,
+    ownedJars: { simple: true, lantern: true, moon: true }, equippedJar: 'moon',
+    ownedTrails: { none: true, gold: true }, equippedTrail: 'gold',
+    deco: true, fountain: false, statueOwned: false,
+    jarCapTiers: { simple: 3, lantern: 2, moon: 1, crystal: 0, elder: 0, aurora: 0 },
+    dailyDeal: { day: '2026-7-31', kind: 'trail', key: 'moonlit' }
+  }
+};
+var threwLoad = false;
+try { __spy.loadResolve(JSON.stringify(preE16Save)); } catch (e) { threwLoad = true; }
+return __tick(5).then(function(){
+  __check('1: a pre-E16 save loads without error under E16', !threwLoad);
+  __check('2: no ownership disappears (lantern, moon, gold trail, deco all still owned)', upgrades.ownedJars.lantern === true && upgrades.ownedJars.moon === true && upgrades.ownedTrails.gold === true && upgrades.deco === true);
+  __check('3: no ownership is duplicated (fountain/statue, never owned, remain unowned)', upgrades.fountain === false && upgrades.statueOwned === false);
+  __check('4/5: coins are exactly what was saved -- E16 neither deducts nor adds anything on load', coins === 4321);
+  __check('6: upgrade levels remain unchanged (jarCapTiers exactly as saved)', upgrades.jarCapTiers.simple === 3 && upgrades.jarCapTiers.lantern === 2 && upgrades.jarCapTiers.moon === 1);
+  __check('7: prices shown for UNOWNED items use the new E16 prices (Crystal, never owned by this save, is 7500)', JARS.find(function(j){ return j.key === 'crystal'; }).price === 7500);
+  __check('7b: Elder and Aurora, also unowned, likewise show the new prices', JARS.find(function(j){ return j.key === 'elder'; }).price === 15000 && JARS.find(function(j){ return j.key === 'aurora'; }).price === 30000);
+  __check('8: already-owned items (lantern, moon) remain owned regardless of their new, higher price', upgrades.ownedJars.lantern === true && upgrades.ownedJars.moon === true);
+  __check('9: the Daily Deal record from before E16 remains valid and readable', upgrades.dailyDeal.kind === 'trail' && upgrades.dailyDeal.key === 'moonlit');
+  __check('9b: nightStreak/nightNumber/lastNightCompletionDay all survive exactly', nightStreak === 4 && nightNumber === 12 && lastNightCompletionDay === '2026-7-30');
+  __check('10: Almost Affordable remains valid against this loaded save\\'s real state', typeof almostAffordableEligible({ kind: 'jarCap', jarKey: 'moon' }) === 'boolean');
+  // owning a jar never re-charges: tapping an owned jar again just equips, no deduction
+  var coinsBeforeReEquip = coins;
+  __check('re-tapping an ALREADY-OWNED jar (lantern) under the new prices only equips, never re-charges', tryBuyOrEquipJar('lantern') === true && coins === coinsBeforeReEquip);
 });
 `);
 

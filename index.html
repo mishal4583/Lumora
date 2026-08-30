@@ -1413,18 +1413,26 @@ function migrateRangeTier(src,dst){
 // for the uniform, easy-to-explain rule rather than a jar-specific fudge.
 const JARS=[
   {key:'simple',  name:'Simple Glass Jar', price:0,    capacity:5,  maxCapacity:13, reachBase:55,  reachMax:64,  magnetReachBase:130, magnetReachMax:154, durationBase:4.0, durationMax:5.5,  lightValueBase:0.65, lightValueMax:0.95, glass:'rgba(128,174,182,0.20)', glassStroke:'rgba(148,194,202,0.55)', lid:'#8a6a45', lidRim:'#6f5436', glow:GLOW_Y,     desc:'The jar found beneath the old workshop.'},
-  {key:'lantern', name:'Firefly Lantern',  price:500,  capacity:6,  maxCapacity:16, reachBase:62,  reachMax:74,  magnetReachBase:145, magnetReachMax:175, durationBase:4.5, durationMax:6.5,  lightValueBase:0.75, lightValueMax:1.10, glass:'rgba(197,170,123,0.24)', glassStroke:'rgba(217,190,143,0.6)',  lid:'#4a4a52', lidRim:'#38383e', glow:'#fbb541',  desc:'Made for Glowkeepers who learned to carry the light farther.'},
-  {key:'moon',    name:'Moon Jar',        price:900,  capacity:7,  maxCapacity:19, reachBase:70,  reachMax:85,  magnetReachBase:165, magnetReachMax:200, durationBase:5.0, durationMax:7.5,  lightValueBase:0.85, lightValueMax:1.20, glass:'rgba(160,187,215,0.20)', glassStroke:'rgba(180,207,235,0.6)',  lid:'#8a8a9a', lidRim:'#6f6f7f', glow:'#fbf2d4',  desc:'Its glass holds a little moonlight of its own.'},
-  {key:'crystal', name:'Crystal Lantern', price:1500, capacity:8,  maxCapacity:23, reachBase:80,  reachMax:98,  magnetReachBase:190, magnetReachMax:235, durationBase:5.5, durationMax:8.5,  lightValueBase:1.00, lightValueMax:1.40, glass:'rgba(131,212,216,0.22)', glassStroke:'rgba(151,232,236,0.6)',  lid:'#4a7a7a', lidRim:'#385c5c', glow:'#7cd8e8',  desc:'Cut facets scatter each spark into a dozen smaller ones.'},
-  {key:'elder',   name:'Elder Vessel',    price:2500, capacity:9,  maxCapacity:30, reachBase:90,  reachMax:114, magnetReachBase:215, magnetReachMax:265, durationBase:6.0, durationMax:9.5,  lightValueBase:1.15, lightValueMax:1.60, glass:'rgba(128,172,119,0.20)', glassStroke:'rgba(148,192,139,0.55)', lid:'#4a6a3a', lidRim:'#385228', glow:'#a4e6bb',  desc:'Older than the workshop itself. Nobody remembers who made it.'},
+  // E16 Shop Economy Rebalance: purchase price only (500->1500) -- capacity/
+  // reach/magnetReach/duration/lightValue and every upgrade-cost formula
+  // that reads them are UNCHANGED. See this phase's own report for the
+  // income-vs-price audit that motivated the new number.
+  {key:'lantern', name:'Firefly Lantern',  price:1500, capacity:6,  maxCapacity:16, reachBase:62,  reachMax:74,  magnetReachBase:145, magnetReachMax:175, durationBase:4.5, durationMax:6.5,  lightValueBase:0.75, lightValueMax:1.10, glass:'rgba(197,170,123,0.24)', glassStroke:'rgba(217,190,143,0.6)',  lid:'#4a4a52', lidRim:'#38383e', glow:'#fbb541',  desc:'Made for Glowkeepers who learned to carry the light farther.'},
+  // E16: purchase price only (900->3500).
+  {key:'moon',    name:'Moon Jar',        price:3500, capacity:7,  maxCapacity:19, reachBase:70,  reachMax:85,  magnetReachBase:165, magnetReachMax:200, durationBase:5.0, durationMax:7.5,  lightValueBase:0.85, lightValueMax:1.20, glass:'rgba(160,187,215,0.20)', glassStroke:'rgba(180,207,235,0.6)',  lid:'#8a8a9a', lidRim:'#6f6f7f', glow:'#fbf2d4',  desc:'Its glass holds a little moonlight of its own.'},
+  // E16: purchase price only (1500->7500).
+  {key:'crystal', name:'Crystal Lantern', price:7500, capacity:8,  maxCapacity:23, reachBase:80,  reachMax:98,  magnetReachBase:190, magnetReachMax:235, durationBase:5.5, durationMax:8.5,  lightValueBase:1.00, lightValueMax:1.40, glass:'rgba(131,212,216,0.22)', glassStroke:'rgba(151,232,236,0.6)',  lid:'#4a7a7a', lidRim:'#385c5c', glow:'#7cd8e8',  desc:'Cut facets scatter each spark into a dozen smaller ones.'},
+  // E16: purchase price only (2500->15000).
+  {key:'elder',   name:'Elder Vessel',    price:15000, capacity:9,  maxCapacity:30, reachBase:90,  reachMax:114, magnetReachBase:215, magnetReachMax:265, durationBase:6.0, durationMax:9.5,  lightValueBase:1.15, lightValueMax:1.60, glass:'rgba(128,172,119,0.20)', glassStroke:'rgba(148,192,139,0.55)', lid:'#4a6a3a', lidRim:'#385228', glow:'#a4e6bb',  desc:'Older than the workshop itself. Nobody remembers who made it.'},
   // Aurora Endgame Jar pass: capacity/reach/magnetReach/duration/lightValue
   // all raised to their new LOCKED ceilings (see the AskUserQuestion trail
   // this pass -- capacity uses the same flat +1/tier mechanic every other
-  // jar uses, no jar-specific nonlinear steps). Price stays 4000 (already
-  // set last pass). `aurora:true` flags the visual-identity/effects layer
-  // below (drawJar, catch/delivery FX, prestige state) -- cosmetic only,
-  // reads nowhere in gameplay math.
-  {key:'aurora',  name:'Aurora Jar',      price:4000, capacity:12, maxCapacity:38, reachBase:110, reachMax:150, magnetReachBase:255, magnetReachMax:340, durationBase:7.0, durationMax:13.0, lightValueBase:1.40, lightValueMax:2.00, glass:'rgba(199,175,245,0.20)', glassStroke:'rgba(219,195,255,0.55)', lid:'#7a5a8a', lidRim:'#5c4268', glow:GLOW_Y, aurora:true, desc:'The last Glowkeeper never finished making this one. Perhaps they were waiting for someone.'}
+  // jar uses, no jar-specific nonlinear steps). `aurora:true` flags the
+  // visual-identity/effects layer below (drawJar, catch/delivery FX,
+  // prestige state) -- cosmetic only, reads nowhere in gameplay math.
+  // E16: purchase price only (4000->30000) -- the genuine endgame economic
+  // goal this phase's own audit calls for; every stat/multiplier above is untouched.
+  {key:'aurora',  name:'Aurora Jar',      price:30000, capacity:12, maxCapacity:38, reachBase:110, reachMax:150, magnetReachBase:255, magnetReachMax:340, durationBase:7.0, durationMax:13.0, lightValueBase:1.40, lightValueMax:2.00, glass:'rgba(199,175,245,0.20)', glassStroke:'rgba(219,195,255,0.55)', lid:'#7a5a8a', lidRim:'#5c4268', glow:GLOW_Y, aurora:true, desc:'The last Glowkeeper never finished making this one. Perhaps they were waiting for someone.'}
 ];
 // Lumora 2.0 Phase 10: Jar Identity. Audit finding (see this phase's own
 // report): every JARS column above -- price, capacity, reach, magnetReach,
@@ -3411,13 +3419,16 @@ const TIER_LINES={
 // shifting palette (Moonlit/Starlight/Celestial), not just one flat tint.
 // `none` has an empty hues array (no particles), same as before just
 // reshaped. LOCKED prices, do not reduce.
+// E16 Shop Economy Rebalance: purchase prices only (500/750/1200/2000/3000
+// -> 2000/3500/6000/10000/15000) -- desc/hues/ordering/unlock conditions
+// all untouched. 'none' stays free.
 const TRAIL_COLORS=[
-  {key:'none',      name:'No Trail',  price:0,    desc:'',                              hues:[]},
-  {key:'gold',      name:'Golden',    price:500,  desc:'Warm golden sparks.',            hues:['rgba(255,214,110,1)']},
-  {key:'violet',    name:'Violet',    price:750,  desc:'Faint violet magic dust.',       hues:['rgba(210,150,255,1)']},
-  {key:'moonlit',   name:'Moonlit',   price:1200, desc:'Cool silver-blue moon dust.',    hues:['rgba(200,215,245,1)','rgba(160,190,225,1)']},
-  {key:'starlight', name:'Starlight', price:2000, desc:'Pale gold starlight, elegant.',  hues:['rgba(255,250,235,1)','rgba(255,224,170,1)']},
-  {key:'celestial', name:'Celestial', price:3000, desc:'Violet, cyan, and soft gold.',   hues:['rgba(210,150,255,1)','rgba(140,220,235,1)','rgba(255,214,150,1)']}
+  {key:'none',      name:'No Trail',  price:0,     desc:'',                              hues:[]},
+  {key:'gold',      name:'Golden',    price:2000,  desc:'Warm golden sparks.',            hues:['rgba(255,214,110,1)']},
+  {key:'violet',    name:'Violet',    price:3500,  desc:'Faint violet magic dust.',       hues:['rgba(210,150,255,1)']},
+  {key:'moonlit',   name:'Moonlit',   price:6000,  desc:'Cool silver-blue moon dust.',    hues:['rgba(200,215,245,1)','rgba(160,190,225,1)']},
+  {key:'starlight', name:'Starlight', price:10000, desc:'Pale gold starlight, elegant.',  hues:['rgba(255,250,235,1)','rgba(255,224,170,1)']},
+  {key:'celestial', name:'Celestial', price:15000, desc:'Violet, cyan, and soft gold.',   hues:['rgba(210,150,255,1)','rgba(140,220,235,1)','rgba(255,214,150,1)']}
 ];
 // Aurora Trail: NOT in TRAIL_COLORS -- it is never purchased and never owned
 // (see activeTrailHues() below), per direct instruction to derive it from
@@ -4761,7 +4772,8 @@ const SHOP_ITEMS={
   // Upgrade Cost Escalation pass: 20->150, per direct instruction. One-shot
   // purchase, no tiers to compound (see tierCostRatio() above) -- a flat
   // price increase is the whole change here.
-  deco: {vendor:'decor',    name:'Garden Lanterns',  price:150, desc:'A few extra lanterns strung along the garden path.',                     field:'deco'},
+  // E16 Shop Economy Rebalance: purchase price only (150->1000).
+  deco: {vendor:'decor',    name:'Garden Lanterns',  price:1000, desc:'A few extra lanterns strung along the garden path.',                     field:'deco'},
   // Village Fountain — the Decor shop's 2nd item, not a new Construction subsystem.
   // Renders nothing at all pre-purchase (see drawFountain()'s own "draws
   // NOTHING when unowned" comment) -- thin by design, same effort level as
@@ -4772,7 +4784,8 @@ const SHOP_ITEMS={
   // it isn't (nothing renders pre-purchase, see above), so the wording
   // implied a placeholder that was never actually there. Fixed to describe
   // the locked decoration itself, not a physical state of the plaza.
-  fountain:{vendor:'decor', name:'Village Fountain', price:300, desc:'A fountain waiting to bring a little light to the village.', field:'fountain'},
+  // E16: purchase price only (300->2500).
+  fountain:{vendor:'decor', name:'Village Fountain', price:2500, desc:'A fountain waiting to bring a little light to the village.', field:'fountain'},
   // Master Glowkeeper Statue -- the Decor shop's 3rd item, and the first one
   // gated behind a progression requirement rather than coins alone (see
   // `locked` below, checked generically by tryPurchase()). Still a one-shot
@@ -4792,7 +4805,8 @@ const SHOP_ITEMS={
   // Fountain (150/300). Nothing else about the item changed -- still the
   // exact same generic tryPurchase()/shopItemOwned() path, still the same
   // locked() gate, still field:'statueOwned'.
-  statue: {vendor:'decor', name:'Master Glowkeeper Statue', price:3500, desc:'Every Glowkeeper eventually learns that the light was never theirs to keep.', field:'statueOwned', locked:()=>restorationPct(best)<100}
+  // E16: purchase price only (3500->12000).
+  statue: {vendor:'decor', name:'Master Glowkeeper Statue', price:12000, desc:'Every Glowkeeper eventually learns that the light was never theirs to keep.', field:'statueOwned', locked:()=>restorationPct(best)<100}
 };
 function itemsForVendor(v){ return Object.keys(SHOP_ITEMS).filter(k=>SHOP_ITEMS[k].vendor===v).map(k=>Object.assign({key:k},SHOP_ITEMS[k])); }
 // generalized over field TYPE (boolean vs numeric tier) rather than hardcoding
