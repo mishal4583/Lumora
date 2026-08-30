@@ -5172,6 +5172,110 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// Lumora 2.0 Phase 6: Village 2.0. "Existing restoration" (Test 1) and
+// "100% restoration / Dawn Chorus" (Test 2) are already covered by the
+// pre-existing restorationPct()/VILLAGE_MILESTONES tests elsewhere in this
+// file -- completely untouched by this phase, not duplicated here. These
+// tests cover only the genuinely new post-100% layer: villageLevelFor()/
+// villageLevel() (a PURE function of best+nightNumber, no new persisted
+// state at all), the Night Complete tail-row integration, restart-safety,
+// and real night-completion behavior.
+// =====================================================================
+scenario('lumora2-phase6-village-level', null, `
+// ---- villageLevelFor(): pure function, exact thresholds, no state ----
+__check('below 100% restoration, level is always 1 regardless of nights played', villageLevelFor(10, 500) === 1, 'restorationPct(10)=' + restorationPct(10));
+__check('at exactly 100% restoration but few nights, level is still 1', villageLevelFor(25, 1) === 1 && villageLevelFor(25, 9) === 1);
+__check('Test 4: level becomes 2 the instant nights reaches the Level 2 threshold, not before', villageLevelFor(25, 9) === 1 && villageLevelFor(25, 10) === 2);
+__check('Test 4: level becomes 3 the instant nights reaches the Level 3 threshold, not before', villageLevelFor(25, 19) === 2 && villageLevelFor(25, 20) === 3);
+__check('level never exceeds 3 -- no arbitrary Level 4+', villageLevelFor(25, 1000) === 3);
+__check('a best far beyond the 100% ceiling still reads from the same restorationPct ceiling, no 4th step', villageLevelFor(999, 1000) === 3);
+
+// ---- villageLevel() reads LIVE best/nightNumber, not a cached/stored value ----
+best = 25; nightNumber = 1;
+__check('villageLevel() reads live state: level 1 at night 1 despite 100% restoration', villageLevel() === 1);
+nightNumber = 10;
+__check('villageLevel() reads live state: level 2 once nightNumber reaches 10', villageLevel() === 2);
+nightNumber = 20;
+__check('villageLevel() reads live state: level 3 once nightNumber reaches 20', villageLevel() === 3);
+
+// ---- Test 3: post-100% progression never begins before restoration genuinely reaches 100%, no matter how many nights ----
+best = 10; nightNumber = 50; // 40% restoration, plenty of nights played
+__check('Test 3: no level past 1 before restoration actually reaches 100%', villageLevel() === 1);
+
+// ---- Night Complete integration: a genuine level-crossing night gets a villageLevelUp tail row, and drawOver() renders it without throwing ----
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false;
+best = 25; bestAtRoundStart = 25; nightNumber = 10; // this exact night crosses 1 -> 2 (nightNumber-1=9 reads 1, nightNumber=10 reads 2)
+S.over = true; S.overT = 1; S.objectiveActive = []; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins;
+var hasLevelUpNow = villageLevel() > villageLevelFor(bestAtRoundStart, nightNumber - 1);
+__check('Test 4/9 setup: this exact state is a genuine level crossing', hasLevelUpNow === true);
+var rows = nightCompleteTailRows(false, false, false, false, hasLevelUpNow);
+__check('Test 4/9: a genuine level-crossing night includes a villageLevelUp tail row', rows.some(function(r){ return r.kind === 'villageLevelUp'; }));
+var threwLevelUp = false;
+try { drawOver(); } catch (e) { threwLevelUp = true; }
+__check('drawOver() renders the Village Level Up row without throwing', threwLevelUp === false);
+
+// ---- Test 5: no villageLevelUp row when the level does not actually change this night ----
+nightNumber = 15; bestAtRoundStart = 25; best = 25; // already level 2 both before (14->2) and after (15->2) -- no crossing
+var hasLevelUpNone = villageLevel() > villageLevelFor(bestAtRoundStart, nightNumber - 1);
+var rowsNoLevelUp = nightCompleteTailRows(false, false, false, false, hasLevelUpNone);
+__check('Test 5: no villageLevelUp row when the level does not change this night', hasLevelUpNone === false && rowsNoLevelUp.every(function(r){ return r.kind !== 'villageLevelUp'; }));
+
+// ---- Test 5 (no duplicate on repeated render): calling drawOver() many times for the SAME completed night reports the exact same outcome every time -- nothing is consumed or mutated ----
+nightNumber = 10; bestAtRoundStart = 9; best = 25; // a genuine crossing night again
+var firstHasLevelUp = villageLevel() > villageLevelFor(bestAtRoundStart, nightNumber - 1);
+for (var i = 0; i < 50; i++) drawOver();
+var stillHasLevelUp = villageLevel() > villageLevelFor(bestAtRoundStart, nightNumber - 1);
+__check('Test 5: repeated Night Complete renders of the same night report the identical level-up outcome every time', firstHasLevelUp === true && stillHasLevelUp === true);
+
+// ---- Test 8: a night restart (reset(), nightNumber unchanged) must not advance village progression ----
+nightNumber = 9; best = 20; bestAtRoundStart = 20;
+var levelBeforeRestart = villageLevel();
+reset(); // simulate the pause menu's "Restart Night" -- nightNumber must be untouched
+__check('Test 8: reset() (a night restart) does not touch nightNumber', nightNumber === 9);
+__check('Test 8: village level is unchanged by a restart', villageLevel() === levelBeforeRestart);
+
+// ---- Test 9: a genuine night completion (continueFromOver(), a real nightNumber advance) updates progression exactly once ----
+upgrades.tutorialDone = true;
+nightNumber = 9; best = 25; bestAtRoundStart = 25;
+__check('Test 9 setup: still level 1 the night before crossing (nightNumber 9)', villageLevel() === 1);
+S.over = true; S.overT = 1;
+continueFromOver();
+__check('Test 9: nightNumber advanced by exactly 1 via the real completion path, not stacked/double-counted', nightNumber === 10);
+__check('Test 9: village level is now 2, updated exactly once by the real completion', villageLevel() === 2);
+
+// ---- drawVillageScreen()/villageReadJournalRect(): draw and hit-test geometry agree, across every level, never throws ----
+[1, 2, 3].forEach(function(lvl){
+  best = 25; nightNumber = lvl === 1 ? 1 : (lvl === 2 ? 10 : 20);
+  var threwVillage = false;
+  try { screen = 'village'; drawVillageScreen(); villageReadJournalRect(); } catch (e) { threwVillage = true; }
+  __check('drawVillageScreen()/villageReadJournalRect() render without throwing at village level ' + lvl, threwVillage === false);
+  __check('villageHeroHeight() (drawing) reflects villageLevel() (hit-test reads the exact same function, so they can never disagree) at level ' + lvl, villageHeroHeight() === (villageLevel() > 1 ? 236 : 210));
+});
+screen = 'title';
+`);
+
+scenario('lumora2-phase6-persistence', { audioEnabled: true }, `
+// ---- Test 7: an existing player's pre-Phase-6 save (already at 100% restoration, already many nights in) loads safely -- Village Level initializes correctly with ZERO new save fields, since villageLevel() is a pure function of best+nightNumber, both of which already existed and already migrate ----
+__spy.loadResolve(JSON.stringify({ best: 30, coins: 500, nightNumber: 25, journal: { y: 5, b: 3, g: 1, e: 0, m: 0 }, objectivesCompleted: {}, eventHistory: [], contractsCompleted: [], cosmeticsUnlocked: [] }));
+return __tick(5).then(function(){
+  __check('Test 7: an existing player\\'s pre-Phase-6 save loads without throwing', loadDone === true && nightNumber === 25);
+  __check('Test 7: existing restoration (best) is preserved exactly', best === 30);
+  __check('Test 7: existing restoration still reads 100% / every Dawn Chorus milestone restored, unchanged by this phase', restorationPct(best) === 100 && VILLAGE_MILESTONES.every(function(m){ return restorationPct(best) >= m.pct; }));
+  __check('Test 7: Village Level initializes correctly from the existing restoration+night-count state -- no migration code needed, it just derives', villageLevel() === 3);
+  __check('Test 7: existing journal/collection data (Phase 5) is untouched by this phase', journal.y === 5 && journal.b === 3 && journal.g === 1);
+  __check('Test 7: existing progression (coins) is unaffected', coins === 500);
+
+  // ---- Test 6: reach a new level, save, and confirm no new/duplicate save key was introduced for it ----
+  best = 25; nightNumber = 10; // a village-level-2 state
+  saveProgress();
+  var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;

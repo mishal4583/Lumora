@@ -2334,6 +2334,35 @@ function restorationPct(scoreVal){
   for(let i=1;i<RESTORATION_THRESH.length;i++){ if(scoreVal>=RESTORATION_THRESH[i])t=i; }
   return RESTORATION_PCT[t];
 }
+// Lumora 2.0 Phase 6: Village 2.0 -- post-100%-restoration progression.
+// A PURE function of two values that already persist and already migrate
+// safely (best, nightNumber) -- exactly the same discipline restorationPct()
+// itself already uses, one level up. No new persisted "village level"
+// field, no accumulator, nothing to migrate: an existing player's level is
+// simply whatever this computes from their existing save the instant it
+// loads. Deliberately NOT based on `best` again for the post-100% steps --
+// restorationPct() is fully saturated at best>=25 (RESTORATION_PCT's own
+// ceiling), so reusing it here would make post-100% progression impossible
+// by construction. nightNumber is the natural existing substitute: a real,
+// already-tracked "how many nights has this player completed" count that
+// keeps climbing for as long as the player keeps playing, is NEVER reset by
+// a night restart (see continueFromOver() -- only a genuine completed night
+// increments it), and requires no new economy value. Village Level can only
+// ever exceed 1 once restoration has genuinely reached 100% (Dawn Chorus) --
+// strictly an ADDITIONAL layer after that milestone, never a parallel or
+// substitute meter (see villageLevel()'s own display, kept separate from
+// restorationPct()'s own % everywhere it's shown).
+// 10/20 nights is deliberately modest, not a grind -- achievable through
+// completely normal continued play (for scale, nightObjectiveTier()
+// elsewhere in this file already treats night 4+ as "later game").
+const VILLAGE_LEVEL_2_NIGHTS=10, VILLAGE_LEVEL_3_NIGHTS=20;
+function villageLevelFor(bestVal,nights){
+  if(restorationPct(bestVal)<100)return 1;
+  if(nights>=VILLAGE_LEVEL_3_NIGHTS)return 3;
+  if(nights>=VILLAGE_LEVEL_2_NIGHTS)return 2;
+  return 1;
+}
+function villageLevel(){ return villageLevelFor(best,nightNumber); }
 // ---- Part C / Shop Restructure / Remove In-Run Capacity Growth: real
 // upgrade effects. jarCapacityForRun sets S.cap for the WHOLE run now —
 // gainCap() no longer exists as a capacity mechanic (see capMilestoneFx
@@ -6295,12 +6324,18 @@ function drawContractChip(){
 // present row simply lands in its slot. Each row's `b` is the glyph's own
 // cy (panel-y-relative); label/value baselines are always b+4/b+5, matching
 // the existing CONTRACT row's own +4 relationship exactly.
-function nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus){
+// Phase 6: a 5th optional tail-row kind, villageLevelUp -- added on the end
+// of the existing stack (contract->event->bonus->villageLevelUp) rather
+// than reordering anything, so every old shipped position for the first 3
+// rows is completely unaffected when this one isn't present (the ordinary
+// case for the overwhelming majority of nights).
+function nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp){
   let base=hasObjectives?306:164;
   const rows=[];
   if(hasContract){ rows.push({kind:'contract',b:base}); base+=26; }
   if(hasEvent){ rows.push({kind:'event',b:base}); base+=26; }
   if(hasBonus){ rows.push({kind:'bonus',b:base}); base+=26; }
+  if(hasVillageLevelUp){ rows.push({kind:'villageLevelUp',b:base}); base+=26; }
   return rows;
 }
 function drawContractResultRow(panelR,b){
@@ -6386,6 +6421,23 @@ function drawBonusRow(panelR,b){
     try{ ctx.letterSpacing='0px'; }catch(e){}
     x+=15+mw+16;
   });
+}
+// Phase 6: same grammar as the contract/event rows above, exactly -- one
+// glyph, one label, one right-aligned value. star4Glyph is the EXISTING
+// sparkle shape this exact panel already draws for a Perfect Delivery mark
+// (see drawBonusRow() above) -- reused as-is rather than inventing new
+// iconography for this milestone, per direct instruction. No coin/reward
+// figure is ever shown here (Village Level grants no economy reward, per
+// direct instruction) -- just the level reached.
+function drawVillageLevelUpRow(panelR,b){
+  star4Glyph(panelR.x+22,panelR.y+b,6.5,d2gold(0.95),d2gold(0.5),8);
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
+  ctx.fillStyle='rgba(230,217,188,0.90)';
+  ctx.fillText('✨ VILLAGE LEVEL UP',panelR.x+40,panelR.y+b+4);
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  ctx.textAlign='right'; ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.95);
+  ctx.fillText('LEVEL '+villageLevel(),panelR.x+panelR.w-18,panelR.y+b+5);
 }
 
 // ---------- Lumora 2.0 D4 (Claude Design spec): Night Event UI ----------
@@ -6601,7 +6653,19 @@ function drawOver(){
   const hasContract=activeContract>=0;
   const hasEvent=!!S.eventActive;
   const hasBonus=nightCompleteHasBonusRow();
-  const tailRows=nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus);
+  // Phase 6: same before/after delta shape as restBefore/restAfter above,
+  // one level up -- nightNumber itself does NOT change during a round (only
+  // continueFromOver() ever increments it, after this screen is dismissed),
+  // so "before this night" is nightNumber-1 (this night not yet counted)
+  // and "after" is nightNumber (this night counted as complete), evaluated
+  // against bestAtRoundStart/best exactly like the restoration delta is.
+  // Nothing is stored/flagged: a restarted attempt at the SAME night
+  // recomputes the exact same before/after pair every time (nightNumber is
+  // unchanged by reset()), so this can never fire twice for one real night
+  // and never fires early for a night still in progress.
+  const villageLevelBefore=villageLevelFor(bestAtRoundStart,nightNumber-1);
+  const hasVillageLevelUp=villageLevel()>villageLevelBefore;
+  const tailRows=nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp);
   const panelH=tailRows.length?(tailRows[tailRows.length-1].b+20):(hasObjectives?280:150);
   const panelR={x:W/2-160,y:H*0.34,w:320,h:panelH};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
@@ -6664,6 +6728,7 @@ function drawOver(){
     tailRows.forEach(row=>{
       if(row.kind==='contract')drawContractResultRow(panelR,row.b);
       else if(row.kind==='event')drawEventResultRow(panelR,row.b);
+      else if(row.kind==='villageLevelUp')drawVillageLevelUpRow(panelR,row.b);
       else drawBonusRow(panelR,row.b);
     });
   }
@@ -8437,8 +8502,14 @@ function questGrantedMessage(q){
 // drawVillageScreen() itself computes, so the link always sits just below
 // the Tonight's Quest card regardless of which of its 3 height states
 // (88/100/210, depending on quest progress) is currently showing.
+// Phase 6: the hero card grows by 26px once a Village Level line needs
+// room (only ever true once restoration is already at 100%) -- one shared
+// height function so drawVillageScreen()'s own draw and this hit-test can
+// never disagree, same "one canonical geometry" discipline this exact
+// function's own comment already describes for heroR/listY/reqY.
+function villageHeroHeight(){ return 210+(villageLevel()>1?26:0); }
 function villageReadJournalRect(){
-  const heroR={x:20,y:120,w:W-40,h:210};
+  const heroR={x:20,y:120,w:W-40,h:villageHeroHeight()};
   const listY=heroR.y+heroR.h+30, milestoneRowH=42;
   const reqY=listY+34+VILLAGE_MILESTONES.length*milestoneRowH+20;
   const q=currentQuest(), reqH=q?(q.done?100:210):88;
@@ -8460,7 +8531,7 @@ function drawVillageScreen(){
   ctx.fillText('✕',VILLAGE_CLOSE_BTN.x,VILLAGE_CLOSE_BTN.y+1);
 
   const pct=restorationPct(best);
-  const heroR={x:20,y:120,w:W-40,h:210};
+  const heroR={x:20,y:120,w:W-40,h:villageHeroHeight()};
   lumPanel(heroR.x,heroR.y,heroR.w,heroR.h,20);
   lumEyebrow('Village Restored',heroR.x+20,heroR.y+30,'left');
   lumGlow(pct+'%',heroR.x+20,heroR.y+72,44,'left');
@@ -8491,6 +8562,18 @@ function drawVillageScreen(){
       ctx.fillText('✦ NEW LANDMARK DISCOVERED ✦',heroR.x+20,heroR.y+168);
       ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='13px Georgia,serif';
       ctx.fillText('Master Glowkeeper Statue — visit the Workshop',heroR.x+20,heroR.y+186);
+    }
+    // Phase 6: Village Level, kept visually and conceptually SEPARATE from
+    // the 100% restoration % above (never blended into it, never shown as
+    // ">100%") -- only rendered at all once it's actually >1, since there's
+    // nothing new to say at Level 1. Gated inside this exact branch because
+    // villageLevel() itself can never exceed 1 until pct is already 100
+    // (see villageLevelFor()'s own comment), so this can never appear
+    // alongside an incomplete restoration bar above it.
+    if(villageLevel()>1){
+      const vlY=upgrades.statueOwned?heroR.y+166:heroR.y+204;
+      ctx.fillStyle=LUM_GOLD; ctx.font='600 13px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+      ctx.fillText('✨ VILLAGE LEVEL '+villageLevel(),heroR.x+20,vlY);
     }
   }
 
