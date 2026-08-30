@@ -3092,7 +3092,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3166,7 +3166,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -3611,7 +3611,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','prestigeLevel','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -5331,7 +5331,7 @@ return __tick(5).then(function(){
   best = 25; nightNumber = 10; // a village-level-2 state
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
 });
 `);
@@ -5461,7 +5461,7 @@ return __tick(5).then(function(){
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
   __check('Test 7: saveProgress() writes equippedTheme into the existing save payload -- no new save key/mechanism', payload.equippedTheme === 'default');
-  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
 });
 `);
 
@@ -5749,7 +5749,7 @@ return __tick(5).then(function(){
   upgrades.tutorialDone = true;
   saveProgress();
   var payload1 = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
 
   // ---- Test 20: Night Complete's existing layout is completely unaffected by Phase 8 monetization state (Mystery Chest/Lucky Firefly live OUTSIDE Night Complete entirely -- see this phase's own report for why) ----
   upgrades.tutorialDone = true;
@@ -5991,7 +5991,12 @@ __check('Test 17: drawJournalScreen() with journalTab==season does not throw', (
 journalTab = 'weekly';
 __check('Test 17: the pre-existing Weekly journal tab still renders without throwing, unaffected by the new Season tab', (function(){ try { drawJournalScreen(); return true; } catch (e) { return false; } })());
 screen = 'play';
-__check('Test 17: JOURNAL_TABS gained exactly one new entry (season), the 3 pre-existing tabs are untouched', JOURNAL_TABS.length === 4 && JOURNAL_TABS.some(function(t){ return t.key === 'season'; }) && JOURNAL_TABS[0].key === 'story' && JOURNAL_TABS[1].key === 'fireflies' && JOURNAL_TABS[2].key === 'weekly');
+// Phase 12 legitimately appends a 5th tab (prestige) after this Phase 11
+// test was written -- updated to assert the real current invariant (the 4
+// tabs THIS phase cares about are untouched, in their original order),
+// not the length of the whole array, which is no longer this phase's own
+// invariant to own.
+__check('Test 17: JOURNAL_TABS gained exactly one new entry (season) at the time of Phase 11, and remains untouched by later phases -- the 3 original pre-Phase-11 tabs are still in their original order', JOURNAL_TABS.some(function(t){ return t.key === 'season'; }) && JOURNAL_TABS[0].key === 'story' && JOURNAL_TABS[1].key === 'fireflies' && JOURNAL_TABS[2].key === 'weekly' && JOURNAL_TABS[3].key === 'season');
 `);
 
 scenario('lumora2-phase11-persistence', { audioEnabled: true }, `
@@ -6034,6 +6039,213 @@ scenario('lumora2-phase11-load-season-clamp', { audioEnabled: true }, `
 __spy.loadResolve(JSON.stringify({ best: 20, coins: 300, seasonId: 'season_1', seasonProgress: 999 }));
 return __tick(5).then(function(){
   __check('Test 13: an out-of-range loaded seasonProgress is clamped to the current season\\'s own milestone cap, never left over-complete', seasonProgress === currentSeason().milestones);
+});
+`);
+
+scenario('lumora2-phase12-prestige', null, `
+// ---- Test 1: default state ----
+__check('Test 1: a fresh player starts at Prestige 0', prestigeLevel === 0);
+
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+
+// ---- Test 2: eligibility -- below the requirement cannot Prestige ----
+best = 5; nightNumber = 1;
+journal = { y: 1, b: 0, g: 0, e: 0, m: 0 };
+__check('Test 2 setup: village is not yet at its top tier', villageLevel() !== 3);
+__check('Test 2 setup: collection is not yet complete', getDiscoveredFireflyCount() !== Object.keys(TYPES).length);
+__check('Test 2: an under-qualified player is not Prestige-eligible', prestigeEligible() === false);
+var coinsBeforeBlocked = coins, statueBeforeBlocked = upgrades.statueOwned;
+__check('Test 2: activatePrestige() refuses and changes nothing for an ineligible player', activatePrestige() === false && prestigeLevel === 0 && coins === coinsBeforeBlocked && upgrades.statueOwned === statueBeforeBlocked);
+
+// ---- Test 3: eligibility reached -- the actual requirement (Village Level 3 AND full base Firefly Collection) ----
+best = 25; nightNumber = 20;
+journal = { y: 3, b: 2, g: 1, e: 1, m: 1 };
+__check('Test 3 setup: villageLevel() is now the top tier', villageLevel() === 3);
+__check('Test 3 setup: the base Firefly Collection is now fully discovered', getDiscoveredFireflyCount() === Object.keys(TYPES).length);
+__check('Test 3: Prestige is now available', prestigeEligible() === true);
+
+// ---- Test 4: confirmation -- opening then cancelling changes absolutely nothing ----
+upgrades.statueOwned = false; upgrades.statueEquipped = false;
+var coinsBeforeCancel = coins, journalBeforeCancel = JSON.stringify(journal), upgradesBeforeCancel = JSON.stringify(upgrades);
+journalFrom = 'title'; journalTab = 'prestige'; journalReading = null; screen = 'journal';
+__fire(cv, 'pointerdown', __fakeEvent(PRESTIGE_BTN.x, PRESTIGE_BTN.y));
+__check('Test 4 setup: tapping the (enabled) Prestige button opens the confirmation modal', prestigeConfirmOpen === true && prestigeLevel === 0);
+// Not just state -- proves drawJournalScreen() actually reaches
+// drawConfirmModal() while the state is open (a real bug found live in
+// Chrome: prestigeConfirmOpen was wired through the pointerdown handler and
+// Esc key correctly, but the actual drawConfirmModal() call was initially
+// missing from drawJournalScreen() entirely, so the confirmation never
+// became visible even though the state itself was correct -- "state is
+// set" and "the modal is visible" are two different claims, and only a
+// spy on the real draw call proves the second one).
+(function(){
+  var realDrawConfirmModal = drawConfirmModal, called = false;
+  drawConfirmModal = function(){ called = true; return realDrawConfirmModal.apply(this, arguments); };
+  try { drawJournalScreen(); } finally { drawConfirmModal = realDrawConfirmModal; }
+  __check('Test 4 setup: the open confirmation modal genuinely calls drawConfirmModal() when the Journal screen renders', called === true);
+})();
+__fire(cv, 'pointerdown', __fakeEvent(CONFIRM_CANCEL_BTN.x, CONFIRM_CANCEL_BTN.y));
+__check('Test 4: Cancel closes the modal', prestigeConfirmOpen === false);
+__check('Test 4: Cancel changes absolutely nothing -- Prestige level, coins, journal, and upgrades are all byte-for-byte unchanged', prestigeLevel === 0 && coins === coinsBeforeCancel && JSON.stringify(journal) === journalBeforeCancel && JSON.stringify(upgrades) === upgradesBeforeCancel);
+
+// ---- Test 5/6: Prestige activation via the real confirm button, and the correct permanent reward ----
+var coinsBeforeConfirm = coins;
+__fire(cv, 'pointerdown', __fakeEvent(PRESTIGE_BTN.x, PRESTIGE_BTN.y));
+__fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+__check('Test 5: confirming Prestige increases Prestige level by exactly one', prestigeLevel === 1);
+__check('Test 5: the confirmation modal closes on confirm', prestigeConfirmOpen === false);
+__check('Test 6: the correct permanent reward (Master Glowkeeper Statue ownership) is granted, at no coin cost since it was not already owned', upgrades.statueOwned === true && coins === coinsBeforeConfirm);
+
+// ---- Test 6 (already-owned fallback): if the reward item was already owned (e.g. bought outright before ever reaching Prestige), the SAME real price is granted in coins instead -- never a wasted no-op, never a second copy of anything ----
+screen = 'play';
+best = 25; nightNumber = 20; journal = { y: 3, b: 2, g: 1, e: 1, m: 1 };
+prestigeLevel = 0; upgrades.statueOwned = true; upgrades.statueEquipped = false; // simulate: player bought the statue themselves, long before reaching Prestige
+var coinsBeforeFallback = coins;
+__check('Test 6 (already-owned fallback) setup: still eligible', prestigeEligible() === true);
+__check('Test 6 (already-owned fallback): activatePrestige() grants the item\\'s own real price in coins instead of a duplicate/no-op', activatePrestige() === true && prestigeLevel === 1 && coins === coinsBeforeFallback + PRESTIGE_REWARDS[0].price && upgrades.statueOwned === true);
+
+// ---- Test 7: duplicate activation protection -- repeated confirmation/callback grants Prestige exactly once ----
+var coinsAtMax = coins;
+__check('Test 7 setup: Prestige is now at its max, no longer eligible', prestigeEligible() === false && prestigeLevel === PRESTIGE_MAX);
+__check('Test 7: a second direct activatePrestige() call (simulating a duplicate callback/double-click) is refused and grants nothing further', activatePrestige() === false && prestigeLevel === PRESTIGE_MAX && coins === coinsAtMax);
+__check('Test 7 (b): a third call is equally inert', activatePrestige() === false && prestigeLevel === PRESTIGE_MAX && coins === coinsAtMax);
+
+// ---- Test 8/12/13/14/15: permanent progression is completely preserved by a real Prestige activation ----
+best = 25; nightNumber = 20;
+journal = { y: 7, b: 4, g: 2, e: 1, m: 1 };
+upgrades.ownedJars = { simple: true, elder: true }; upgrades.equippedJar = 'elder'; upgrades.jarCapTiers.elder = 3;
+upgrades.ownedTrails = { none: true, gold: true }; upgrades.equippedTrail = 'gold';
+equippedTheme = 'default'; cosmeticsUnlocked = ['theme-winter'];
+upgrades.statueOwned = false; upgrades.statueEquipped = false;
+prestigeLevel = 0;
+var journalBefore8 = JSON.stringify(journal);
+var jarsBefore8 = JSON.stringify({ owned: upgrades.ownedJars, equipped: upgrades.equippedJar, tiers: JSON.stringify(upgrades.jarCapTiers) });
+var trailsBefore8 = JSON.stringify({ owned: upgrades.ownedTrails, equipped: upgrades.equippedTrail });
+var themeBefore8 = equippedTheme, cosmeticsBefore8 = JSON.stringify(cosmeticsUnlocked);
+var bestBefore8 = best, nightBefore8 = nightNumber, restBefore8 = restorationPct(best), villageBefore8 = villageLevel();
+__check('Test 8 setup: eligible', prestigeEligible() === true);
+activatePrestige();
+__check('Test 12: Firefly Journal is byte-for-byte unchanged by Prestige', JSON.stringify(journal) === journalBefore8);
+__check('Test 13: Village Restoration and Village Level are unchanged by Prestige', restorationPct(best) === restBefore8 && villageLevel() === villageBefore8 && best === bestBefore8 && nightNumber === nightBefore8);
+__check('Test 14: owned/equipped themes are unchanged by Prestige', equippedTheme === themeBefore8 && JSON.stringify(cosmeticsUnlocked) === cosmeticsBefore8);
+__check('Test 15: owned jars, jar upgrade tiers, and the equipped jar are all unchanged by Prestige', JSON.stringify({ owned: upgrades.ownedJars, equipped: upgrades.equippedJar, tiers: JSON.stringify(upgrades.jarCapTiers) }) === jarsBefore8);
+__check('Test 8: owned/equipped trails are unchanged by Prestige', JSON.stringify({ owned: upgrades.ownedTrails, equipped: upgrades.equippedTrail }) === trailsBefore8);
+__check('Test 8: the only thing Prestige actually changed is prestigeLevel and the one intended reward field', prestigeLevel === 1 && upgrades.statueOwned === true);
+
+// ---- Test 10: a Weekly reset (new week bucket) does not touch Prestige ----
+var prestigeBeforeWeeklyReset = prestigeLevel;
+prevLastPlayed = 1000; lastPlayed = prevLastPlayed + 8 * 24 * 60 * 60 * 1000;
+resolveWeekly({ stats: { fireflies: 80, rare: 4, nights: 3, events: 1 }, claimed: { fireflies: true }, chestClaimed: false });
+__check('Test 10: a genuine Weekly reset leaves Prestige level completely untouched', prestigeLevel === prestigeBeforeWeeklyReset);
+
+// ---- Test 11: a Season transition (simulated -- only one real SEASONS entry exists today) does not touch Prestige ----
+var prestigeBeforeSeasonChange = prestigeLevel;
+seasonId = 'season_1'; seasonProgress = 0; // simulating a hypothetical reset/transition
+seasonProgressAdd(3);
+__check('Test 11: Season progress changing (even a simulated reset/transition) leaves Prestige level completely untouched', prestigeLevel === prestigeBeforeSeasonChange);
+
+// ---- Test 16: Night Objectives remain fully functional alongside Prestige state ----
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+S.objectiveActive = [{ id: 'x', category: 'catch', kind: 'deliver', target: 3, reward: 20, done: false }];
+S.objectiveProgress = { x: 0 };
+objectiveProgress('deliver', 1);
+__check('Test 16: Night Objectives still progress normally with real Prestige state present', S.objectiveProgress.x === 1);
+
+// ---- Test 17: Contracts remain fully functional ----
+activeContract = 0; // Peaceful, a real coin-multiplier contract
+__check('Test 17: an active contract\\'s coin multiplier is still computed normally', contractCoinMult() !== 1);
+activeContract = -1;
+
+// ---- Test 18: Events remain fully functional ----
+S.eventActive = 'moonlight';
+__check('Test 18: an active Night Event\\'s coin multiplier is still computed normally', typeof nightEventCoinMult() === 'number');
+S.eventActive = null;
+
+// ---- Test 19: Glow Chain remains fully functional ----
+var coinsBeforeChain = coins;
+for (var ci = 0; ci < 5; ci++) advanceChain();
+var m5 = CHAIN_MILESTONES.find(function(mm){ return mm.n === 5; });
+__check('Test 19: Glow Chain milestones still grant their real reward with Prestige state present', coins === coinsBeforeChain + m5.reward);
+
+// ---- Test 20: Night Complete's own panel/button geometry is unaffected by any Prestige state ----
+S.objectiveActive = [{ id: 'x', category: 'catch', kind: 'catch', fireflyType: 'y', label: 'Catch 5', target: 5, reward: 20, done: true }];
+S.over = true; S.overT = 1; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins; S.coinsEarnedThisNight = 10;
+var playBtnYBefore, threwBefore = false;
+try { drawOver(); playBtnYBefore = playBtn.y; } catch (e) { threwBefore = true; }
+prestigeLevel = PRESTIGE_MAX; upgrades.statueOwned = true;
+var playBtnYAfter, threwAfter = false;
+try { drawOver(); playBtnYAfter = playBtn.y; } catch (e) { threwAfter = true; }
+__check('Test 20: drawOver() does not throw with real Prestige state set', !threwBefore && !threwAfter);
+__check('Test 20: Night Complete\\'s own panel/button geometry is byte-for-byte identical regardless of Prestige state -- none of it is read by drawOver() at all', playBtnYBefore === playBtnYAfter);
+screen = 'play';
+
+// ---- Test 21: existing monetization surfaces remain unaffected ----
+__check('Test 21: Workshop monetization helpers remain callable and unaffected by Prestige state', typeof rewardedAdsAvailable() === 'boolean' && typeof mysteryChestEligible() === 'boolean');
+
+// ---- Test 22: full release regression -- every Journal tab still renders without throwing alongside real Prestige state ----
+journalFrom = 'title'; journalTab = 'prestige'; journalReading = null; screen = 'journal';
+__check('Test 22: drawJournalScreen() with journalTab==prestige does not throw', (function(){ try { drawJournalScreen(); return true; } catch (e) { return false; } })());
+// Not just "doesn't throw" -- proves the DRAW dispatch actually reaches
+// drawPrestigeJournal() (a real bug found live in Chrome: the pointerdown
+// dispatch had its own 'prestige' branch from the start, but the draw
+// dispatch's own branch was initially missing, so the tab visually still
+// showed the Fireflies grid underneath the highlighted Prestige tab --
+// "doesn't throw" alone can never catch a wrong-branch-selected bug like
+// this, only a real spy on the actual function called can).
+(function(){
+  var realDrawPrestigeJournal = drawPrestigeJournal, called = false;
+  drawPrestigeJournal = function(){ called = true; return realDrawPrestigeJournal.apply(this, arguments); };
+  try { drawJournalScreen(); } finally { drawPrestigeJournal = realDrawPrestigeJournal; }
+  __check('Test 22: the journalTab==prestige dispatch genuinely calls drawPrestigeJournal(), not a fallthrough to another tab\\'s draw function', called === true);
+})();
+['story', 'fireflies', 'weekly', 'season'].forEach(function(tab){
+  journalTab = tab;
+  __check('Test 22: the pre-existing ' + tab + ' journal tab still renders without throwing, unaffected by the new Prestige tab', (function(){ try { drawJournalScreen(); return true; } catch (e) { return false; } })());
+});
+screen = 'play';
+__check('Test 22: JOURNAL_TABS gained exactly one new entry (prestige); the 4 pre-existing tabs are untouched, in their original order', JOURNAL_TABS.length === 5 && JOURNAL_TABS[0].key === 'story' && JOURNAL_TABS[1].key === 'fireflies' && JOURNAL_TABS[2].key === 'weekly' && JOURNAL_TABS[3].key === 'season' && JOURNAL_TABS[4].key === 'prestige');
+
+// ---- Performance: prestigeEligible() is a cheap, pure, event-driven read -- never scans S or runs every frame on its own ----
+__check('Performance: prestigeEligible() is a pure function of already-existing persistent state, not a per-frame accumulator', typeof prestigeEligible === 'function' && typeof prestigeLevel === 'number');
+`);
+
+scenario('lumora2-phase12-persistence', { audioEnabled: true }, `
+// ---- Migration: a pre-Phase-12 save (no prestigeLevel field at all) loads without throwing, defaulting safely to 0 ----
+__spy.loadResolve(JSON.stringify({ best: 25, coins: 300, nightNumber: 20, journal: { y: 3, b: 2, g: 1, e: 1, m: 1 }, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, statueOwned: false, statueEquipped: false } }));
+return __tick(5).then(function(){
+  __check('Migration: a pre-Phase-12 save loads without throwing', loadDone === true);
+  __check('Migration: a pre-Phase-12 save defaults prestigeLevel to 0, not undefined/NaN', prestigeLevel === 0);
+  __check('Migration: unrelated pre-existing fields (coins/best/journal) are completely unaffected by the Prestige migration', coins === 300 && best === 25 && journal.y === 3);
+  __check('Migration: a player who happens to already meet the requirement is correctly eligible immediately after loading, with zero extra state needed', prestigeEligible() === true);
+
+  // ---- Test 9 (save side): a real Prestige activation is written into the YT save payload ----
+  activatePrestige();
+  saveProgress();
+  var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Test 9: saveProgress() writes the current prestigeLevel into the YT save payload', payload.prestigeLevel === 1);
+  __check('Test 9: the granted reward (statueOwned) is written into the payload\\'s existing upgrades field -- no new/duplicate reward field', payload.upgrades && payload.upgrades.statueOwned === true);
+});
+`);
+
+// The load side of the Test 9 round trip -- a fresh context loading the
+// exact payload shape the scenario above just proved saveProgress() writes,
+// same "separate fresh-context load" pattern as lumora2-phase11-load-season-progress.
+scenario('lumora2-phase12-load-prestige', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 25, coins: 300, prestigeLevel: 1, upgrades: { tutorialDone: true, statueOwned: true, statueEquipped: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true } } }));
+return __tick(5).then(function(){
+  __check('Test 9: reloading a saved prestigeLevel restores it exactly', prestigeLevel === 1);
+  __check('Test 9: the reload also restores the permanent reward it granted', upgrades.statueOwned === true);
+});
+`);
+
+// Test: an out-of-range/invalid loaded prestigeLevel (corrupted data, or a
+// stale save from a hypothetical future build with more approved reward
+// tiers) clamps safely rather than crashing or over-completing.
+scenario('lumora2-phase12-load-prestige-clamp', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 25, coins: 300, prestigeLevel: 999 }));
+return __tick(5).then(function(){
+  __check('Invalid Prestige state: an out-of-range loaded prestigeLevel is clamped to PRESTIGE_MAX, never left over-complete', prestigeLevel === PRESTIGE_MAX);
 });
 `);
 

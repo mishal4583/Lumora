@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1165,7 +1165,7 @@ function continueFromOver(){
     // already is. Persisted immediately, before the interstitial branch below's
     // early `return`, so it survives even if that ad request never resolves.
     nightNumber++;
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel})); }catch(e){} }
     weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
@@ -1852,9 +1852,85 @@ function seasonProgressAdd(n){
   seasonProgress=Math.min(seasonProgress+(n||1),currentSeason().milestones);
   for(let lvl=prev+1;lvl<=seasonProgress;lvl++)grantSeasonLevel(lvl);
   if(seasonProgress>prev){
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel})); }catch(e){} }
     saveProgress();
   }
+}
+// Lumora 2.0 Phase 12: Prestige -- an endgame RECOGNITION layer that sits
+// above existing progression, never replaces it. No destructive reset: see
+// this phase's own final report for why no genuinely safe repeatable layer
+// was identified to cycle, per direct instruction not to invent one.
+//
+// Eligibility is the smallest sensible combination of signals THIS PROJECT
+// already treats as "substantially progressed", both re-derived live from
+// state that already persists on its own (never a duplicated tracker):
+// villageLevel()'s own top tier (already requires 100% restoration AND
+// nightNumber>=20 -- see villageLevelFor()'s own comment calling this an
+// "ADDITIONAL layer after" full restoration) and full base Firefly
+// Collection (getDiscoveredFireflyCount(), NOT the variant pool, which its
+// own comment already documents as dormant/unreachable in real play today).
+// Season completion and Weekly progression are deliberately NOT required:
+// Season is still a single-entry, content-incomplete system per Phase 11's
+// own report, and Weekly is a recurring, non-permanent cycle, not an
+// endgame milestone.
+//
+// PRESTIGE_REWARDS mirrors SEASONS' own "one real entry, extensible" shape.
+// Exactly one approved permanent reward exists today: the Master
+// Glowkeeper Statue, an EXISTING Decor shop item already flagged in its
+// own comment as "a final/late-game prestige landmark" (see SHOP_ITEMS.
+// statue) -- granted through the exact same upgrades.statueOwned flag a
+// real purchase would set, never a second/duplicate ownership field. If
+// already owned (bought outright, or from an earlier Prestige), falls back
+// to the item's own real price in coins -- same "never a wasted no-op
+// reward" fallback grantSeasonLevel() already established in Phase 11.
+// PRESTIGE_MAX (=PRESTIGE_REWARDS.length) is deliberately 1 right now:
+// there is exactly one approved unique reward, and inventing a second/
+// third tier's content would be fabricating unapproved design, which this
+// phase's own instructions explicitly forbid -- reported as a content
+// dependency rather than assumed.
+const PRESTIGE_REWARDS=[
+  { level:1, field:'statueOwned', price:3500, label:'Master Glowkeeper Statue' }
+];
+const PRESTIGE_MAX=PRESTIGE_REWARDS.length;
+// Same "Phase 0 foundation fields" bucket every scalar above already
+// shares (gk2_lumora2 + the YT save payload), not a new storage key. No
+// separate "prestigeRewardsClaimed" map, no persisted eligibility flag:
+// "is level N claimed" is simply prestigeLevel>=N (Season's own
+// established reasoning), and eligibility is always re-derived live, never
+// duplicated into a second stored flag that could drift out of sync.
+let prestigeLevel=0;
+function prestigeEligible(){
+  return prestigeLevel<PRESTIGE_MAX && villageLevel()===3 && getDiscoveredFireflyCount()===Object.keys(TYPES).length;
+}
+function grantPrestigeReward(level){
+  const r=PRESTIGE_REWARDS.find(x=>x.level===level);
+  if(!r)return;
+  if(!upgrades[r.field]){
+    upgrades[r.field]=true;
+    persistUpgradesLocal();
+  } else {
+    // Already owned (bought outright, or an earlier Prestige cycle already
+    // granted it) -- valued at the item's own real price rather than a
+    // wasted duplicate-ownership no-op, same fallback grantSeasonLevel()
+    // already established for Season's own final-level trail reward.
+    applyCoinsOrLuckReward('coins',r.price);
+  }
+}
+// The ONE place prestigeLevel ever advances. Re-checks prestigeEligible()
+// (specifically prestigeLevel<PRESTIGE_MAX) immediately before mutating,
+// not just at the confirmation button's own earlier gate -- same "check
+// right before the mutation itself, not just earlier" discipline
+// jarCanAcceptCatch() established for the Capacity Enforcement fix -- so a
+// double-tap, a re-fired callback, or reopening the confirmation modal can
+// never grant a second level: the repeat call's own eligibility check sees
+// the already-incremented prestigeLevel and safely no-ops.
+function activatePrestige(){
+  if(!prestigeEligible())return false;
+  prestigeLevel+=1;
+  grantPrestigeReward(prestigeLevel);
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel})); }catch(e){} }
+  saveProgress();
+  return true;
 }
 if(!YT){
   try{
@@ -1882,6 +1958,11 @@ if(!YT){
     // or exceed what a real player could have earned.
     if(typeof l2.seasonId==='string')seasonId=l2.seasonId;
     if(typeof l2.seasonProgress==='number'&&l2.seasonProgress>=0)seasonProgress=Math.min(l2.seasonProgress,currentSeason().milestones);
+    // Phase 12: clamped defensively to [0, PRESTIGE_MAX] -- a corrupted or
+    // out-of-range value (e.g. a negative level, or a stale save from a
+    // hypothetical future build with more approved reward tiers) can never
+    // read as more complete than this build's own reward table supports.
+    if(typeof l2.prestigeLevel==='number'&&l2.prestigeLevel>=0)prestigeLevel=Math.min(Math.floor(l2.prestigeLevel),PRESTIGE_MAX);
   }catch(e){}
 }
 // ---------- Lumora 2.0 Phase 9: Weekly Progression ----------
@@ -2233,7 +2314,7 @@ function generateNightEvent(){
     // save, which already ran before this executes inside reset()).
     eventHistory.push(S.eventActive);
     weeklyProgress('events',1); // Lumora 2.0 Phase 9: same "the moment it's rolled" authoritative site
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel})); }catch(e){} }
     saveProgress();
   } else {
     S.eventActive=null;
@@ -2936,7 +3017,7 @@ function equipTheme(id){
   if(!validVillageTheme(id)||!isThemeOwned(id))return false;
   if(equippedTheme===id)return true;
   equippedTheme=id;
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -3085,6 +3166,8 @@ if(YT&&YT.game&&YT.game.loadData){
       // Phase 11: same defensive pattern as equippedTheme just above.
       if(typeof d.seasonId==='string')seasonId=d.seasonId;
       if(typeof d.seasonProgress==='number'&&d.seasonProgress>=0)seasonProgress=Math.min(d.seasonProgress,currentSeason().milestones);
+      // Phase 12: same defensive clamp as the non-YT load path's own comment.
+      if(typeof d.prestigeLevel==='number'&&d.prestigeLevel>=0)prestigeLevel=Math.min(Math.floor(d.prestigeLevel),PRESTIGE_MAX);
     }catch(e){}
   }).catch(()=>{})
     .then(()=>{
@@ -3219,6 +3302,12 @@ let shopFrom='title'; let shopTab='jars'; // was the stale 'glassblower' key (ma
 // chapter list -- null also means "close" backs out to journalFrom instead
 // of just clearing this.
 let journalFrom='title'; let journalTab='story'; let journalReading=null;
+// Phase 12: whether the Prestige confirmation modal is open -- session-level
+// UI state, same category as journalReading above (not S, not persisted;
+// cleared defensively in reset(), same reasoning as pauseConfirm's own
+// defensive clear, so a stray open confirmation can't survive into a fresh
+// round).
+let prestigeConfirmOpen=false;
 // Aurora shop-presentation pass: whether the informational "current jar vs
 // Aurora" comparison modal is open. Session-level shop UI state, same
 // category as shopTab/shopFrom above (not S, not cleared by reset() --
@@ -3342,6 +3431,7 @@ function reset(){
   pointer.down=false;
   KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
+  prestigeConfirmOpen=false; // Phase 12: same defensive clear as pauseConfirm above
   // Lumora 2.0 Phase 1: the ONE place objective generation/restoration is
   // decided -- every reset() call site (initial top-level init, beginPlay(),
   // continueFromOver(), the pause menu's Restart Night) funnels through
@@ -3754,6 +3844,11 @@ const TUTORIAL_SKIP_BTN={x:W/2,y:TUTORIAL_PANEL_Y+TUTORIAL_PANEL_H-26,w:180,h:32
 // row (Story | Fireflies) above it. Only ever drawn/hit-tested on the
 // Journal screen's own fireflies tab -- see drawJournalScreen().
 const TRACKER_TOGGLE={x:W/2-90,y:192,r:16};
+// Phase 12: single source of truth for both the Prestige button's hit-test
+// and its draw call, same PAUSE_BTN/RESUME_BTN discipline this file already
+// follows for every button. Only ever drawn/hit-tested on the Journal
+// screen's own prestige tab -- see drawJournalScreen()/drawPrestigeJournal().
+const PRESTIGE_BTN={x:W/2,y:210+290,w:240,h:48,fontSize:12};
 // Lumora UI port: village milestones, ported from src/data/village.ts's
 // MILESTONES exactly (names/descriptions/percent thresholds unchanged).
 // Checked against restorationPct(best) -- the EXISTING, already-tested
@@ -4222,6 +4317,17 @@ cv.addEventListener('pointerdown',e=>{
     return;
   }
   if(screen==='journal'){
+    // Phase 12: the confirmation modal is informational-and-choice only --
+    // every tap while it's open is swallowed except its own two buttons,
+    // same discipline jarCompareOpen/pauseConfirm already established
+    // elsewhere in this file. Checked first, before anything else in this
+    // screen, so it genuinely can't leak a tap through to the tab row or
+    // close button behind it.
+    if(prestigeConfirmOpen){
+      if(inRect(p.x,p.y,CONFIRM_CANCEL_BTN))prestigeConfirmOpen=false; // Cancel -- nothing changes, per Test 4
+      else if(inRect(p.x,p.y,CONFIRM_ACTION_BTN)){ prestigeConfirmOpen=false; activatePrestige(); }
+      return;
+    }
     if(dist(p.x,p.y,JOURNAL_CLOSE_BTN.x,JOURNAL_CLOSE_BTN.y)<=hitR(JOURNAL_CLOSE_BTN)){
       if(journalReading){ journalReading=null; return; } // one level back: reading -> chapter list
       screen=journalFrom; return;
@@ -4230,6 +4336,13 @@ cv.addEventListener('pointerdown',e=>{
     for(const t of journalTabRects()){ if(inRect(p.x,p.y,t)){ journalTab=t.key; return; } }
     if(journalTab==='fireflies'){
       if(dist(p.x,p.y,TRACKER_TOGGLE.x,TRACKER_TOGGLE.y)<=TRACKER_TOGGLE.r){ toggleTracker(); return; }
+      return;
+    }
+    if(journalTab==='prestige'){
+      // Eligibility is re-checked here too (not just visually) -- tapping a
+      // locked/disabled-looking button is always inert, never opens the
+      // confirmation modal, per "no accidental activation".
+      if(prestigeEligible()&&inRect(p.x,p.y,PRESTIGE_BTN))prestigeConfirmOpen=true;
       return;
     }
     for(const rect of storyRowRects()){ if(inRect(p.x,p.y,rect)&&storyKeyUnlocked(rect.key)){ journalReading=rect.key; return; } }
@@ -4409,6 +4522,7 @@ window.addEventListener('keydown',e=>{
     else if(screen==='shop'&&jarCompareOpen)jarCompareOpen=false; // Aurora shop-presentation pass: Esc closes the compare modal first, same two-step precedent as pauseConfirm above -- doesn't fall through to closing the shop in the same keystroke
     else if(screen==='shop')screen=shopFrom; // SHOULD: Esc closes modals — every modal screen is
     else if(screen==='village')screen='title';
+    else if(screen==='journal'&&prestigeConfirmOpen)prestigeConfirmOpen=false; // Phase 12: same two-step precedent as pauseConfirm/jarCompareOpen above -- Esc cancels the confirmation first
     else if(screen==='journal'&&journalReading)journalReading=null; // one level back, same as the corner button
     else if(screen==='journal')screen=journalFrom;
     return;
@@ -9515,7 +9629,7 @@ function latestUnlockedChapterKey(){
   STORY_CHAPTERS.forEach(ch=>{ if(storyChapterUnlocked(ch))latest=ch.key; });
   return latest;
 }
-const JOURNAL_TABS=[{key:'story',label:'Story'},{key:'fireflies',label:'Fireflies'},{key:'weekly',label:'Weekly'},{key:'season',label:'Season'}];
+const JOURNAL_TABS=[{key:'story',label:'Story'},{key:'fireflies',label:'Fireflies'},{key:'weekly',label:'Weekly'},{key:'season',label:'Season'},{key:'prestige',label:'Prestige'}];
 // single source of truth for both the tab draw and its hit-test, same
 // discipline as shopTabRects()/jarCardRects() elsewhere in the file.
 function journalTabRects(){
@@ -9677,6 +9791,64 @@ function drawSeasonJournal(){
     wrapText('Season progress advances whenever a Weekly milestone or the Weekly Glow Chest is claimed.',px+20,py+200,pw-40,15,'left');
   }
 }
+// Lumora 2.0 Phase 12: Prestige's own tab -- reuses the exact same panel/
+// eyebrow/lumButton primitives every other Journal tab already uses, no new
+// UI component invented. Three distinct states, same "don't overbuild"
+// discipline as drawSeasonJournal()'s complete/non-complete split: maxed
+// (nothing left to show but a thank-you), eligible (reward preview + a real
+// enabled button), and locked (a clear, honest requirement checklist and a
+// visibly disabled button -- tapping it is inert, per "no accidental
+// activation", never hidden entirely, per "shown as locked with a clear
+// requirement").
+function drawPrestigeJournal(){
+  const maxed=prestigeLevel>=PRESTIGE_MAX;
+  const villageReady=villageLevel()===3;
+  const totalFireflies=Object.keys(TYPES).length, discoveredFireflies=getDiscoveredFireflyCount();
+  const collectionReady=discoveredFireflies===totalFireflies;
+  const eligible=prestigeEligible();
+
+  ctx.fillStyle=LUM_HAZE; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('Prestige '+prestigeLevel+' of '+PRESTIGE_MAX,W/2,172);
+
+  const px=20, py=210, pw=W-40, ph=330;
+  lumPanel(px,py,pw,ph,18);
+  lumEyebrow('PRESTIGE',px+20,py+30,'left',11);
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillStyle=LUM_GOLD; ctx.font='700 40px Georgia,serif';
+  ctx.fillText(prestigeLevel+' / '+PRESTIGE_MAX,W/2,py+82);
+
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.font='500 13px Georgia,serif';
+  ctx.fillStyle=villageReady?LUM_GOLD:'rgba(174,184,203,0.6)';
+  ctx.fillText((villageReady?'✓ ':'○ ')+'Village fully restored (Level 3)',px+20,py+108);
+  ctx.fillStyle=collectionReady?LUM_GOLD:'rgba(174,184,203,0.6)';
+  ctx.fillText((collectionReady?'✓ ':'○ ')+'Full Firefly Collection ('+discoveredFireflies+'/'+totalFireflies+')',px+20,py+128);
+
+  ctx.fillStyle='rgba(174,184,203,0.7)'; ctx.font='500 10px Georgia,serif';
+  ctx.fillText(maxed?'MAX PRESTIGE REACHED':(eligible?'NEXT REWARD':'LOCKED'),px+20,py+156);
+  ctx.fillStyle=maxed?LUM_GOLD:LUM_CREAM; ctx.font='500 15px Georgia,serif'; ctx.textBaseline='top';
+  // Every block below is positioned off the PREVIOUS block's own wrapText()
+  // return value, never a hardcoded offset -- same discipline established
+  // for Aurora's Equipped Jar Hero card, after a real overflow was found
+  // there once a variable-length string collided with fixed-Y text below
+  // it. The "already owned" reward line can run long (item name + price
+  // fallback note), so it gets the same wrapText treatment as everything
+  // else here, never a plain unwrapped fillText.
+  if(maxed){
+    wrapText('Every Prestige level claimed. Nothing is reset -- your collection, village, jars, themes, and trails all remain exactly as you left them.',px+20,py+170,pw-40,18,'left');
+  } else if(eligible){
+    const r=PRESTIGE_REWARDS.find(x=>x.level===prestigeLevel+1); // the reward for the NEXT level, looked up by level (not array index), same discipline as grantPrestigeReward()'s own lookup
+    const rewardText=r.label+(upgrades[r.field]?' (already owned -- grants +'+r.price+' Coins instead)':'');
+    const afterReward=wrapText(rewardText,px+20,py+170,pw-40,19,'left');
+    ctx.fillStyle='rgba(174,184,203,0.55)'; ctx.font='italic 11px Georgia,serif';
+    wrapText('Nothing is reset. A new Prestige level is permanent recognition on top of everything you\'ve already earned.',px+20,afterReward+8,pw-40,15,'left');
+  } else {
+    ctx.fillStyle='rgba(174,184,203,0.6)'; ctx.font='italic 13px Georgia,serif';
+    wrapText('Reach both requirements above to unlock your next Prestige.',px+20,py+170,pw-40,17,'left');
+  }
+
+  if(!maxed)lumButton(PRESTIGE_BTN,eligible?'Prestige':'Locked','primary',!eligible);
+  ctx.textAlign='center'; ctx.textBaseline='top';
+}
 // Glowkeeper Story pass: the Journal is now the storybook (journalTab
 // defaults to 'story') with the original firefly-discovery grid moved to
 // its own tab, not removed -- still reads the exact same journal[type]
@@ -9724,6 +9896,8 @@ function drawJournalScreen(){
     drawWeeklyJournal();
   } else if(journalTab==='season'){
     drawSeasonJournal();
+  } else if(journalTab==='prestige'){
+    drawPrestigeJournal();
   } else {
     const order=Object.keys(TYPES);
     const discoveredCount=order.filter(t=>journal[t]>0).length;
@@ -9757,6 +9931,17 @@ function drawJournalScreen(){
       ctx.fillStyle=LUM_CREAM; ctx.font='500 18px Georgia,serif';
       ctx.fillText(caught+'',rect.x+rect.w-16,rect.y+50);
     });
+  }
+  // Phase 12: the Prestige confirmation modal, drawn ON TOP of the tab
+  // content above -- same "extra dim+panel layer on top of what's already
+  // drawn" construction drawConfirmModal()'s own comment describes for the
+  // pause overlay's Restart/Go Home confirms, just reused here for the
+  // Journal screen instead. Nothing is reset by a real Prestige, so the
+  // body copy says so explicitly, per "if nothing is reset, say so clearly".
+  if(prestigeConfirmOpen){
+    const r=PRESTIGE_REWARDS.find(x=>x.level===prestigeLevel+1);
+    const rewardLine=r?(r.label+(upgrades[r.field]?' (already owned -- you will receive +'+r.price+' Coins instead)':'')):'';
+    drawConfirmModal('Begin a new Prestige cycle?','You will receive Prestige '+(prestigeLevel+1)+' and: '+rewardLine+'. Nothing is reset -- your collection, village, jars, themes, and trails all remain exactly as they are.','Prestige');
   }
   ctx.textAlign='center'; ctx.textBaseline='top';
 }
