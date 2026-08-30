@@ -3092,7 +3092,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3166,7 +3166,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -3611,7 +3611,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','quests','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -4414,7 +4414,8 @@ weeklyChestClaimed = false;
 var coinsStart = coins;
 weeklyProgress('events', 1);
 __check('weeklyProgress() increments the named stat by the given amount', weeklyStats.events === 1);
-__check('crossing the events milestone (target 1) grants exactly its own reward (+30)', weeklyMilestonesClaimed.events === true && coins === coinsStart + 30, 'coins=' + coins);
+// Phase 11: a newly-claimed Weekly milestone also advances Season by one level (+30 coinsPerLevel here, since level 1 of 10 isn't the final level), so the total is +30 (milestone) + 30 (season).
+__check('crossing the events milestone (target 1) grants exactly its own reward (+30) plus the Phase 11 Season level-up (+30)', weeklyMilestonesClaimed.events === true && coins === coinsStart + 30 + 30, 'coins=' + coins);
 var coinsAfterEvents = coins;
 weeklyProgress('events', 1);
 __check('further progress on an already-claimed milestone does not re-grant its reward', weeklyStats.events === 2 && coins === coinsAfterEvents);
@@ -4425,7 +4426,8 @@ weeklyProgress('rare', 5);
 var coinsBeforeLastMilestone = coins;
 weeklyProgress('nights', 5);
 __check('the 4th and final milestone (nights) still grants its own reward (+50)', weeklyMilestonesClaimed.nights === true);
-__check('completing the 4th milestone ALSO grants the Weekly Glow Chest bonus (+100) in the same call', coins === coinsBeforeLastMilestone + 50 + 100, 'coins=' + coins);
+// Phase 11: the 4th milestone crossing AND the chest bonus each independently advance Season by one level (+30 each, coinsPerLevel, since these are levels 4 and 5 of 10 -- not the final level), so the total is +50 (milestone) +30 (its season level) +100 (chest) +30 (chest's season level).
+__check('completing the 4th milestone ALSO grants the Weekly Glow Chest bonus (+100) in the same call, plus the two Phase 11 Season level-ups (+30 each) triggered by the milestone and the chest', coins === coinsBeforeLastMilestone + 50 + 30 + 100 + 30, 'coins=' + coins);
 var coinsAfterChest = coins;
 weeklyProgress('fireflies', 1);
 __check('the chest bonus is never granted a second time, even as stats keep growing past every target', coins === coinsAfterChest);
@@ -5329,7 +5331,7 @@ return __tick(5).then(function(){
   best = 25; nightNumber = 10; // a village-level-2 state
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
 });
 `);
@@ -5459,7 +5461,7 @@ return __tick(5).then(function(){
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
   __check('Test 7: saveProgress() writes equippedTheme into the existing save payload -- no new save key/mechanism', payload.equippedTheme === 'default');
-  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
 });
 `);
 
@@ -5747,7 +5749,7 @@ return __tick(5).then(function(){
   upgrades.tutorialDone = true;
   saveProgress();
   var payload1 = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
 
   // ---- Test 20: Night Complete's existing layout is completely unaffected by Phase 8 monetization state (Mystery Chest/Lucky Firefly live OUTSIDE Night Complete entirely -- see this phase's own report for why) ----
   upgrades.tutorialDone = true;
@@ -5905,6 +5907,133 @@ return __tick(5).then(function(){
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
   __check('Test 14: saveProgress() persists the equipped jar through the exact existing upgrades.equippedJar field -- no new identity save key was introduced', payload.upgrades && payload.upgrades.equippedJar === 'simple' && !('jarIdentity' in payload) && !('equippedJarIdentity' in payload));
   __check('Test 14 (load side): re-resolving identity from that exact saved equippedJar value gives the correct (different) identity, proving identity is derived fresh, not itself persisted', jarIdentity(payload.upgrades.equippedJar).name === 'Balanced');
+});
+`);
+
+scenario('lumora2-phase11-season', null, `
+// ---- Test 1: season initialization -- a valid single-entry SEASONS array, a fresh player starts at level 0 of it ----
+__check('Test 1: SEASONS is a non-empty array with a valid current entry', Array.isArray(SEASONS) && SEASONS.length > 0 && currentSeason() === SEASONS[0]);
+__check('Test 1: a fresh player starts at seasonProgress 0 on the first real SEASONS entry', seasonId === 'season_1' && seasonProgress === 0);
+
+// ---- Test 2: stable ID -- currentSeason() always resolves to the same entry across repeated calls, never drifts ----
+__check('Test 2: currentSeason() is stable across repeated calls', currentSeason().id === currentSeason().id && currentSeason() === currentSeason());
+
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+weeklyStats = { fireflies: 0, rare: 0, nights: 0, events: 0 };
+weeklyMilestonesClaimed = { fireflies: false, rare: false, nights: false, events: false };
+weeklyChestClaimed = false;
+seasonId = 'season_1'; seasonProgress = 0;
+
+// ---- Test 3/4: progress increments exactly once per newly-claimed Weekly milestone, never on repeat progress toward an already-claimed one ----
+var coinsStart = coins;
+weeklyProgress('events', 1); // crosses the 'events' milestone (target 1) -- also the ONLY milestone crossed here
+__check('Test 3: a newly-claimed Weekly milestone advances Season by exactly one level', seasonProgress === 1);
+__check('Test 5: the level-up grants exactly coinsPerLevel (+30), since level 1 of 10 is not the final level', coins === coinsStart + 30 + 30, 'coins=' + coins); // +30 milestone reward, +30 season coinsPerLevel
+var seasonProgressAfterFirst = seasonProgress, coinsAfterFirst = coins;
+weeklyProgress('events', 1); // further progress on an ALREADY-claimed milestone
+__check('Test 4/6: no double-count -- further progress toward an already-claimed milestone does not advance Season again', seasonProgress === seasonProgressAfterFirst && coins === coinsAfterFirst);
+
+// ---- Test 7: duplicate-claim protection at the seasonProgressAdd() level itself -- calling it directly when already at the season's cap is a harmless no-op ----
+seasonId = 'season_1'; seasonProgress = currentSeason().milestones;
+var coinsAtCap = coins;
+seasonProgressAdd(1);
+__check('Test 7: seasonProgressAdd() is a no-op once already at the season\\'s milestone cap -- no over-completion, no extra grant', seasonProgress === currentSeason().milestones && coins === coinsAtCap);
+
+// ---- Test 9: Collection compatibility -- Season progress/rewards never touch the Firefly Journal ----
+seasonId = 'season_1'; seasonProgress = 0;
+weeklyStats = { fireflies: 0, rare: 0, nights: 0, events: 0 };
+weeklyMilestonesClaimed = { fireflies: false, rare: false, nights: false, events: false };
+weeklyChestClaimed = false;
+var journalBeforeSeason = JSON.stringify(journal);
+weeklyProgress('events', 1);
+__check('Test 9: a real Season level-up never touches Firefly Journal state', JSON.stringify(journal) === journalBeforeSeason);
+
+// ---- Test 11: Village compatibility -- Season progress never touches nightNumber/restorationPct(best) ----
+var nightBefore = nightNumber, restBefore = restorationPct(best);
+weeklyProgress('events', 1); // already claimed above -- a no-op, but re-asserts nothing else moved
+__check('Test 11: Season progression never modifies nightNumber or the Village restoration percentage', nightNumber === nightBefore && restorationPct(best) === restBefore);
+
+// ---- Test 10: weekly reset does NOT reset Season -- resolveWeekly() rolling into a new week only resets weeklyStats/weeklyMilestonesClaimed, never seasonProgress ----
+seasonId = 'season_1'; seasonProgress = 3;
+var seasonBeforeWeekReset = seasonProgress;
+prevLastPlayed = 1000; lastPlayed = prevLastPlayed + 8 * 24 * 60 * 60 * 1000; // a genuine new week bucket
+resolveWeekly({ stats: { fireflies: 80, rare: 4, nights: 3, events: 1 }, claimed: { fireflies: true }, chestClaimed: false });
+__check('Test 10: a genuine Weekly reset (new week bucket) leaves Season progress completely untouched', seasonProgress === seasonBeforeWeekReset);
+
+// ---- Test 14: Season completion -- reaching the final level grants finalCoins AND ownership of the final trail (since it starts unowned) ----
+seasonId = 'season_1'; seasonProgress = currentSeason().milestones - 1;
+upgrades.ownedTrails = { none: true }; // final trail (gold) deliberately NOT owned yet
+var coinsBeforeFinal = coins;
+seasonProgressAdd(1);
+var season = currentSeason();
+__check('Test 14: crossing the final level grants finalCoins', coins === coinsBeforeFinal + season.finalCoins, 'coins=' + coins);
+__check('Test 14: crossing the final level also grants ownership of the season\\'s final trail reward', upgrades.ownedTrails[season.finalTrail] === true);
+__check('Test 14: Season is now at its own cap, exactly -- no over-completion', seasonProgress === season.milestones);
+
+// ---- Test 14 (fallback branch): if the final trail is ALREADY owned, the final level instead grants the trail's own coin price, never a wasted no-op, and never a double-grant of finalCoins ----
+seasonId = 'season_1'; seasonProgress = currentSeason().milestones - 1;
+upgrades.ownedTrails = { none: true, gold: true }; // already owned this time
+var coinsBeforeFinal2 = coins;
+seasonProgressAdd(1);
+var trailPrice = TRAIL_COLORS.find(function(t){ return t.key === currentSeason().finalTrail; }).price;
+__check('Test 14 (already-owned fallback): the final level grants finalCoins PLUS the trail\\'s own price instead of a wasted duplicate-ownership no-op', coins === coinsBeforeFinal2 + currentSeason().finalCoins + trailPrice, 'coins=' + coins);
+
+// ---- Test 6 (readout/payout agreement): seasonLevelRewardLabel() never disagrees with what grantSeasonLevel() actually grants ----
+seasonId = 'season_1'; seasonProgress = 2;
+__check('Test 6: seasonLevelRewardLabel() for a non-final level names the exact coinsPerLevel amount grantSeasonLevel() actually grants', seasonLevelRewardLabel(3) === ('+' + currentSeason().coinsPerLevel + ' Coins'));
+
+// ---- Test 17: full regression -- drawJournalScreen() with the new Season tab active does not throw, and every other pre-existing screen is unaffected ----
+seasonId = 'season_1'; seasonProgress = 4;
+journalTab = 'season'; journalFrom = 'title'; journalReading = null;
+screen = 'journal';
+__check('Test 17: drawJournalScreen() with journalTab==season does not throw', (function(){ try { drawJournalScreen(); return true; } catch (e) { return false; } })());
+journalTab = 'weekly';
+__check('Test 17: the pre-existing Weekly journal tab still renders without throwing, unaffected by the new Season tab', (function(){ try { drawJournalScreen(); return true; } catch (e) { return false; } })());
+screen = 'play';
+__check('Test 17: JOURNAL_TABS gained exactly one new entry (season), the 3 pre-existing tabs are untouched', JOURNAL_TABS.length === 4 && JOURNAL_TABS.some(function(t){ return t.key === 'season'; }) && JOURNAL_TABS[0].key === 'story' && JOURNAL_TABS[1].key === 'fireflies' && JOURNAL_TABS[2].key === 'weekly');
+`);
+
+scenario('lumora2-phase11-persistence', { audioEnabled: true }, `
+// ---- Test 13: a pre-Phase-11 save (no seasonId/seasonProgress fields at all) loads without throwing, defaulting safely to season_1 / level 0 ----
+__spy.loadResolve(JSON.stringify({ best: 20, coins: 300, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true } }, weekly: { stats: { fireflies: 0, rare: 0, nights: 0, events: 0 }, claimed: { fireflies: false, rare: false, nights: false, events: false }, chestClaimed: false } }));
+return __tick(5).then(function(){
+  __check('Test 13: a pre-Phase-11 save loads without throwing', loadDone === true);
+  __check('Test 13: a pre-Phase-11 save defaults seasonId to the first real season', seasonId === 'season_1');
+  __check('Test 13: a pre-Phase-11 save defaults seasonProgress to 0, not undefined/NaN', seasonProgress === 0);
+  __check('Test 13: unrelated pre-existing fields (coins/best/jars) are completely unaffected by the Season migration', coins === 300 && best === 20 && upgrades.ownedJars.simple === true);
+
+  // ---- Test 12 (save side): a real seasonProgress value is written into the YT save payload ----
+  // A genuine reload can't be simulated further inside this same scenario --
+  // the mock loadData() Promise (__loadPromise) resolves exactly once, same
+  // discipline lumora2-phase5-load-with-variants' own comment already
+  // documents. The load side of this round trip is instead proven by the
+  // two separate fresh-context scenarios below.
+  seasonId = 'season_1'; seasonProgress = 6;
+  saveProgress();
+  var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Test 12: saveProgress() writes the current seasonId/seasonProgress into the YT save payload', payload.seasonId === 'season_1' && payload.seasonProgress === 6);
+});
+`);
+
+// The load side of the Test 12 round trip -- a fresh context loading the
+// exact payload shape the scenario above just proved saveProgress() writes,
+// same "separate fresh-context load" pattern as lumora2-phase5-load-with-variants.
+scenario('lumora2-phase11-load-season-progress', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 20, coins: 300, seasonId: 'season_1', seasonProgress: 6 }));
+return __tick(5).then(function(){
+  __check('Test 12: reloading a saved seasonProgress value restores it exactly', seasonProgress === 6 && seasonId === 'season_1');
+});
+`);
+
+// Test 13 (existing-player coexistence): an out-of-range loaded
+// seasonProgress (e.g. from a hypothetical future season with more levels,
+// or corrupted data) clamps safely to the current season's own milestone
+// cap rather than leaving the player permanently over-complete.
+scenario('lumora2-phase11-load-season-clamp', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 20, coins: 300, seasonId: 'season_1', seasonProgress: 999 }));
+return __tick(5).then(function(){
+  __check('Test 13: an out-of-range loaded seasonProgress is clamped to the current season\\'s own milestone cap, never left over-complete', seasonProgress === currentSeason().milestones);
 });
 `);
 

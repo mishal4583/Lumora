@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1165,7 +1165,7 @@ function continueFromOver(){
     // already is. Persisted immediately, before the interstitial branch below's
     // early `return`, so it survives even if that ad request never resolves.
     nightNumber++;
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
     weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
@@ -1749,6 +1749,113 @@ function requestCosmeticTrial(category,id){
     // consumed -- the cosmetic is still just as trial-eligible afterward.
   },()=>{ cosmeticTrialPending=false; });
 }
+// ---------- Lumora 2.0 Phase 11: Seasons ----------
+// Audit (see this phase's own report): no Season system existed anywhere
+// before this -- every prior "season" hit in this file is SEASON_PALETTES,
+// the completely unrelated automatic heartTier()-driven recolor system
+// from Stage 1, already flagged in Phase 7's own audit as "NOT the same
+// thing" as a player-facing progression/cosmetic system.
+//
+// One real season, id 'season_1', name deliberately plain ("Season 1", not
+// an invented theme like "Moon Festival") -- no approved season name/
+// theme/artwork exists in this project (confirmed by the same inspection
+// Phase 7 did for Village Themes: no design_handoff folder, no seasonal
+// asset references anywhere). Per direct instruction not to fabricate
+// content, this ships as an honest, generic label; a real name/theme is a
+// content decision for later, not something invented here. SEASONS is an
+// array (not a single object) specifically so a real Season 2 is just a
+// second entry once real content exists -- zero code changes needed, same
+// "architecture ready, no fake content" precedent VILLAGE_THEMES already
+// established.
+//
+// Progression source: rides Weekly Progression's own milestone-claim
+// events (see checkWeeklyMilestones() below) rather than nights/objectives
+// directly -- this is deliberately what the phase's own hierarchy diagram
+// asks for (Night -> Objectives -> Weekly -> Season), and avoids
+// re-deriving yet another counter from nightNumber (Village Level already
+// owns that exact signal). Each of the 4 weekly milestones plus the
+// Weekly Glow Chest bonus advances the season by exactly 1 level, so a
+// player who fully clears every weekly goal in one week reaches 5 season
+// levels that week -- roughly 2 such weeks for the whole 10-level season,
+// a "small, stable" pace per direct instruction, not a grind.
+//
+// finalTrail ('gold', the cheapest real purchasable trail) is granted via
+// the EXACT existing upgrades.ownedTrails ownership flag -- reusing
+// Phase 7/8's own cosmetic ownership system, not a new one. Falls back to
+// coins if already owned, mirroring grantQuestReward()'s own 'deco'
+// fallback exactly (see grantSeasonLevel() below). No Village Theme reward
+// exists because Phase 7 itself has no second real theme to grant --
+// VILLAGE_THEMES has exactly one entry ('default'), already owned by
+// everyone; forcing a theme reward here would be a no-op, not a reward
+// (flagged in this phase's own report, not silently faked).
+const SEASONS=[
+  { id:'season_1', name:'Season 1', milestones:10, coinsPerLevel:30, finalCoins:100, finalTrail:'gold' }
+];
+// The two fields actually persisted -- both scalars, folded into the SAME
+// "Phase 0 foundation fields" bucket nightNumber/objectivesCompleted/
+// eventHistory/contractsCompleted/cosmeticsUnlocked/equippedTheme/
+// workshopTokens already share (gk2_lumora2 + the YT save payload), not a
+// new dedicated key. seasonId is stored raw and re-validated on every read
+// via currentSeason()'s own fallback, same "defer validation to read time"
+// reasoning equippedTheme already established in Phase 7 (avoids an
+// ordering-hazard-prone validation at this early top-level point).
+let seasonId='season_1', seasonProgress=0;
+function currentSeason(){ return SEASONS.find(s=>s.id===seasonId)||SEASONS[0]; }
+// A milestone's reward is derived from `level` and the season's own data
+// -- no second per-level reward table, no separate claimed-map. Grants
+// exactly once per level because grantSeasonLevel() is only ever called
+// from seasonProgressAdd()'s own "for each newly reached level" loop
+// below, which by construction can never revisit an already-passed level.
+function grantSeasonLevel(level){
+  const season=currentSeason();
+  if(level===season.milestones){
+    applyCoinsOrLuckReward('coins',season.finalCoins); // the completion bonus -- always granted, once
+    if(!upgrades.ownedTrails[season.finalTrail]){
+      upgrades.ownedTrails[season.finalTrail]=true;
+      persistUpgradesLocal();
+    } else {
+      // Already owned (bought, or from an earlier reward) -- same "never a
+      // wasted no-op reward" fallback grantQuestReward()'s own 'deco' case
+      // already established, valued at the trail's own real price rather
+      // than re-granting finalCoins a second time.
+      applyCoinsOrLuckReward('coins',TRAIL_COLORS.find(t=>t.key===season.finalTrail).price);
+    }
+  } else {
+    applyCoinsOrLuckReward('coins',season.coinsPerLevel);
+  }
+}
+// Display-only mirror of grantSeasonLevel()'s own branching -- reads the
+// exact same TRAIL_COLORS/ownedTrails/season fields, never a second
+// hardcoded reward table, so the Season journal's "next reward" line can
+// never disagree with what a real crossing actually grants (same
+// "readout and payout can never disagree" discipline as Phase 10's
+// chainMilestoneReward()).
+function seasonLevelRewardLabel(level){
+  const season=currentSeason();
+  if(level===season.milestones){
+    if(!upgrades.ownedTrails[season.finalTrail]){
+      const trail=TRAIL_COLORS.find(t=>t.key===season.finalTrail);
+      return '+'+season.finalCoins+' Coins + '+trail.name+' Trail';
+    }
+    return '+'+(season.finalCoins+TRAIL_COLORS.find(t=>t.key===season.finalTrail).price)+' Coins';
+  }
+  return '+'+season.coinsPerLevel+' Coins';
+}
+// The ONE place seasonProgress ever advances. Capped at the season's own
+// milestone count (Math.min) -- once complete, further calls are
+// harmless no-ops (prev===seasonProgress, the loop below never executes).
+// No separate seasonMilestonesClaimed map: "is level N claimed" is simply
+// seasonProgress>=N, so there is nothing else that could ever drift out of
+// sync with what was actually granted.
+function seasonProgressAdd(n){
+  const prev=seasonProgress;
+  seasonProgress=Math.min(seasonProgress+(n||1),currentSeason().milestones);
+  for(let lvl=prev+1;lvl<=seasonProgress;lvl++)grantSeasonLevel(lvl);
+  if(seasonProgress>prev){
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
+    saveProgress();
+  }
+}
 if(!YT){
   try{
     const l2=JSON.parse(localStorage.getItem('gk2_lumora2')||'{}');
@@ -1767,6 +1874,14 @@ if(!YT){
     // trusted, and never crashes anything.
     if(typeof l2.equippedTheme==='string')equippedTheme=l2.equippedTheme;
     if(typeof l2.workshopTokens==='number'&&l2.workshopTokens>=0)workshopTokens=l2.workshopTokens;
+    // Phase 11: same "store raw, re-validate at read time" reasoning as
+    // equippedTheme just above -- currentSeason() falls back safely if
+    // seasonId is ever unrecognized. seasonProgress is clamped defensively
+    // (0..the CURRENT season's own milestone count) so a corrupted/
+    // out-of-range value can never read as "already complete" by accident
+    // or exceed what a real player could have earned.
+    if(typeof l2.seasonId==='string')seasonId=l2.seasonId;
+    if(typeof l2.seasonProgress==='number'&&l2.seasonProgress>=0)seasonProgress=Math.min(l2.seasonProgress,currentSeason().milestones);
   }catch(e){}
 }
 // ---------- Lumora 2.0 Phase 9: Weekly Progression ----------
@@ -2118,7 +2233,7 @@ function generateNightEvent(){
     // save, which already ran before this executes inside reset()).
     eventHistory.push(S.eventActive);
     weeklyProgress('events',1); // Lumora 2.0 Phase 9: same "the moment it's rolled" authoritative site
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
     saveProgress();
   } else {
     S.eventActive=null;
@@ -2195,12 +2310,14 @@ function checkWeeklyMilestones(){
       coins+=m.reward;
       if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
       anyNewlyClaimed=true;
+      seasonProgressAdd(1); // Phase 11: Weekly -> Season, per the phase's own hierarchy -- exactly once per NEWLY claimed milestone, guarded by the same weeklyMilestonesClaimed check this whole branch already sits behind
     }
   });
   if(!weeklyChestClaimed&&WEEKLY_MILESTONES.every(m=>weeklyMilestonesClaimed[m.key])){
     weeklyChestClaimed=true;
     coins+=WEEKLY_CHEST_BONUS;
     if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+    seasonProgressAdd(1); // the Weekly Glow Chest bonus counts as one more season step, guarded the same way (weeklyChestClaimed)
   }
   if(anyNewlyClaimed)persistWeeklyLocal();
 }
@@ -2819,7 +2936,7 @@ function equipTheme(id){
   if(!validVillageTheme(id)||!isThemeOwned(id))return false;
   if(equippedTheme===id)return true;
   equippedTheme=id;
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -2965,6 +3082,9 @@ if(YT&&YT.game&&YT.game.loadData){
       // corrupted/since-removed theme id here is inert, never trusted.
       if(typeof d.equippedTheme==='string')equippedTheme=d.equippedTheme;
       if(typeof d.workshopTokens==='number'&&d.workshopTokens>=0)workshopTokens=d.workshopTokens;
+      // Phase 11: same defensive pattern as equippedTheme just above.
+      if(typeof d.seasonId==='string')seasonId=d.seasonId;
+      if(typeof d.seasonProgress==='number'&&d.seasonProgress>=0)seasonProgress=Math.min(d.seasonProgress,currentSeason().milestones);
     }catch(e){}
   }).catch(()=>{})
     .then(()=>{
@@ -9395,7 +9515,7 @@ function latestUnlockedChapterKey(){
   STORY_CHAPTERS.forEach(ch=>{ if(storyChapterUnlocked(ch))latest=ch.key; });
   return latest;
 }
-const JOURNAL_TABS=[{key:'story',label:'Story'},{key:'fireflies',label:'Fireflies'},{key:'weekly',label:'Weekly'}];
+const JOURNAL_TABS=[{key:'story',label:'Story'},{key:'fireflies',label:'Fireflies'},{key:'weekly',label:'Weekly'},{key:'season',label:'Season'}];
 // single source of truth for both the tab draw and its hit-test, same
 // discipline as shopTabRects()/jarCardRects() elsewhere in the file.
 function journalTabRects(){
@@ -9517,6 +9637,46 @@ function drawWeeklyJournal(){
   ctx.textAlign='right'; ctx.fillStyle=weeklyChestClaimed?LUM_GOLD:'rgba(174,184,203,0.6)'; ctx.font='500 15px Georgia,serif';
   ctx.fillText('+'+WEEKLY_CHEST_BONUS,W-40,chestY+30);
 }
+// Lumora 2.0 Phase 11: Season progression's own tab -- deliberately not a
+// per-milestone row list like Weekly's (10 rows would run well past the
+// screen); reuses the existing lumBar()/lumTierPips() primitives instead,
+// same "no new UI component invented" discipline the phase's own audit
+// called for. seasonLevelRewardLabel() (defined alongside grantSeasonLevel)
+// guarantees the "next reward" line can never disagree with what a real
+// crossing actually grants.
+function drawSeasonJournal(){
+  const season=currentSeason(), complete=seasonProgress>=season.milestones;
+  ctx.fillStyle=LUM_HAZE; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(season.name+' — '+(complete?'complete':'level '+seasonProgress+' of '+season.milestones),W/2,172);
+
+  const px=20, py=210, pw=W-40, ph=240;
+  lumPanel(px,py,pw,ph,18);
+  lumEyebrow('SEASON PROGRESS',px+20,py+30,'left',11);
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillStyle=LUM_GOLD; ctx.font='700 40px Georgia,serif';
+  ctx.fillText(seasonProgress+' / '+season.milestones,W/2,py+82);
+
+  lumBar(px+20,py+98,pw-40,10,(seasonProgress/season.milestones)*100);
+
+  const pipCount=season.milestones, pipGap=6, pipW=(pw-40-(pipCount-1)*pipGap)/pipCount;
+  lumTierPips(px+20,py+122,seasonProgress,pipCount,pipW,pipGap);
+
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillStyle='rgba(174,184,203,0.7)'; ctx.font='500 10px Georgia,serif';
+  ctx.fillText(complete?'SEASON COMPLETE':'NEXT REWARD',px+20,py+156);
+  ctx.fillStyle=complete?LUM_GOLD:LUM_CREAM; ctx.font='500 15px Georgia,serif'; ctx.textBaseline='top';
+  // The completion message stands alone (no flavor line below it) -- it
+  // already says everything that line would; a non-complete state instead
+  // gets the short one-line reward plus the flavor line beneath it, with a
+  // fixed gap wide enough for either's tallest real string (verified live).
+  if(complete){
+    wrapText('Every level claimed for this Season. Thank you for lighting the way.',px+20,py+170,pw-40,18,'left');
+  } else {
+    ctx.fillText(seasonLevelRewardLabel(seasonProgress+1),px+20,py+170);
+    ctx.fillStyle='rgba(174,184,203,0.55)'; ctx.font='italic 11px Georgia,serif';
+    wrapText('Season progress advances whenever a Weekly milestone or the Weekly Glow Chest is claimed.',px+20,py+200,pw-40,15,'left');
+  }
+}
 // Glowkeeper Story pass: the Journal is now the storybook (journalTab
 // defaults to 'story') with the original firefly-discovery grid moved to
 // its own tab, not removed -- still reads the exact same journal[type]
@@ -9562,6 +9722,8 @@ function drawJournalScreen(){
     drawStoryList();
   } else if(journalTab==='weekly'){
     drawWeeklyJournal();
+  } else if(journalTab==='season'){
+    drawSeasonJournal();
   } else {
     const order=Object.keys(TYPES);
     const discoveredCount=order.filter(t=>journal[t]>0).length;
