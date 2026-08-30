@@ -3092,7 +3092,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3166,7 +3166,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -3611,7 +3611,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','quests','trackerOn','upgrades','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','quests','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -5019,6 +5019,157 @@ try {
 } catch (e) { threw2 = true; }
 activeContract = -1; S.eventActive = null;
 __check('drawOver() never throws across a full matrix of contract/event/chain/delivery/objectives combinations', threw2 === false);
+`);
+
+// =====================================================================
+// Lumora 2.0 Phase 5: Firefly Journal / Collection. The base-type discovery/
+// count system (`journal`, isFireflyDiscovered()) already existed before this
+// phase -- these tests exercise it through the REAL catch-success path (not
+// a parallel detector) to prove the existing system already satisfies the
+// spec's own numbered tests, plus the new variant foundation
+// (variantJournal, isVariantDiscovered/getVariantCount, recordFireflyCatch(),
+// getFireflyCount/getDiscoveredFireflyCount/getCollectionProgress) added
+// this phase. Persistence/migration/save-payload coverage lives in the
+// separate lumora2-phase5-persistence scenario below (needs the Playables
+// mock, same reason lumora2-phase1-persistence is its own scenario).
+// =====================================================================
+scenario('lumora2-phase5-firefly-journal', null, `
+upgrades.tutorialDone = true;
+
+// ---- shared helper: catch a real firefly of a given type through the actual production path -- same technique the 'standalone' scenario's own catch test already uses, not a parallel test-only catch detector ----
+function realCatch(type){
+  reset(); screen = 'play'; paused = false; // spawnFly() no-ops unless screen==='play' -- reset() itself never touches screen
+  S.isNewNight = false; S.newNightT = 999; // skip the D1 new-night reveal card -- it gates update(dt) entirely (see newNightCardActive()) and the FIRST reset() of a real (non-tutorial) run always triggers it
+  spawnFly(type);
+  var fly = S.flies[S.flies.length - 1];
+  fly.x = S.jar.x; fly.y = S.jar.y - 14; // drop it right on the jar so it locks+catches quickly
+  var caughtBefore = S.caughtN;
+  for (var i = 0; i < 240 && S.caughtN === caughtBefore; i++) __stepFrame(16);
+  return S.caughtN > caughtBefore;
+}
+
+// ---- Test 1: first discovery ----
+__check('a fresh player has not discovered Curious yet', isFireflyDiscovered('y') === false && getFireflyCount('y') === 0);
+__check('Test 1 setup: the real catch actually landed', realCatch('y') === true);
+__check('Test 1: Curious discovered = true after a real successful catch, through the real catch-success path', isFireflyDiscovered('y') === true);
+__check('Test 1: Curious count = 1', getFireflyCount('y') === 1 && journal.y === 1);
+
+// ---- Test 2: repeat catch increments the COUNT -- discovery stays a plain boolean, not a second counter ----
+__check('Test 2 setup: second real catch landed', realCatch('y') === true);
+__check('Test 2: Curious count = 2 (a real count, not a boolean flipped twice)', getFireflyCount('y') === 2);
+__check('Test 2: discovery is still exactly true, not incremented into something else', isFireflyDiscovered('y') === true);
+
+// ---- Test 3: a firefly that is NOT caught (patience expires, it leaves) must not discover or count ----
+reset(); screen = 'play'; paused = false;
+spawnFly('b');
+var flyMiss = S.flies[S.flies.length - 1];
+flyMiss.patience = 0.01; flyMiss.rest = 0; flyMiss.pause = 0; // expire almost immediately -- same technique the existing miss-round test in 'standalone' already uses
+for (var m = 0; m < 300 && S.flies.indexOf(flyMiss) !== -1; m++) __stepFrame(16);
+__check('Test 3: an uncaught firefly (patience expired, never reached the catch-success site) does not increment its count', getFireflyCount('b') === 0);
+__check('Test 3: an uncaught firefly does not mark its type discovered', isFireflyDiscovered('b') === false);
+
+// ---- Test 4: multiple distinct types, each tracked independently ----
+__check('Test 4 setup: catch Playful for real', realCatch('b') === true);
+__check('Test 4 setup: catch Shy for real', realCatch('g') === true);
+__check('Test 4: Curious+Playful+Shy are all discovered (Curious from Tests 1-2 above)', isFireflyDiscovered('y') && isFireflyDiscovered('b') && isFireflyDiscovered('g'));
+__check('Test 4: exactly 3 of the 5 base types are discovered so far', getDiscoveredFireflyCount() === 3);
+__check('Test 4: Elder/Mystery remain undiscovered', isFireflyDiscovered('e') === false && isFireflyDiscovered('m') === false);
+__check('Test 4: getCollectionProgress() reports 3/5 base, 0/5 variants', JSON.stringify(getCollectionProgress()) === JSON.stringify({ base: { discovered: 3, total: 5 }, variants: { discovered: 0, total: 5 } }));
+
+// ---- Test 8: a night restart (reset()) must NOT roll back permanent discoveries -- journal is session-level, never touched by reset() ----
+var journalBeforeRestart = JSON.stringify(journal);
+reset();
+__check('Test 8: reset() (a night restart) does not touch journal at all', JSON.stringify(journal) === journalBeforeRestart);
+__check('Test 8: discoveries survive a restart', isFireflyDiscovered('y') && isFireflyDiscovered('b') && isFireflyDiscovered('g'));
+
+// ---- Test 7 / variant foundation: independently discoverable, not a proxy for base discovery ----
+__check('a fresh variant is not discovered', isVariantDiscovered('rainy_playful') === false && getVariantCount('rainy_playful') === 0);
+var baseCountBeforeOrdinary = getFireflyCount('b');
+recordFireflyCatch('b', null); // an ordinary base catch, no variant -- the real spawnFly() path never sets one today
+__check('an ordinary base-type catch with no variantId does not discover any variant', isVariantDiscovered('rainy_playful') === false);
+__check('...but it still counts as a normal base catch', getFireflyCount('b') === baseCountBeforeOrdinary + 1);
+var baseCountBeforeVariant = getFireflyCount('b');
+recordFireflyCatch('b', 'rainy_playful'); // a real variant catch
+__check('Test 7: a variant catch discovers the variant independently', isVariantDiscovered('rainy_playful') === true && getVariantCount('rainy_playful') === 1);
+__check('Test 7: a variant catch ALSO counts as a normal base-type catch -- the base journal is not bypassed', getFireflyCount('b') === baseCountBeforeVariant + 1);
+__check('Test 7: discovering one variant does not mark a DIFFERENT variant discovered', isVariantDiscovered('moonlit_curious') === false);
+__check('Test 7: discovering a variant is not substituted for base discovery of an otherwise-undiscovered type', isFireflyDiscovered('e') === false && isFireflyDiscovered('m') === false);
+
+// ---- variant validation: a variantId whose own baseType does not match what was actually caught must never be credited ----
+var shyCountBefore = getFireflyCount('g');
+recordFireflyCatch('g', 'rainy_playful'); // rainy_playful's baseType is 'b', not 'g'
+__check('a mismatched variantId (wrong baseType) is never credited', getVariantCount('rainy_playful') === 1, 'still 1, unchanged from the real Playful catch above');
+__check('...but the ordinary base catch it rode in on is still credited normally', getFireflyCount('g') === shyCountBefore + 1);
+
+// ---- an unrecognized variant id is silently ignored, never thrown ----
+var unknownThrew = false;
+try { recordFireflyCatch('y', 'not_a_real_variant'); } catch (e) { unknownThrew = true; }
+__check('an unrecognized variantId does not throw', unknownThrew === false);
+__check('...and credits nothing under that bogus id', variantJournal['not_a_real_variant'] === undefined);
+
+// ---- Test 9 / Test 10: collection tracking is unaffected by an active contract or event ----
+reset();
+activeContract = 3; // Collector -- zero side effects on speed/miss/coin/spawn, the same contract the D3 tests pick to stay isolated
+S.eventActive = 'moonlight';
+var elderCountBefore = getFireflyCount('e');
+__check('Test 9/10 setup: a real catch during an active contract+event still lands', realCatch('e') === true);
+__check('Test 9/10: collection tracking still works during an active contract and event', isFireflyDiscovered('e') === true && getFireflyCount('e') === elderCountBefore + 1);
+activeContract = -1; S.eventActive = null;
+`);
+
+scenario('lumora2-phase5-persistence', { audioEnabled: true }, `
+// ---- Test 5: an existing pre-Phase-5 save (has journal, no variantJournal at all) loads safely ----
+__spy.loadResolve(JSON.stringify({ best: 12, coins: 300, nightNumber: 6, journal: { y: 9, b: 4, g: 1, e: 0, m: 0 }, objectivesCompleted: {}, eventHistory: [], contractsCompleted: [], cosmeticsUnlocked: [] }));
+return __tick(5).then(function(){
+  __check('Test 5: a pre-Phase-5 save loads without throwing', loadDone === true && nightNumber === 6);
+  __check('Test 5: existing journal data is preserved exactly', journal.y === 9 && journal.b === 4 && journal.g === 1);
+  __check('Test 5: existing progression (best/coins) is unchanged by the new field being absent', best === 12 && coins === 300);
+  __check('Test 5: variantJournal defaults safely to all zero -- no corruption from a save that never had this field', Object.keys(variantJournal).every(function(k){ return variantJournal[k] === 0; }));
+  __check('Test 5: no variant is discovered on a save that predates variants', VARIANT_POOL.every(function(v){ return isVariantDiscovered(v.id) === false; }));
+
+  // ---- Test 6: a real catch's discovery/count survives a save/load round-trip ----
+  upgrades.tutorialDone = true;
+  reset(); screen = 'play'; paused = false;
+  S.isNewNight = false; S.newNightT = 999; // skip the D1 new-night reveal card, same reason realCatch() in the other Phase 5 scenario does
+  spawnFly('g');
+  var fly = S.flies[S.flies.length - 1];
+  fly.x = S.jar.x; fly.y = S.jar.y - 14;
+  var caughtBefore = S.caughtN;
+  for (var i = 0; i < 240 && S.caughtN === caughtBefore; i++) __stepFrame(16);
+  __check('Test 6 setup: the real catch landed', S.caughtN === caughtBefore + 1);
+  var shyCountAfterCatch = getFireflyCount('g');
+  __check('Test 6 setup: Shy is now discovered with a real count', isFireflyDiscovered('g') === true && shyCountAfterCatch === 2);
+  recordFireflyCatch('e', 'frost_elder'); // also exercise a variant in the same payload
+  saveProgress();
+  var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Test 6: saveProgress() writes journal into the save payload via the existing mechanism -- no second save system', payload.journal && payload.journal.g === shyCountAfterCatch);
+  __check('Test 6: saveProgress() writes variantJournal into the same payload', payload.variantJournal && payload.variantJournal.frost_elder === 1);
+  // A genuine reload can't be simulated further inside this same scenario --
+  // the mock loadData() Promise (__loadPromise) resolves exactly once, same
+  // as the real platform SDK's own loadData() is only ever awaited once per
+  // session, so a second __spy.loadResolve() call here would be a silent
+  // no-op, not a real second load. The other half of Test 6 ("discovered
+  // state/count survive a save/load round-trip") is instead proven by
+  // lumora2-phase5-load-with-variants below, loading a FRESH context with a
+  // save shaped exactly like the payload just asserted above.
+});
+`);
+
+// A separate fresh-context load, using the exact payload shape Test 6 above
+// just proved saveProgress() writes -- this is the genuine other half of
+// "save then reload" (see the comment at the end of Test 6): a real
+// isFireflyDiscovered()/getFireflyCount()/isVariantDiscovered()/
+// getVariantCount() read against state that came ONLY from a loaded save,
+// never touched by any catch in this scenario.
+scenario('lumora2-phase5-load-with-variants', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 12, coins: 300, journal: { y: 0, b: 0, g: 2, e: 1, m: 0 }, variantJournal: { moonlit_curious: 0, rainy_playful: 0, garden_shy: 0, frost_elder: 1, aurora_mystery: 0 } }));
+return __tick(5).then(function(){
+  __check('Test 6: a loaded save\\'s discovered state is restored correctly (Shy, Elder)', isFireflyDiscovered('g') === true && isFireflyDiscovered('e') === true);
+  __check('Test 6: a loaded save\\'s counts are restored correctly', getFireflyCount('g') === 2 && getFireflyCount('e') === 1);
+  __check('Test 6: a loaded save\\'s undiscovered types stay undiscovered', isFireflyDiscovered('y') === false && isFireflyDiscovered('b') === false && isFireflyDiscovered('m') === false);
+  __check('Test 6: a loaded save\\'s variant discovery is restored correctly', isVariantDiscovered('frost_elder') === true && getVariantCount('frost_elder') === 1);
+  __check('Test 6: a loaded save\\'s other variants stay undiscovered', isVariantDiscovered('moonlit_curious') === false && isVariantDiscovered('rainy_playful') === false);
+});
 `);
 
 // ---------- runner ----------

@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -195,6 +195,32 @@ const TYPES={
   // kickoff's own ask to verify that before building anything separate.
   m:{pts:5, coins:8.00, glow:GLOW_MYS, core:'#f6e8ff', name:'mystery', rarity:'legendary', desc:'Nobody knows where these lights come from.'}
 };
+// Lumora 2.0 Phase 5 (Firefly Journal / Collection): variant data foundation.
+// A variant is a distinct, independently-discoverable collectible layered on
+// top of one of the 5 EXISTING base types above -- never a new base type, and
+// never a change to any base type's own pts/coins/glow/rarity/spawn/unlock
+// fields. One proof variant per base type (5 total), per direct instruction
+// ("prove the architecture, not a large content set"). `id` is the stable
+// identifier the whole collection system (variantJournal, isVariantDiscovered,
+// getVariantCount) keys off of; `baseType` ties it back to an existing TYPES
+// key so a variant catch can be validated against what was actually caught;
+// `label` is display-only, for the future Journal UI redesign, not read by
+// any gameplay logic here.
+// Deliberately NOT wired into spawnFly() -- no fly ever gets a variantId
+// today, so this whole system stays completely inert during normal play
+// until a future phase decides how a variant should actually appear (see the
+// comment on recordFireflyCatch() below for the exact seam that future work
+// would use). Per direct instruction: inventing spawn conditions now would
+// mean touching the already-shipped, harness-verified Night Events/Contracts
+// systems "merely to create variants," which this phase explicitly avoids.
+const VARIANT_POOL=[
+  { id:'moonlit_curious', baseType:'y', variant:'moonlit', label:'Moonlit Curious' },
+  { id:'rainy_playful',   baseType:'b', variant:'rainy',   label:'Rainy Playful' },
+  { id:'garden_shy',      baseType:'g', variant:'garden',  label:'Garden Shy' },
+  { id:'frost_elder',     baseType:'e', variant:'frost',   label:'Frost Elder' },
+  { id:'aurora_mystery',  baseType:'m', variant:'aurora',  label:'Aurora Mystery' }
+];
+const VARIANT_BY_ID={}; VARIANT_POOL.forEach(v=>{ VARIANT_BY_ID[v.id]=v; });
 // Stage 3 Part A: rare weather. Round-scoped only (S.weather/S.weatherT below) —
 // no persistence, matching spawning's own existing round-scoped nature. Each
 // affects spawn RATE only, and only for types whose existing score-gated unlock
@@ -1078,6 +1104,39 @@ function recordNightEconomy(){
 function dumpEconomyLog(){ if(typeof console!=='undefined'){ if(console.table)console.table(economyLog); else if(console.log)console.log(economyLog); } return economyLog; }
 let journal={y:0,b:0,g:0,e:0,m:0}; // lifetime catch count per firefly type — session-level, like best/coins, not reset by reset(). 'm' (Mystery) added in Stage 3 Part A; the save/load code below iterates this object's OWN keys, so no other change was needed for it to persist correctly.
 if(!YT){ try{ const j=JSON.parse(localStorage.getItem('gk2_journal')||'{}'); Object.keys(journal).forEach(k=>{ if(typeof j[k]==='number'&&j[k]>journal[k])journal[k]=j[k]; }); }catch(e){} }
+// Phase 5: variant lifetime catch counts, one key per VARIANT_POOL id --
+// exact same shape/pattern as `journal` above (a count IS the discovery
+// signal, no separate boolean needed), its own dedicated localStorage key
+// mirroring gk2_journal, session-level and not reset by reset(). Declared
+// here (not further down near isFireflyDiscovered) so it exists before
+// anything that might read it, same ordering discipline `journal` itself
+// already follows.
+let variantJournal={};
+VARIANT_POOL.forEach(v=>{ variantJournal[v.id]=0; });
+if(!YT){ try{ const vj=JSON.parse(localStorage.getItem('gk2_variants')||'{}'); Object.keys(variantJournal).forEach(k=>{ if(typeof vj[k]==='number'&&vj[k]>variantJournal[k])variantJournal[k]=vj[k]; }); }catch(e){} }
+// Phase 5: the one authoritative "a firefly was successfully caught" hook --
+// extracted from what used to be an inline `journal[f.type]++` at the catch
+// site itself (see the real catch-success block below, jarCanAcceptCatch()'s
+// second check) so both base-type AND variant tracking share one place,
+// matching the file's existing "one canonical function" discipline
+// (jarCanAcceptCatch(), objectiveProgress(), etc.). variantId is optional
+// and undefined for every real spawn today (see VARIANT_POOL's own comment
+// for why) -- this is a strict superset of the old inline behavior, not a
+// new one; passing no variantId behaves byte-for-byte like the old line did.
+// Validates variantId against VARIANT_BY_ID and its own baseType before
+// crediting anything, so a future spawn path can't accidentally credit the
+// wrong variant just by setting a mismatched f.variantId.
+function recordFireflyCatch(type,variantId){
+  journal[type]++;
+  if(!YT){ try{localStorage.setItem('gk2_journal',JSON.stringify(journal));}catch(e){} }
+  if(variantId){
+    const v=VARIANT_BY_ID[variantId];
+    if(v&&v.baseType===type&&variantJournal.hasOwnProperty(variantId)){
+      variantJournal[variantId]++;
+      if(!YT){ try{localStorage.setItem('gk2_variants',JSON.stringify(variantJournal));}catch(e){} }
+    }
+  }
+}
 // Journal discovery tier: one pure function, same pattern as heartTier — every
 // place that renders a journal entry's richness reads from this, nothing
 // duplicates the 25/100 thresholds (which are also just the tier names themselves)
@@ -1510,6 +1569,29 @@ function persistWeeklyLocal(){ if(!YT){ try{ localStorage.setItem('gk2_weekly',J
 // needed for that either. Reuses the EXISTING stable firefly type ids
 // ('y','b','g','e','m'), never a new identifier scheme, per direct instruction.
 function isFireflyDiscovered(type){ return !!(journal&&journal[type]>0); }
+// Phase 5: minimum collection API a future Journal UI needs, so it can ask
+// simple questions without reaching into journal/variantJournal directly --
+// each one is a single lookup or a 5-element scan (TYPES/VARIANT_POOL both
+// have exactly 5 entries), never an expensive operation, per direct
+// instruction. No new abstraction beyond what's actually asked for in the
+// spec's own list -- not every suggested helper name is added, only these.
+function getFireflyCount(type){ return (journal&&journal[type])||0; }
+function getDiscoveredFireflyCount(){ return Object.keys(TYPES).filter(isFireflyDiscovered).length; }
+// Mirrors isFireflyDiscovered()/getFireflyCount()'s exact shape for a
+// variant id -- same "a count IS the discovery signal" reasoning, just
+// backed by variantJournal instead of journal.
+function isVariantDiscovered(id){ return !!(variantJournal&&variantJournal[id]>0); }
+function getVariantCount(id){ return (variantJournal&&variantJournal[id])||0; }
+// One combined progress read for both the base-type grid and the (currently
+// dormant) variant set, e.g. "5/5 base fireflies" and "0/5 variants" -- kept
+// as a single function since a future Journal UI's summary line needs both
+// numbers together, not because base/variant progress are the same concept.
+function getCollectionProgress(){
+  return {
+    base:{discovered:getDiscoveredFireflyCount(), total:Object.keys(TYPES).length},
+    variants:{discovered:VARIANT_POOL.filter(v=>isVariantDiscovered(v.id)).length, total:VARIANT_POOL.length}
+  };
+}
 // Stage 3 Part C: shared last-played timestamp (ms since epoch), same additive
 // pattern as every prior field. prevLastPlayed captures the value from BEFORE
 // this session overwrites it — both quests (calendar-day check) and the
@@ -2441,6 +2523,12 @@ if(YT&&YT.game&&YT.game.loadData){
       if(typeof d.coinFraction==='number'&&d.coinFraction>coinFraction&&d.coinFraction>=0&&d.coinFraction<1)coinFraction=d.coinFraction;
       if(d.journal&&typeof d.journal==='object'){
         Object.keys(journal).forEach(k=>{ if(typeof d.journal[k]==='number'&&d.journal[k]>journal[k])journal[k]=d.journal[k]; });
+      }
+      // Phase 5: same defensive per-field merge as journal above -- a save
+      // written before this phase simply has no d.variantJournal at all, and
+      // variantJournal already defaults safely (all zeros) at declaration.
+      if(d.variantJournal&&typeof d.variantJournal==='object'){
+        Object.keys(variantJournal).forEach(k=>{ if(typeof d.variantJournal[k]==='number'&&d.variantJournal[k]>variantJournal[k])variantJournal[k]=d.variantJournal[k]; });
       }
       if(d.upgrades&&typeof d.upgrades==='object'){
         if(typeof d.upgrades.lightTier==='number'&&d.upgrades.lightTier>upgrades.lightTier)upgrades.lightTier=d.upgrades.lightTier;
@@ -4178,7 +4266,7 @@ function update(dt){
         // site itself, a same-frame double-completion still can't both pass it.
         if(jarCanAcceptCatch()){
           S.caughtN++;
-          journal[f.type]++; if(!YT){ try{localStorage.setItem('gk2_journal',JSON.stringify(journal));}catch(e){} } // Journal: lifetime catches per type, tracked from here forward (no backfill for history predating this)
+          recordFireflyCatch(f.type,f.variantId); // Journal: lifetime catches per type (+ variant, if this fly ever carries one -- see recordFireflyCatch()'s own comment), tracked from here forward (no backfill for history predating this)
           questProgress('catch',f.type); // same catch moment as the Journal increment above
           objectiveProgress('catch',f.type); // Lumora 2.0 Phase 1: same authoritative catch-success moment, not spawn/lock/radius-entry
           advanceChain(); // Lumora 2.0 Phase 2: same authoritative catch-success moment
