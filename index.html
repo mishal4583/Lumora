@@ -1337,12 +1337,41 @@ function migrateRangeTier(src,dst){
 // replaces "every jar earns coins identically" with real economic
 // jar identity. All of these remain PROVISIONAL pending real playtest,
 // same as Elder/Aurora's prices below.
+// E2 Shop Economy 2.0: maxCapacity and lightValueMax raised per the
+// E1-approved targets below -- reachMax/magnetReachMax/durationMax are
+// DELIBERATELY UNCHANGED (E1/E2 gave no specific new ceiling for these
+// three, only a level-count target, and explicitly warned against
+// "extreme late-game reach" / "excessive duration" -- extending their
+// LEVEL COUNT via a smaller per-jar step, with the ceiling held exactly
+// where it already was, is the conservative reading that satisfies "more
+// levels" without inventing an ungiven new stat ceiling).
+//
+// Capacity note (see this phase's own final report "Issues" section for
+// the full explanation): E1's own generic guidance ("approximately 15-18
+// levels per jar") does not reconcile with E1's own explicit worked
+// ceiling examples (Simple 5->13-14, Aurora 12->35-38) under the mandatory
+// "+1 whole unit per level, never fractional" rule -- 5->13 is only 8
+// levels, not 15-18, while 12->38 is 26 levels, well past 18. Resolved by
+// treating the explicit ceiling examples as authoritative (E2's own text:
+// "Use the exact E1-calibrated values where available") and interpolating
+// the 4 unlisted jars proportionally along the existing JAR_COST_MULTIPLIER
+// scale, which reproduces both anchors exactly: simple max=13 (8 levels),
+// lantern=16 (10), moon=19 (12), crystal=23 (15), elder=30 (21),
+// aurora=38 (26). Per-jar level counts therefore vary (8-26), same as
+// every other per-jar stat line already does today -- not a new pattern.
+//
+// Light Value note: new max = old max + (old range + 0.15), i.e. every
+// jar's OWN existing range is extended by a flat +0.15 -- reproduces E1's
+// Simple example exactly (0.65->0.95) and lands 0.05 above E1's rough
+// Aurora example (1.85->"~1.95"; this rule gives 2.00) -- a rounding-level
+// difference from an "approximately" figure, not a real conflict, so kept
+// for the uniform, easy-to-explain rule rather than a jar-specific fudge.
 const JARS=[
-  {key:'simple',  name:'Simple Glass Jar', price:0,    capacity:5,  maxCapacity:8,  reachBase:55,  reachMax:64,  magnetReachBase:130, magnetReachMax:154, durationBase:4.0, durationMax:5.5,  lightValueBase:0.65, lightValueMax:0.80, glass:'rgba(128,174,182,0.20)', glassStroke:'rgba(148,194,202,0.55)', lid:'#8a6a45', lidRim:'#6f5436', glow:GLOW_Y,     desc:'The jar found beneath the old workshop.'},
-  {key:'lantern', name:'Firefly Lantern',  price:500,  capacity:6,  maxCapacity:10, reachBase:62,  reachMax:74,  magnetReachBase:145, magnetReachMax:175, durationBase:4.5, durationMax:6.5,  lightValueBase:0.75, lightValueMax:0.95, glass:'rgba(197,170,123,0.24)', glassStroke:'rgba(217,190,143,0.6)',  lid:'#4a4a52', lidRim:'#38383e', glow:'#fbb541',  desc:'Made for Glowkeepers who learned to carry the light farther.'},
-  {key:'moon',    name:'Moon Jar',        price:900,  capacity:7,  maxCapacity:12, reachBase:70,  reachMax:85,  magnetReachBase:165, magnetReachMax:200, durationBase:5.0, durationMax:7.5,  lightValueBase:0.85, lightValueMax:1.05, glass:'rgba(160,187,215,0.20)', glassStroke:'rgba(180,207,235,0.6)',  lid:'#8a8a9a', lidRim:'#6f6f7f', glow:'#fbf2d4',  desc:'Its glass holds a little moonlight of its own.'},
-  {key:'crystal', name:'Crystal Lantern', price:1500, capacity:8,  maxCapacity:15, reachBase:80,  reachMax:98,  magnetReachBase:190, magnetReachMax:235, durationBase:5.5, durationMax:8.5,  lightValueBase:1.00, lightValueMax:1.25, glass:'rgba(131,212,216,0.22)', glassStroke:'rgba(151,232,236,0.6)',  lid:'#4a7a7a', lidRim:'#385c5c', glow:'#7cd8e8',  desc:'Cut facets scatter each spark into a dozen smaller ones.'},
-  {key:'elder',   name:'Elder Vessel',    price:2500, capacity:9,  maxCapacity:17, reachBase:90,  reachMax:114, magnetReachBase:215, magnetReachMax:265, durationBase:6.0, durationMax:9.5,  lightValueBase:1.15, lightValueMax:1.45, glass:'rgba(128,172,119,0.20)', glassStroke:'rgba(148,192,139,0.55)', lid:'#4a6a3a', lidRim:'#385228', glow:'#a4e6bb',  desc:'Older than the workshop itself. Nobody remembers who made it.'},
+  {key:'simple',  name:'Simple Glass Jar', price:0,    capacity:5,  maxCapacity:13, reachBase:55,  reachMax:64,  magnetReachBase:130, magnetReachMax:154, durationBase:4.0, durationMax:5.5,  lightValueBase:0.65, lightValueMax:0.95, glass:'rgba(128,174,182,0.20)', glassStroke:'rgba(148,194,202,0.55)', lid:'#8a6a45', lidRim:'#6f5436', glow:GLOW_Y,     desc:'The jar found beneath the old workshop.'},
+  {key:'lantern', name:'Firefly Lantern',  price:500,  capacity:6,  maxCapacity:16, reachBase:62,  reachMax:74,  magnetReachBase:145, magnetReachMax:175, durationBase:4.5, durationMax:6.5,  lightValueBase:0.75, lightValueMax:1.10, glass:'rgba(197,170,123,0.24)', glassStroke:'rgba(217,190,143,0.6)',  lid:'#4a4a52', lidRim:'#38383e', glow:'#fbb541',  desc:'Made for Glowkeepers who learned to carry the light farther.'},
+  {key:'moon',    name:'Moon Jar',        price:900,  capacity:7,  maxCapacity:19, reachBase:70,  reachMax:85,  magnetReachBase:165, magnetReachMax:200, durationBase:5.0, durationMax:7.5,  lightValueBase:0.85, lightValueMax:1.20, glass:'rgba(160,187,215,0.20)', glassStroke:'rgba(180,207,235,0.6)',  lid:'#8a8a9a', lidRim:'#6f6f7f', glow:'#fbf2d4',  desc:'Its glass holds a little moonlight of its own.'},
+  {key:'crystal', name:'Crystal Lantern', price:1500, capacity:8,  maxCapacity:23, reachBase:80,  reachMax:98,  magnetReachBase:190, magnetReachMax:235, durationBase:5.5, durationMax:8.5,  lightValueBase:1.00, lightValueMax:1.40, glass:'rgba(131,212,216,0.22)', glassStroke:'rgba(151,232,236,0.6)',  lid:'#4a7a7a', lidRim:'#385c5c', glow:'#7cd8e8',  desc:'Cut facets scatter each spark into a dozen smaller ones.'},
+  {key:'elder',   name:'Elder Vessel',    price:2500, capacity:9,  maxCapacity:30, reachBase:90,  reachMax:114, magnetReachBase:215, magnetReachMax:265, durationBase:6.0, durationMax:9.5,  lightValueBase:1.15, lightValueMax:1.60, glass:'rgba(128,172,119,0.20)', glassStroke:'rgba(148,192,139,0.55)', lid:'#4a6a3a', lidRim:'#385228', glow:'#a4e6bb',  desc:'Older than the workshop itself. Nobody remembers who made it.'},
   // Aurora Endgame Jar pass: capacity/reach/magnetReach/duration/lightValue
   // all raised to their new LOCKED ceilings (see the AskUserQuestion trail
   // this pass -- capacity uses the same flat +1/tier mechanic every other
@@ -1350,7 +1379,7 @@ const JARS=[
   // set last pass). `aurora:true` flags the visual-identity/effects layer
   // below (drawJar, catch/delivery FX, prestige state) -- cosmetic only,
   // reads nowhere in gameplay math.
-  {key:'aurora',  name:'Aurora Jar',      price:4000, capacity:12, maxCapacity:25, reachBase:110, reachMax:150, magnetReachBase:255, magnetReachMax:340, durationBase:7.0, durationMax:13.0, lightValueBase:1.40, lightValueMax:1.85, glass:'rgba(199,175,245,0.20)', glassStroke:'rgba(219,195,255,0.55)', lid:'#7a5a8a', lidRim:'#5c4268', glow:GLOW_Y, aurora:true, desc:'The last Glowkeeper never finished making this one. Perhaps they were waiting for someone.'}
+  {key:'aurora',  name:'Aurora Jar',      price:4000, capacity:12, maxCapacity:38, reachBase:110, reachMax:150, magnetReachBase:255, magnetReachMax:340, durationBase:7.0, durationMax:13.0, lightValueBase:1.40, lightValueMax:2.00, glass:'rgba(199,175,245,0.20)', glassStroke:'rgba(219,195,255,0.55)', lid:'#7a5a8a', lidRim:'#5c4268', glow:GLOW_Y, aurora:true, desc:'The last Glowkeeper never finished making this one. Perhaps they were waiting for someone.'}
 ];
 // Lumora 2.0 Phase 10: Jar Identity. Audit finding (see this phase's own
 // report): every JARS column above -- price, capacity, reach, magnetReach,
@@ -1443,6 +1472,26 @@ function jarCapMaxed(jarObj){ return jarCurrentCapacity(jarObj)>=jarObj.maxCapac
 // (which was already true before this multiplier existed, purely from
 // having more tiers to buy through).
 const JAR_COST_MULTIPLIER={simple:1.00, lantern:1.05, moon:1.10, crystal:1.20, elder:1.35, aurora:1.50};
+// E2 Shop Economy 2.0: the E1-approved LATE-BAND-ONLY multiplier schedule
+// (Section 9 of the E1 report/E2 spec). Deliberately separate from
+// JAR_COST_MULTIPLIER above, which still governs every line's EARLY price
+// exactly as before -- this one only affects bandedTierCost()'s endgame
+// scaling (see its own comment), so a cheap jar's first purchase is
+// unchanged while its long-term ceiling barely moves, and an expensive
+// jar's first purchase is also unchanged while its long-term ceiling moves
+// a great deal. Verified (E1's own simulation, reproduced against the real
+// formula in this pass) to leave no jar cheaper to fully upgrade than it
+// was before this pass, with Aurora remaining the single largest sink.
+const JAR_ENDGAME_MULTIPLIER={simple:1.3, lantern:1.8, moon:2.6, crystal:4.2, elder:6.5, aurora:11};
+// E2 Shop Economy 2.0: Coin Value's own scalar constants, declared here
+// (well above TIER_LINES' own declaration further down, and above the
+// non-YT load-merge block right below) specifically so migrateEconomyV2()
+// -- called from inside that load-merge block, long before TIER_LINES
+// itself exists -- can reference COIN_VALUE_STEP directly without an
+// ordering-hazard "Cannot access before initialization" throw. TIER_LINES
+// itself also reads these same 4 constants later, so there is exactly one
+// source of truth for Coin Value's shape, not two copies.
+const COIN_VALUE_LEVELS=60, COIN_VALUE_STEP=0.0125, COIN_VALUE_START_PRICE=60, COIN_VALUE_ENDGAME_MULT=2.5;
 // Upgrade Cost Escalation pass: per direct instruction, Capacity/Range
 // (Jar Reach + Magnet Reach)/Light Value/Magnet Duration all needed to feel
 // much steeper per tier than the old flat linear step. "Triple the next
@@ -1458,6 +1507,70 @@ const JAR_COST_MULTIPLIER={simple:1.00, lantern:1.05, moon:1.10, crystal:1.20, e
 // shared Coin Value line (TIER_LINES.light), NOT quest rewards.
 function tierCostRatio(tier){ return tier<2?3.0:1.2+(3.0-1.2)*Math.pow(0.35,tier-1); }
 function compoundTierCost(base,tier){ let c=base; for(let t=0;t<tier;t++)c=Math.round(c*tierCostRatio(t)); return c; }
+// Shop Economy 2.0 (E2): replaces compoundTierCost()/tierCostRatio() as the
+// live price formula for every per-jar upgrade line and the shared Coin
+// Value line -- those two functions above are left completely intact (not
+// deleted, not rewired) purely so old code/tests that reference them
+// directly keep working; nothing in the live purchase path calls them
+// anymore as of this pass. E1's own audit found the old 3x/3x/decay-to-1.2x
+// curve produced genuinely catastrophic totals once a line's tier count
+// grew past ~15 (Aurora's old 13-tier Capacity line alone reached ~21,000
+// coins), so a from-scratch compound curve was never a safe option for the
+// much longer E2 ladders -- this is the E1-approved BANDED + INTERPOLATED
+// curve instead: five progression bands (very-early/early/mid/late/
+// endgame), each spanning ceil(totalTiers/5) tier indices, with price
+// interpolated SMOOTHLY within a band (every single tier moves the price a
+// little, never a flat same-price band and never a sudden spike between
+// bands). BAND_TARGETS are E1's own average-player-income-calibrated
+// figures (60 coins/night reference: ~1.5/2.5/4/6.5/11.5 nights per level
+// in each band) -- scaled proportionally to THIS LINE's own real starting
+// price (so a cheap line like Duration gets proportionally cheap bands,
+// never Coin-Value-sized absolute numbers), and the endgame reach is
+// additionally scaled by `endgameMult`, applied PROGRESSIVELY across the 5
+// bands (band 0 gets none of it, band 4 gets all of it) -- so a jar's
+// EARLY price is completely unaffected by its own endgame multiplier; only
+// the far ceiling moves. This is what keeps Simple's first purchase cheap
+// while still letting Aurora's last purchase be enormous, per E1 Section 9
+// ("these multipliers apply ONLY to the late/endgame portion").
+//
+// Two real bugs were found and fixed while implementing this (not present
+// in the shape E1's own report described, only in a first literal
+// translation of it into code):
+// (1) Scaling every band by (startPrice/BAND_TARGETS[0]) made band 0's own
+//     END collapse to EXACTLY startPrice by construction (BAND_TARGETS[0]
+//     divided by itself is always 1) -- the "very early" band was
+//     perfectly FLAT, the exact "cheap, cheap, cheap, then a jump" shape
+//     Section 8 explicitly warns against. Fixed by scaling against a fixed
+//     REFERENCE_START_PRICE (60, Coin Value's own real starting price --
+//     the line BAND_TARGETS was originally calibrated against) instead of
+//     against BAND_TARGETS[0] itself, so band 0 now genuinely grows from
+//     startPrice up to its own real target.
+// (2) With bug (1) fixed, a band's very first tier (t=0) still landed
+//     EXACTLY on the previous band's last tier's price (band N's end IS
+//     band N+1's start, by construction), producing one flat repeated
+//     price at each of the 4 band seams. Fixed by nudging every band
+//     AFTER band 0 to start at t=1/bandCount instead of t=0 -- band 0
+//     itself is deliberately excluded from this nudge, since its own
+//     first tier (tier index 0) must stay EXACTLY startPrice (the
+//     player's real, unchanged first-upgrade price).
+const REFERENCE_START_PRICE=60; // Coin Value's own real starting price -- what BAND_TARGETS below was calibrated against
+const BAND_TARGETS=[90,150,240,390,690];
+function bandedTierCost(startPrice,tierIndex,totalTiers,endgameMult){
+  endgameMult=endgameMult||1;
+  const bandLen=Math.max(1,Math.ceil(totalTiers/5));
+  const bandIdx=Math.min(4,Math.floor(tierIndex/bandLen));
+  const bandStartIdx=bandIdx*bandLen;
+  const bandCount=Math.min(bandLen,totalTiers-bandStartIdx);
+  const bandEndFor=b=>BAND_TARGETS[b]*(startPrice/REFERENCE_START_PRICE)*(1+(endgameMult-1)*(b/4));
+  const bandStartPrice=bandIdx===0?startPrice:bandEndFor(bandIdx-1);
+  const bandEndPrice=bandEndFor(bandIdx);
+  const posInBand=tierIndex-bandStartIdx;
+  let t;
+  if(bandCount<=1)t=1;
+  else if(bandIdx===0)t=posInBand/(bandCount-1); // band 0's own first tier must stay EXACTLY startPrice
+  else t=(posInBand+1)/bandCount; // later bands: skip t=0 so a band's own first tier never exactly repeats the previous band's last
+  return Math.max(1,Math.round(bandStartPrice+(bandEndPrice-bandStartPrice)*t));
+}
 // Phase 1 economy pass: rescaled from the original 40+30t to 25+19t --
 // same ratio-of-decrease (~0.62x) applied to every other per-jar upgrade
 // line this pass, keeping every line's night-count pacing internally
@@ -1465,7 +1578,14 @@ function compoundTierCost(base,tier){ let c=base; for(let t=0;t<tier;t++)c=Math.
 // formula (jar identity differs via base/maxCapacity AND now the cost
 // multiplier above, not via a per-jar copy of this curve) — easy to
 // replace again without touching purchase/migration logic.
-function jarCapUpgradeCost(jarObj){ return compoundTierCost(Math.round(25*JAR_COST_MULTIPLIER[jarObj.key]),jarCapTierOwned(jarObj.key)); }
+// E2 Shop Economy 2.0: now the banded/interpolated curve (bandedTierCost())
+// instead of compoundTierCost() -- same base price (25) and the same
+// JAR_COST_MULTIPLIER scaling as before (tier-0 price is therefore
+// byte-for-byte unchanged), but the total tier count (jarObj.maxCapacity-
+// jarObj.capacity, now much larger per E1's raised ceilings below) and the
+// new JAR_ENDGAME_MULTIPLIER now shape the curve instead of the old
+// tapering-compound ratio.
+function jarCapUpgradeCost(jarObj){ return bandedTierCost(Math.round(25*JAR_COST_MULTIPLIER[jarObj.key]),jarCapTierOwned(jarObj.key),jarObj.maxCapacity-jarObj.capacity,JAR_ENDGAME_MULTIPLIER[jarObj.key]); }
 function tryUpgradeJarCap(jarKey){
   const jar=JARS.find(j=>j.key===jarKey);
   if(!jar||!upgrades.ownedJars[jarKey])return false; // must own the jar first, same as any other jar action
@@ -1526,7 +1646,47 @@ function migrateJarTier(src,dstUpgrades){
 //   lightValue: deltas .15/.20/.20/.25/.30/.35 -> step .05 -> 3/4/4/5/6/7 tiers
 // Prices rescaled (~0.62x, same ratio as Capacity above) from the
 // pre-rebalance formulas to match the new, smaller fresh-run income target.
-const PER_JAR_STAT_STEP={reach:3, magnetReach:10, duration:0.5, lightValue:0.05};
+// E2 Shop Economy 2.0: PER_JAR_STAT_STEP is now PER-JAR (was one flat
+// number shared by every jar) -- a single shared step cannot hit a similar
+// target LEVEL COUNT across jars whose own base->max ranges differ this
+// much (9px for Simple's Reach vs 40px for Aurora's), since level count =
+// range/step: shrinking the step enough for Simple's small range to reach
+// ~30 levels would send Aurora's much bigger range past 100. Each jar's
+// own step below is solved as (its own range)/(target level count) so
+// every jar lands in the same E1-approved level-count band (E2 spec
+// Sections 2-6) despite very different ranges -- same "per-jar variance is
+// normal" precedent jarStatTierCount()'s own long-standing comment already
+// established (3-14 tiers varying by jar under the OLD flat-step system).
+// Ceilings (jarObj.xMax) are UNCHANGED for reach/magnetReach/duration (see
+// JARS' own comment on why) and RAISED for lightValue -- so these new,
+// smaller steps land at: reach ~31-32 levels, magnetReach ~24-25,
+// duration ~27-28, lightValue ~19-20 per jar, all within E1's target
+// ranges (Section 2/4/5/6 of the E2 spec).
+const PER_JAR_STAT_STEP={
+  reach:       {simple:0.29,  lantern:0.39,  moon:0.48,  crystal:0.58,  elder:0.77,  aurora:1.3},
+  magnetReach: {simple:1,     lantern:1.2,   moon:1.4,   crystal:1.8,   elder:2,     aurora:3.4},
+  duration:    {simple:0.056, lantern:0.074, moon:0.093, crystal:0.111, elder:0.13,  aurora:0.222},
+  lightValue:  {simple:0.015, lantern:0.018, moon:0.018, crystal:0.021, elder:0.024, aurora:0.03}
+};
+// Migration only: the frozen shape of the OLD flat per-stat step (one
+// number shared by every jar, pre-E2) -- kept ONLY so migrateEconomyV2()
+// can reconstruct what stat value an existing player's OLD tierOwned count
+// actually produced, then find the equivalent (or better) new tierOwned
+// count under the new per-jar step above. Never read by any live gameplay
+// or purchase code -- same "frozen migration-only constant" precedent
+// LEGACY_CAPACITY_STEPS already established.
+const OLD_PER_JAR_STAT_STEP={reach:3, magnetReach:10, duration:0.5, lightValue:0.05};
+// Migration only: the frozen OLD ceiling for lightValue (the one per-jar
+// stat whose ceiling actually changed -- reach/magnetReach/duration keep
+// their exact old ceiling today, so no ceiling-side migration is needed
+// for them at all). Keyed by jar, since each jar's old ceiling differed.
+const OLD_LIGHT_VALUE_MAX={simple:0.80, lantern:0.95, moon:1.05, crystal:1.25, elder:1.45, aurora:1.85};
+// Migration only: the frozen OLD Coin Value steps (3 flat +10pp entries) --
+// kept ONLY so migrateEconomyV2() can reconstruct the exact bonus an
+// existing player's old lightTier count actually produced, then find the
+// smallest NEW lightTier whose bonus is >= it. Never read by any live
+// gameplay/purchase code.
+const OLD_COIN_VALUE_STEPS=[0.10,0.10,0.10];
 const PER_JAR_STAT_PRICE_BASE={reach:16, magnetReach:18, duration:12, lightValue:20};
 // PER_JAR_STAT_PRICE_STEP (the old flat per-tier price step) is gone as of
 // the Upgrade Cost Escalation pass -- jarStatUpgradeCost() below now
@@ -1539,8 +1699,8 @@ function jarStatTiersField(statKey){ return statKey+'Tiers'; }
 function jarStatTierOwned(statKey,jarKey){ const t=upgrades[jarStatTiersField(statKey)]; return (t&&t[jarKey])||0; }
 // tier count this jar's own base->max range actually supports for this
 // stat — NOT assumed uniform across jars, now genuinely different per jar
-function jarStatTierCount(statKey,jarObj){ return Math.ceil((jarStatMax(statKey,jarObj)-jarStatBase(statKey,jarObj))/PER_JAR_STAT_STEP[statKey]); }
-function jarCurrentStat(statKey,jarObj){ return Math.min(jarStatBase(statKey,jarObj)+jarStatTierOwned(statKey,jarObj.key)*PER_JAR_STAT_STEP[statKey], jarStatMax(statKey,jarObj)); }
+function jarStatTierCount(statKey,jarObj){ return Math.ceil((jarStatMax(statKey,jarObj)-jarStatBase(statKey,jarObj))/PER_JAR_STAT_STEP[statKey][jarObj.key]); }
+function jarCurrentStat(statKey,jarObj){ return Math.min(jarStatBase(statKey,jarObj)+jarStatTierOwned(statKey,jarObj.key)*PER_JAR_STAT_STEP[statKey][jarObj.key], jarStatMax(statKey,jarObj)); }
 function jarStatMaxed(statKey,jarObj){ return jarCurrentStat(statKey,jarObj)>=jarStatMax(statKey,jarObj); }
 // Aurora shop-presentation pass: {base, current, max} for any one of the
 // five per-jar stats (capacity included, via its own base/current/max
@@ -1561,7 +1721,10 @@ function jarCompareValues(statKey,jarObj){
 // Endgame Jar pass: JAR_COST_MULTIPLIER applied last, same as Capacity's
 // own cost curve above -- every per-jar stat line prices Aurora's tiers
 // higher than Simple's at the same tier index, not just longer overall.
-function jarStatUpgradeCost(statKey,jarObj){ return compoundTierCost(Math.round(PER_JAR_STAT_PRICE_BASE[statKey]*JAR_COST_MULTIPLIER[jarObj.key]),jarStatTierOwned(statKey,jarObj.key)); }
+// E2 Shop Economy 2.0: bandedTierCost() instead of compoundTierCost() --
+// same reasoning/precedent as jarCapUpgradeCost() above (tier-0 price
+// unchanged, only the shape of later tiers changes).
+function jarStatUpgradeCost(statKey,jarObj){ return bandedTierCost(Math.round(PER_JAR_STAT_PRICE_BASE[statKey]*JAR_COST_MULTIPLIER[jarObj.key]),jarStatTierOwned(statKey,jarObj.key),jarStatTierCount(statKey,jarObj),JAR_ENDGAME_MULTIPLIER[jarObj.key]); }
 function tryUpgradeJarStat(statKey,jarKey){
   const jar=JARS.find(j=>j.key===jarKey);
   if(!jar||!upgrades.ownedJars[jarKey])return false; // must own the jar first, same as Capacity
@@ -1592,6 +1755,55 @@ function migrateSharedStatTier(statKey,oldTierCount,dstUpgrades){
   const tiers=dstUpgrades[jarStatTiersField(statKey)];
   if(seeded>(tiers[jar.key]||0))tiers[jar.key]=seeded;
 }
+// E2 Shop Economy 2.0 migration -- the ONE place an existing player's OLD
+// tierOwned counts (bought under the pre-E2 step/ceiling/steps-array
+// shapes) are converted into their NEW equivalents. Guarded by
+// upgrades.economyV2Migrated so it runs EXACTLY ONCE per save, ever,
+// regardless of reload/repeated load callbacks/reopening the Workshop/
+// restarting a night -- none of those touch this flag, and it's part of
+// the same `upgrades` object every other purchase already persists through
+// (no new save key introduced). Principle throughout (per E2 Sections
+// 15-17): reconstruct the OLD stat value the player's OLD tierOwned count
+// actually produced (using the frozen OLD_* constants, never the live
+// post-E2 JARS/PER_JAR_STAT_STEP), then find the SMALLEST NEW tierOwned
+// count whose NEW stat output is >= that old value -- "preserve or
+// slightly increase power, never reduce it." Capacity is deliberately NOT
+// touched here: its formula (base + tierOwned, flat +1/tier) never
+// changed, only its ceiling rose, so an existing jarCapTiers count is
+// already exactly as correct under the new ceiling as it was under the
+// old one -- converting it would be pure risk for zero benefit.
+function migrateEconomyV2(){
+  if(upgrades.economyV2Migrated)return;
+  // Coin Value: reconstruct the OLD bonus from the OLD flat 3-entry step
+  // array, then find the smallest NEW level (flat COIN_VALUE_STEP) whose
+  // cumulative bonus meets or exceeds it.
+  const oldLightTier=upgrades.lightTier||0;
+  let oldBonus=0; for(let i=0;i<Math.min(oldLightTier,OLD_COIN_VALUE_STEPS.length);i++)oldBonus+=OLD_COIN_VALUE_STEPS[i];
+  if(oldBonus>0){
+    const newLightTier=Math.min(COIN_VALUE_LEVELS,Math.ceil(oldBonus/COIN_VALUE_STEP-1e-9));
+    if(newLightTier>oldLightTier)upgrades.lightTier=newLightTier;
+  }
+  // Per-jar reach/magnetReach/duration/lightValue: same "reconstruct old
+  // value, find smallest new tier that meets or exceeds it" principle,
+  // applied independently per jar (a player's progress on one jar was
+  // always independent of every other, and stays that way here).
+  ['reach','magnetReach','duration','lightValue'].forEach(statKey=>{
+    const oldStep=OLD_PER_JAR_STAT_STEP[statKey];
+    JARS.forEach(jar=>{
+      const tiersObj=upgrades[jarStatTiersField(statKey)];
+      const oldTierOwned=(tiersObj&&tiersObj[jar.key])||0;
+      if(oldTierOwned<=0)return;
+      const oldMax=statKey==='lightValue'?OLD_LIGHT_VALUE_MAX[jar.key]:jarStatMax(statKey,jar); // reach/magnetReach/duration ceilings never changed, so jarStatMax() (the LIVE, post-E2 value) already equals the old one for those three
+      const oldVal=Math.min(jarStatBase(statKey,jar)+oldTierOwned*oldStep,oldMax);
+      const newStep=PER_JAR_STAT_STEP[statKey][jar.key];
+      const newTierCount=jarStatTierCount(statKey,jar);
+      let newTierOwned=Math.ceil((oldVal-jarStatBase(statKey,jar))/newStep-1e-9);
+      newTierOwned=Math.max(0,Math.min(newTierOwned,newTierCount));
+      if(newTierOwned>oldTierOwned)tiersObj[jar.key]=newTierOwned;
+    });
+  });
+  upgrades.economyV2Migrated=true;
+}
 // Master Glowkeeper Statue: statueOwned/statueEquipped follow the exact same
 // flat-boolean-field convention as deco/fountain above (not a new save
 // system) -- two fields instead of one only because this is the first decor
@@ -1609,7 +1821,20 @@ let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statue
 if(!YT){
   try{
     const u=JSON.parse(localStorage.getItem('gk2_upgrades')||'{}');
-    if(typeof u.lightTier==='number'&&u.lightTier>upgrades.lightTier)upgrades.lightTier=u.lightTier;
+    // E2 Shop Economy 2.0: clamped to TIER_LINES.light.prices.length (the
+    // real, current max level) -- a real pre-existing gap surfaced while
+    // testing the new 60-level ladder: this line never had an upper bound
+    // at all, so a corrupted/out-of-range save value used to just leave
+    // tierMaxed('light') permanently true (harmless) but would now feed
+    // tierBonusSum() an out-of-range loop bound, silently producing NaN
+    // through every future delivery's coinMultiplierForRun() -- exactly
+    // the "must not crash, must not corrupt the rest of the save" bar
+    // Prestige/Season's own defensive load-time clamps already meet.
+    // COIN_VALUE_LEVELS (not TIER_LINES.light.prices.length) -- TIER_LINES
+    // itself isn't declared until much later in the file; this is exactly
+    // the ordering-hazard class CLAUDE.md documents, avoided the same way
+    // migrateEconomyV2() already avoids it for the same constant.
+    if(typeof u.lightTier==='number'&&u.lightTier>upgrades.lightTier)upgrades.lightTier=Math.min(u.lightTier,COIN_VALUE_LEVELS);
     // Phase 1 economy architecture: jarReachTier/magnetReachTier/durationTier
     // are retired scalar fields now (replaced by per-jar Tiers objects
     // below), but migrateMagnetTier()/migrateRangeTier() are untouched,
@@ -1658,6 +1883,20 @@ if(!YT){
     migrateSharedStatTier('duration',legacyShared.durationTier,upgrades);
   }catch(e){}
 }
+// E2 Shop Economy 2.0: guarded by if(!YT) -- a REAL bug caught before this
+// pass shipped: calling this unconditionally here would run it immediately
+// at top-level for a YT player too, against the still-default (all-zero)
+// `upgrades` object, BEFORE their real cloud save has even arrived (that
+// only resolves later, inside YT.game.loadData().then() below). Since
+// upgrades.economyV2Migrated is set on that same object by reference, a
+// premature call here would mark it migrated before the real old tier
+// values ever loaded -- permanently skipping a real YT player's actual
+// migration the one time it would have mattered. For the YT path,
+// migrateEconomyV2() is called ONLY from inside the loadData().then()
+// callback, after d.upgrades has actually been merged in. This call here
+// covers the non-YT path, where `upgrades` genuinely is fully resolved by
+// this point; it's also a safe no-op for a completely fresh player.
+if(!YT)migrateEconomyV2();
 let trackerOn=false; // Collector's optional QoL toggle — free, no coin cost, no balance risk
 if(!YT){ try{ trackerOn=localStorage.getItem('gk2_tracker')==='1'; }catch(e){} }
 // ---------- Lumora 2.0 Phase 0: foundation state ----------
@@ -2908,8 +3147,31 @@ function villageLevel(){ return villageLevelFor(best,nightNumber); }
 // per direct instruction to bring it in line with the rest of the shop.
 // Multiplier ceiling itself (1.00x->1.10x->1.20x->1.30x) is untouched --
 // only the cost of reaching it changed.
+// E2 Shop Economy 2.0: Coin Value's steps/prices are now 60-element
+// GENERATED arrays instead of hand-authored 3-element ones -- every reader
+// of this line (tierOwned()/tierMaxed()/tryPurchaseTier()/tierBonusSum()/
+// lineValueAtTier() below) already works purely off `.steps`/`.prices`
+// array length and indexing, so this is the entire change needed to give
+// Coin Value its new 60-level, 1.00x->1.75x progression: no function
+// signature anywhere had to change. `steps` is a flat +1.25 percentage
+// points per level (60 levels x 1.25pp = 75pp, landing exactly at the
+// E1-approved 1.75x ceiling) -- kept flat/additive on purpose, same
+// design language the OLD 3-level system already used (a flat step is
+// easy for a player to reason about; the PRICE curve, not a shrinking
+// stat gain, carries this line's long-term pacing). `prices` uses the
+// same bandedTierCost() curve every per-jar line now uses, with the SAME
+// starting price (60) as before ("do not simply multiply the first price
+// by 3" -- E2 Section 1) and its own endgameMult (2.5, E1's own
+// calibration for this specific line -- Coin Value is the one shared
+// global line, not one of the 6 per-jar lines, so it isn't part of the
+// JAR_ENDGAME_MULTIPLIER schedule). The 4 COIN_VALUE_* constants
+// themselves are declared much earlier in the file (alongside
+// JAR_ENDGAME_MULTIPLIER) -- see that declaration's own comment for why.
 const TIER_LINES={
-  light: {vendor:'light-value', field:'lightTier', name:'Coin Value', desc:'Your permanent global economy multiplier — applies no matter which jar is equipped.', steps:[0.10,0.10,0.10], prices:[60,180,540]}
+  light: {vendor:'light-value', field:'lightTier', name:'Coin Value', desc:'Your permanent global economy multiplier — applies no matter which jar is equipped.',
+    steps: Array.from({length:COIN_VALUE_LEVELS},()=>COIN_VALUE_STEP),
+    prices: Array.from({length:COIN_VALUE_LEVELS},(_,i)=>bandedTierCost(COIN_VALUE_START_PRICE,i,COIN_VALUE_LEVELS,COIN_VALUE_ENDGAME_MULT))
+  }
 };
 // Lumora UI port: the Jar Collection, ported directly from the prototype's
 // src/data/jars.ts (6 jars, each with its OWN base capacity). JARS itself
@@ -3107,7 +3369,8 @@ if(YT&&YT.game&&YT.game.loadData){
         Object.keys(variantJournal).forEach(k=>{ if(typeof d.variantJournal[k]==='number'&&d.variantJournal[k]>variantJournal[k])variantJournal[k]=d.variantJournal[k]; });
       }
       if(d.upgrades&&typeof d.upgrades==='object'){
-        if(typeof d.upgrades.lightTier==='number'&&d.upgrades.lightTier>upgrades.lightTier)upgrades.lightTier=d.upgrades.lightTier;
+        // E2 Shop Economy 2.0: same defensive clamp as the non-YT load path's own comment.
+        if(typeof d.upgrades.lightTier==='number'&&d.upgrades.lightTier>upgrades.lightTier)upgrades.lightTier=Math.min(d.upgrades.lightTier,COIN_VALUE_LEVELS);
         // Phase 1 economy architecture: same throwaway-legacy-shape pattern
         // as the non-YT load path above -- migrateMagnetTier()/
         // migrateRangeTier() stay untouched, just fed a scratch object
@@ -3143,6 +3406,10 @@ if(YT&&YT.game&&YT.game.loadData){
         migrateSharedStatTier('magnetReach',legacyShared.magnetReachTier,upgrades);
         migrateSharedStatTier('duration',legacyShared.durationTier,upgrades);
       }
+      // E2 Shop Economy 2.0: unconditional, same reasoning as the non-YT
+      // load path's own call -- runs as a safe no-op for a fresh player
+      // whose cloud save never had a d.upgrades object at all.
+      migrateEconomyV2();
       if(d.trackerOn===true)trackerOn=true;
       // lastPlayed/quests: prevLastPlayed was only a sync placeholder (0) until
       // now for the Playables case — this is the real "before this session"
@@ -7752,11 +8019,28 @@ function lumBar(x,y,w,h,pct){
   }
   ctx.restore();
 }
-function lumTierPips(x,y,tier,max,pipW,gap){
+// E2 Shop Economy 2.0: optional 7th param `maxWidth` -- every pre-existing
+// call site (Season/Weekly/Prestige journal tabs, all with small, fixed
+// tier counts of 10 or fewer) omits it and keeps the exact original fixed
+// pipW/gap, so this is purely additive. Needed because several Workshop
+// upgrade lines now have 20-32 tiers -- at the original fixed pipW=15/
+// gap=4, a 32-tier row would be 32*19=608px wide, well past this game's
+// own 540px virtual canvas. When maxWidth is given, pipW/gap are scaled
+// down (never up) so all `max` pips fit inside it -- same pip-per-tier
+// visual language at every tier count, just auto-thinning instead of
+// silently overflowing off-screen.
+function lumTierPips(x,y,tier,max,pipW,gap,maxWidth){
   pipW=pipW||16; gap=gap||5;
+  if(maxWidth&&max>0){
+    const natural=max*pipW+(max-1)*gap;
+    if(natural>maxWidth){
+      const scale=maxWidth/natural;
+      pipW=Math.max(1,pipW*scale); gap=Math.max(0.5,gap*scale);
+    }
+  }
   for(let i=0;i<max;i++){
     ctx.fillStyle=i<tier?LUM_GOLD:'rgba(43,51,84,0.6)';
-    ctx.beginPath(); ctx.roundRect(x+i*(pipW+gap),y,pipW,5,2.5); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(x+i*(pipW+gap),y,pipW,5,Math.min(2.5,pipW/2)); ctx.fill();
   }
 }
 function lumCoinIcon(x,y,r){
@@ -8806,7 +9090,7 @@ function drawUpgradeCard(key,rect){
     ctx.fillStyle=WS_GOLD; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
     ctx.fillText(formatLineValue(key,nextVal),nx,descEnd+48);
   }
-  lumTierPips(tx,descEnd+60,n,max,15,4);
+  lumTierPips(tx,descEnd+60,n,max,15,4,rect.w-pad*2);
   ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='12px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
   ctx.fillText('TIER '+n+' / '+max,tx,rect.y+rect.h-26);
   if(maxed){
@@ -8847,7 +9131,7 @@ function drawJarCapacityCard(rect){
   lumEyebrow('Max',mx,descEnd+20,'left',12);
   ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   ctx.fillText(jar.maxCapacity+'',mx,descEnd+48);
-  lumTierPips(tx,descEnd+60,owned,totalSteps,15,4);
+  lumTierPips(tx,descEnd+60,owned,totalSteps,15,4,rect.w-pad*2);
   ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='12px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
   ctx.fillText('UPGRADE '+owned+' / '+totalSteps,tx,rect.y+rect.h-26);
   if(maxed){
@@ -8897,13 +9181,13 @@ function drawJarStatCard(statKey,label,desc,rect,fmt,accent){
     const nx=tx+104;
     lumEyebrow('Next',nx,descEnd+20,'left',12);
     ctx.fillStyle=WS_GOLD; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
-    ctx.fillText(fmt(Math.min(cur+PER_JAR_STAT_STEP[statKey],maxVal)),nx,descEnd+48);
+    ctx.fillText(fmt(Math.min(cur+PER_JAR_STAT_STEP[statKey][jar.key],maxVal)),nx,descEnd+48);
   }
   const mx=tx+(maxed?104:198);
   lumEyebrow('Max',mx,descEnd+20,'left',12);
   ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   ctx.fillText(fmt(maxVal),mx,descEnd+48);
-  lumTierPips(tx,descEnd+60,owned,totalSteps,15,4);
+  lumTierPips(tx,descEnd+60,owned,totalSteps,15,4,rect.w-pad*2);
   ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='12px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
   ctx.fillText('UPGRADE '+owned+' / '+totalSteps,tx,rect.y+rect.h-26);
   if(maxed){
@@ -8915,8 +9199,17 @@ function drawJarStatCard(statKey,label,desc,rect,fmt,accent){
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }
-const fmtReach=v=>Math.round(v)+'';
-const fmtDuration=v=>v.toFixed(1)+'s';
+// E2 Shop Economy 2.0: fmtReach now shows 1 decimal (was a whole-number
+// round) -- Reach's new per-level step is sub-1px (E1's extended 30-32
+// level ladders spread the same or a similar range across many more,
+// smaller increments), so rounding to a whole pixel would make most
+// individual upgrades display as "no change" even though the real
+// underlying value did move. fmtDuration gains a 2nd decimal for the same
+// reason (its new per-level step is a fraction of a second). Both are pure
+// display-precision fixes -- neither changes any stat value, upgrade
+// effect, or the underlying float itself.
+const fmtReach=v=>v.toFixed(1)+'';
+const fmtDuration=v=>v.toFixed(2)+'s';
 const fmtLightValue=v=>v.toFixed(2)+'x';
 // Aurora shop-presentation pass: the five per-jar stats compared in
 // drawJarCompareModal() below, reusing the exact same formatters the
