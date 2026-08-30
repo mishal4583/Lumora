@@ -6830,6 +6830,75 @@ return __tick(5).then(function(){
 });
 `);
 
+// E5: Almost Affordable polish -- ONLY the two things E5 actually changed
+// (button label wording, pending-state feedback). Everything else about
+// eligibility/reward/duplicate-protection is already covered exhaustively
+// by lumora2-e4-almost-affordable above and deliberately not re-tested
+// here, per E5's own "do not rewrite existing tests" instruction.
+scenario('lumora2-e5-almost-affordable-polish', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+ytgame.ads = {
+  requestRewardedAd: function(id){ return new Promise(function(resolve){ __pendingAdResolve = resolve; }); },
+  requestInterstitialAd: function(){ return Promise.resolve(); }
+};
+var __pendingAdResolve = null;
+
+// Capture every lumButton(...) call without altering its real behavior
+// (it still draws against the mock ctx normally) -- same wrap-and-restore
+// technique already used for drawPrestigeJournal above.
+// NOT wrapped in try/finally -- a finally block runs as soon as the
+// function returns the pending Promise below, which is BEFORE that
+// promise's own .then() callbacks actually execute, so it would restore
+// lumButton too early and silently break every capture after the first
+// __tick(). Restored explicitly as the last statement in the async chain
+// instead (see bottom).
+var realLumButton = lumButton, calls = [];
+lumButton = function(rect, label, variant, disabled){ calls.push({ label: label, disabled: disabled }); return realLumButton.apply(this, arguments); };
+
+  var jar = JARS.find(function(j){ return j.key === 'simple'; });
+  upgrades.jarCapTiers.simple = 5;
+  var cost = jarCapUpgradeCost(jar);
+  coins = cost - Math.round(cost * 0.1); // within the 15% window
+  var target = { kind: 'jarCap', jarKey: 'simple' };
+  var shortfall = almostAffordableShortfall(target);
+
+  // ---- label wording matches the SAME "Watch Ad · <detail>" convention as every other ad button (Favor's own "Watch Ad · +75 Coins" is the closest analog) ----
+  calls.length = 0;
+  drawUpgradeButtonOrAd({ x: 20, y: 20, w: 300, h: 220 }, cost, target);
+  __check('the Almost Affordable button label follows the existing "Watch Ad · <detail>" convention, not a one-off phrasing', calls[0].label === 'Watch Ad · +' + shortfall + ' Coins', 'got=' + calls[0].label);
+  __check('the eligible button is enabled (not disabled) before any tap', calls[0].disabled === false);
+
+  // ---- pending state: a real in-flight request swaps the SAME card to "Watching…", disabled -- matching every other ad button's own pending convention ----
+  requestAlmostAffordable(target);
+  __check('requestAlmostAffordable() left a real request pending', almostAffordablePending === true);
+  calls.length = 0;
+  drawUpgradeButtonOrAd({ x: 20, y: 20, w: 300, h: 220 }, cost, target);
+  __check('while pending, the button shows "Watching…" just like Favor/Mystery Chest/Double the Glow/Extra Life do', calls[0].label === 'Watching…', 'got=' + calls[0].label);
+  __check('while pending, the button is disabled so it cannot be tapped again', calls[0].disabled === true);
+
+  // resolve the in-flight ad so it doesn't leak into later scenarios
+  __pendingAdResolve(true);
+  return __tick(5).then(function(){
+    __check('after the ad resolves, pending clears back to false', almostAffordablePending === false);
+    calls.length = 0;
+    drawUpgradeButtonOrAd({ x: 20, y: 20, w: 300, h: 220 }, jarCapUpgradeCost(jar), target);
+    __check('once resolved (and now affordable), the card reverts to the normal "<price> · Upgrade" button, not stuck on "Watching…"', calls[0].label.indexOf('Upgrade') !== -1, 'got=' + calls[0].label);
+    upgrades.jarCapTiers.simple = 0; coins = 0;
+
+    // ---- existing ad buttons elsewhere in the Workshop are byte-for-byte unchanged by this phase ----
+    calls.length = 0;
+    drawWorkshopFavorCard({ x: 0, y: 0, w: 300, h: 150 });
+    __check('Glowkeeper\\'s Favor button label is unchanged by E5', calls[0].label === 'Watch Ad · +75 Coins', 'got=' + calls[0].label);
+    calls.length = 0;
+    drawMysteryChestCard({ x: 0, y: 0, w: 300, h: 150 });
+    __check('Mystery Glow button label is unchanged by E5', calls[0].label === 'Watch Ad · Reveal Reward', 'got=' + calls[0].label);
+    lumButton = realLumButton;
+  });
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;

@@ -9225,15 +9225,24 @@ function cardButtonRect(rect){ return {x:rect.x+rect.w-18-75,y:rect.y+rect.h-32,
 // 'glass' style, same size as the normal Upgrade button in every case, so
 // the ad option is never visually more prominent than normal progression
 // (per direct instruction). Only the LABEL and tap outcome differ: when
-// `target` is Almost-Affordable-eligible, shows "Watch Ad +<shortfall>"
-// instead of "<price> · Upgrade". Reads almostAffordableEligible()/
-// almostAffordableShortfall() live, every frame -- the same two functions
-// handleUpgradeButtonTap() (the pointerdown side) checks, so the two can
-// never disagree about which state is showing.
+// `target` is Almost-Affordable-eligible, shows "Watch Ad · +<shortfall>
+// Coins" -- E5 polish: matches the exact "Watch Ad · <detail>" wording
+// every OTHER rewarded-ad button in the game already uses (Double the
+// Glow's "Watch Ad · 2× Coins", Extra Life's "Watch Ad · Extra Life",
+// Glowkeeper's Favor's "Watch Ad · +75 Coins" -- the closest analog, same
+// flat coins reward), not a one-off phrasing. Also mirrors every other ad
+// button's own "Watching…"-while-pending swap (E5 audit finding: E4
+// shipped this button with disabled hard-coded to false, so a tap gave no
+// visual acknowledgement until the promise resolved -- every other ad
+// button in the file already reflects its own pending flag here).
+// Reads almostAffordableEligible()/almostAffordableShortfall() live, every
+// frame -- the same two functions handleUpgradeButtonTap() (the
+// pointerdown side) checks, so the two can never disagree about which
+// state is showing.
 function drawUpgradeButtonOrAd(rect,price,target){
   if(almostAffordableEligible(target)){
     const shortfall=almostAffordableShortfall(target);
-    lumButton(cardButtonRect(rect),'Watch Ad +'+shortfall,'glass',false);
+    lumButton(cardButtonRect(rect),almostAffordablePending?'Watching…':'Watch Ad · +'+shortfall+' Coins','glass',almostAffordablePending);
   } else {
     const afford=coins>=price;
     lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
