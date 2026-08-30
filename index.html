@@ -3306,6 +3306,109 @@ function tryPurchaseTier(key){
   saveProgress(); // a purchase is a deliberate, stakes-bearing action — save immediately, same as every other buy in this shop
   return true;
 }
+// ---------- Shop Economy 2.0, E4: Almost Affordable ----------
+// A single, narrowly-scoped rewarded-ad opportunity: when the player is
+// within E1's approved 15% threshold of affording their CURRENTLY VIEWED
+// upgrade, an optional ad covers exactly the remaining shortfall -- never
+// the whole cost, never a flat/fixed amount. Reuses the exact same
+// rewarded-ad infrastructure (rewardedAdsAvailable()/YT.ads.
+// requestRewardedAd()/coins/saveProgress()) every existing ad already
+// uses -- no second ad framework, no new currency, no new save field
+// (the only persistent effect is the existing `coins` balance changing,
+// through the exact same path a delivery or a purchase already uses).
+// REWARDED_AD_IDS.WORKSHOP_SMALL_UPGRADE was reserved for exactly this
+// purpose back in the Monetization 2.0 pass ("defined here for
+// completeness but deliberately NOT wired to any UI/claim path in this
+// pass") -- this is that wiring, not a new ID.
+//
+// `target` identifies WHICH upgrade line is being offered the ad, one of:
+//   {kind:'light'}                          -- the shared Coin Value line
+//   {kind:'jarCap', jarKey}                 -- a jar's Capacity line
+//   {kind:'jarStat', statKey, jarKey}       -- a jar's Reach/Magnet Reach/Duration/Light Value line
+// Always re-derived from LIVE upgrades/coins state, never cached -- the
+// same "never trust a value computed when the button was first shown"
+// discipline every other exact-price/exact-reward check in this file
+// already follows (jarCanAcceptCatch(), grantDeliveryCoins(), etc.).
+function almostAffordableCost(target){
+  if(target.kind==='light')return TIER_LINES.light.prices[tierOwned('light')];
+  const jar=JARS.find(j=>j.key===target.jarKey);
+  if(!jar)return Infinity;
+  if(target.kind==='jarCap')return jarCapUpgradeCost(jar);
+  if(target.kind==='jarStat')return jarStatUpgradeCost(target.statKey,jar);
+  return Infinity;
+}
+function almostAffordableMaxed(target){
+  if(target.kind==='light')return tierMaxed('light');
+  const jar=JARS.find(j=>j.key===target.jarKey);
+  if(!jar)return true;
+  if(target.kind==='jarCap')return jarCapMaxed(jar);
+  if(target.kind==='jarStat')return jarStatMaxed(target.statKey,jar);
+  return true;
+}
+// E1's own approved threshold, locked -- "the player has at least 85% of
+// the required coins" (E4 Section 4). Never adjusted by this feature to
+// compensate for a price/income concern -- see this phase's own report.
+const ALMOST_AFFORDABLE_THRESHOLD=0.15;
+function almostAffordableShortfall(target){
+  if(almostAffordableMaxed(target))return 0;
+  const cost=almostAffordableCost(target);
+  return Math.max(0,cost-coins);
+}
+// The single source of truth for "should this specific card show Watch Ad
+// instead of the normal Upgrade button right now" -- called both by the
+// draw code (to decide what to render) and the pointerdown handler (to
+// decide what a tap on that exact button rect should do), so the two can
+// never disagree about which state is showing.
+function almostAffordableEligible(target){
+  if(almostAffordableMaxed(target))return false;
+  if(!rewardedAdsAvailable())return false; // never show an ad offer the platform can't actually deliver
+  const cost=almostAffordableCost(target);
+  if(coins>=cost)return false; // already affordable -- the normal Upgrade button is the only relevant action
+  const shortfall=cost-coins;
+  return (shortfall/cost)<=ALMOST_AFFORDABLE_THRESHOLD;
+}
+// Session-level pending guard (not persisted), same shape as
+// workshopFavorPending/mysteryChestPending above -- rejects a second call
+// while one is already in flight, covering double-taps and any duplicate/
+// retried callback the platform might otherwise deliver.
+let almostAffordablePending=false;
+function requestAlmostAffordable(target){
+  if(almostAffordablePending)return;
+  if(!upgrades.tutorialDone)return;
+  if(!almostAffordableEligible(target))return; // re-verify at request time, not just trust the button having been shown a frame ago
+  almostAffordablePending=true;
+  let result;
+  try{ result=YT.ads.requestRewardedAd(REWARDED_AD_IDS.WORKSHOP_SMALL_UPGRADE); }
+  catch(e){ almostAffordablePending=false; return; }
+  Promise.resolve(result).then(res=>{
+    almostAffordablePending=false;
+    if(res===true){
+      // Recalculated HERE, at the moment the reward is actually granted --
+      // never the amount shown when the ad was requested. If the player's
+      // balance changed while the ad played (a real delivery, another
+      // reward, buying a different upgrade) the reward shrinks to match,
+      // and if they now already afford it (or the line got maxed in the
+      // meantime), it's exactly 0 -- never a duplicate/excess grant, never
+      // an exploit, one ad can only ever cover ONE shortfall.
+      const reward=almostAffordableShortfall(target);
+      if(reward>0){
+        coins+=reward;
+        if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
+        saveProgress(); // the existing coin balance's own persistence path -- no new save field
+      }
+    }
+  },()=>{ almostAffordablePending=false; }); // failure/cancel/rejection: no coins, Workshop stays exactly as usable as before
+}
+// Shared tap-dispatch for every upgrade button in the Workshop -- if this
+// EXACT target is currently showing "Watch Ad" (per almostAffordableEligible(),
+// the same function the draw code checks), route the tap to the ad
+// request instead of the normal purchase function. One shared function so
+// this decision can never be made differently by the draw code and the
+// hit-test.
+function handleUpgradeButtonTap(target,buyFn){
+  if(almostAffordableEligible(target))requestAlmostAffordable(target);
+  else buyFn();
+}
 // steps aren't necessarily uniform per line, so every *ForRun() sums the
 // OWNED steps rather than multiplying tier-count by a single flat step value.
 function tierBonusSum(key){ const line=TIER_LINES[key], n=tierOwned(key); let s=0; for(let i=0;i<n;i++)s+=line.steps[i]; return s; }
@@ -4709,21 +4812,26 @@ cv.addEventListener('pointerdown',e=>{
       // equip button to hit-test
       for(const rect of jarCardRects()){ if(inRect(p.x,p.y,rect))tryBuyOrEquipJar(rect.key); }
     } else if(shopTab==='capacity'){
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))tryUpgradeJarCap(currentJar().key); // always the EQUIPPED jar's own progression, see drawJarCapacityCard()
+      // E4: routes through handleUpgradeButtonTap() -- a tap on this exact
+      // button either buys normally or, if this specific line is currently
+      // showing "Watch Ad" (almostAffordableEligible()), requests the ad
+      // instead. Every upgrade-button hit-test below follows the same
+      // pattern, never a duplicated buy-vs-ad decision.
+      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarCap',jarKey:currentJar().key},()=>tryUpgradeJarCap(currentJar().key)); // always the EQUIPPED jar's own progression, see drawJarCapacityCard()
     } else if(shopTab==='range'){
       // Phase 1 economy architecture: always the EQUIPPED jar's own
       // progression now, same principle as Capacity's tab
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))tryUpgradeJarStat('reach',currentJar().key);
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(1))))tryUpgradeJarStat('magnetReach',currentJar().key);
+      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarStat',statKey:'reach',jarKey:currentJar().key},()=>tryUpgradeJarStat('reach',currentJar().key));
+      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(1))))handleUpgradeButtonTap({kind:'jarStat',statKey:'magnetReach',jarKey:currentJar().key},()=>tryUpgradeJarStat('magnetReach',currentJar().key));
     } else if(shopTab==='light-value'){
       // Phase 1 economy pass: TWO distinct cards now, per direct
       // instruction -- card 0 is the EQUIPPED JAR's own Light Value
       // (per-jar earning efficiency), card 1 is the shared, global,
       // LOCKED-ceiling Coin Value line. Never call these the same thing.
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))tryUpgradeJarStat('lightValue',currentJar().key);
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(1))))tryPurchaseTier('light');
+      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarStat',statKey:'lightValue',jarKey:currentJar().key},()=>tryUpgradeJarStat('lightValue',currentJar().key));
+      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(1))))handleUpgradeButtonTap({kind:'light'},()=>tryPurchaseTier('light'));
     } else if(shopTab==='magnet'){
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))tryUpgradeJarStat('duration',currentJar().key);
+      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarStat',statKey:'duration',jarKey:currentJar().key},()=>tryUpgradeJarStat('duration',currentJar().key));
     } else if(shopTab==='decor'){
       // Master Glowkeeper Statue: the one decor item with a real equip step.
       // wasStatueOwned is snapshotted BEFORE the generic buy loop runs --
@@ -9112,6 +9220,25 @@ function drawAuroraTrailCard(){
 // bottom-right corner -- drawUpgradeCard/drawDecorCard draw it here,
 // the pointerdown hit-test below calls the exact same function
 function cardButtonRect(rect){ return {x:rect.x+rect.w-18-75,y:rect.y+rect.h-32,w:150,h:36,fontSize:12}; }
+// E4 Almost Affordable: shared upgrade-button drawing for every upgrade
+// card (Coin Value, Capacity, the four per-jar stats) -- same rect, same
+// 'glass' style, same size as the normal Upgrade button in every case, so
+// the ad option is never visually more prominent than normal progression
+// (per direct instruction). Only the LABEL and tap outcome differ: when
+// `target` is Almost-Affordable-eligible, shows "Watch Ad +<shortfall>"
+// instead of "<price> · Upgrade". Reads almostAffordableEligible()/
+// almostAffordableShortfall() live, every frame -- the same two functions
+// handleUpgradeButtonTap() (the pointerdown side) checks, so the two can
+// never disagree about which state is showing.
+function drawUpgradeButtonOrAd(rect,price,target){
+  if(almostAffordableEligible(target)){
+    const shortfall=almostAffordableShortfall(target);
+    lumButton(cardButtonRect(rect),'Watch Ad +'+shortfall,'glass',false);
+  } else {
+    const afford=coins>=price;
+    lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
+  }
+}
 // Lumora UI port: UpgradeCard -- ported from
 // src/components/shop/UpgradeCard.tsx (current/next values, tier pips,
 // cost+upgrade button). Drives the four remaining TIER_LINES entries
@@ -9154,8 +9281,7 @@ function drawUpgradeCard(key,rect){
     ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right';
     ctx.fillText('MAX LEVEL',rect.x+rect.w-pad,rect.y+rect.h-26);
   } else {
-    const price=line.prices[n], afford=coins>=price;
-    lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
+    drawUpgradeButtonOrAd(rect,line.prices[n],{kind:'light'});
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }
@@ -9198,8 +9324,7 @@ function drawJarCapacityCard(rect){
     ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right';
     ctx.fillText('MAX LEVEL',rect.x+rect.w-pad,rect.y+rect.h-26);
   } else {
-    const price=jarCapUpgradeCost(jar), afford=coins>=price;
-    lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
+    drawUpgradeButtonOrAd(rect,jarCapUpgradeCost(jar),{kind:'jarCap',jarKey:jar.key});
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }
@@ -9257,8 +9382,7 @@ function drawJarStatCard(statKey,label,desc,rect,fmt,accent){
     ctx.fillStyle=WS_GOLD_BRIGHT; ctx.font='600 12px Georgia,serif'; ctx.textAlign='right';
     ctx.fillText('MAX LEVEL',rect.x+rect.w-pad,rect.y+rect.h-26);
   } else {
-    const price=jarStatUpgradeCost(statKey,jar), afford=coins>=price;
-    lumButton(cardButtonRect(rect),price+' · Upgrade','glass',!afford);
+    drawUpgradeButtonOrAd(rect,jarStatUpgradeCost(statKey,jar),{kind:'jarStat',statKey:statKey,jarKey:jar.key});
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }

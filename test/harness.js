@@ -6610,6 +6610,226 @@ __check('Coin Value still has exactly 60 levels, unchanged by E3', TIER_LINES.li
 upgrades.equippedJar = 'simple';
 `);
 
+scenario('lumora2-e4-almost-affordable', { audioEnabled: true }, `
+// Resolve the initial load FIRST (same pattern ads-workshop-favor already
+// established) -- saveProgress() defers to pendingSave until loadDone is
+// true, so any reward granted before this would never actually reach
+// __spy.saveDataCalls, which several checks below rely on.
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+
+// ---- no ad offered at all when the platform doesn't support ads ----
+var __targetCap = { kind: 'jarCap', jarKey: 'simple' };
+upgrades.jarCapTiers.simple = 0; coins = 20; // 20/25 = 80%, would be eligible if ads were available
+__check('almostAffordableEligible() is false when the SDK has no ads namespace at all', almostAffordableEligible(__targetCap) === false);
+__check('requestAlmostAffordable() is a no-op when ads are unavailable', (function(){ var before = coins; requestAlmostAffordable(__targetCap); return coins === before; })());
+
+// ---- install the mock SDK ads namespace (same pattern as the existing Workshop Favor/Double the Glow tests) ----
+var rewardCalls = [];
+var rewardBehavior = 'success'; // success | false | reject | throw
+ytgame.ads = {
+  requestRewardedAd: function(id){
+    rewardCalls.push(id);
+    if (rewardBehavior === 'throw') throw new Error('mock rewarded throw');
+    if (rewardBehavior === 'reject') return Promise.reject(new Error('mock rewarded reject'));
+    return Promise.resolve(rewardBehavior === 'success');
+  },
+  requestInterstitialAd: function(){ return Promise.resolve(); }
+};
+
+// ---- the 15% threshold, spot-checked against the EXACT real cost of a real upgrade (Simple Capacity tier 0 = 25, not a hand-picked fictional number) ----
+upgrades.jarCapTiers.simple = 0;
+var realCapCost = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })); // 25
+var eightyFivePct = Math.ceil(realCapCost * 0.85 - 1e-9);
+coins = eightyFivePct - 1;
+__check('one coin below the real 85% threshold (cost=' + realCapCost + ', balance=' + coins + ') is NOT eligible', almostAffordableEligible(__targetCap) === false, 'cost=' + realCapCost + ' coins=' + coins);
+coins = eightyFivePct;
+__check('exactly at the real 85% threshold (cost=' + realCapCost + ', balance=' + coins + ') IS eligible', almostAffordableEligible(__targetCap) === true, 'cost=' + realCapCost + ' coins=' + coins);
+
+// ---- the spec's own worked Case A-F, using a real retrieved cost for the "1,000" example (illustrative labels match the spec 1:1, the underlying cost is whatever this jar/tier's real bandedTierCost() output is) ----
+upgrades.jarCapTiers.simple = 5; // a mid-ladder tier with a bigger, more realistic cost
+var cost1000ish = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+var target1000ish = { kind: 'jarCap', jarKey: 'simple' };
+coins = Math.floor(cost1000ish * 0.849);
+__check('Case A (~84.9% of cost): NOT eligible', almostAffordableEligible(target1000ish) === false, 'cost=' + cost1000ish + ' coins=' + coins);
+coins = Math.ceil(cost1000ish * 0.85);
+__check('Case B (~85% of cost): eligible', almostAffordableEligible(target1000ish) === true, 'cost=' + cost1000ish + ' coins=' + coins);
+coins = Math.floor(cost1000ish * 0.9);
+__check('Case C (~90% of cost): eligible', almostAffordableEligible(target1000ish) === true, 'cost=' + cost1000ish + ' coins=' + coins);
+coins = cost1000ish - 1;
+__check('Case D (cost - 1): eligible for exactly +1', almostAffordableEligible(target1000ish) === true && almostAffordableShortfall(target1000ish) === 1, 'cost=' + cost1000ish + ' coins=' + coins);
+coins = cost1000ish;
+__check('Case E (cost exactly): normal upgrade only, no ad', almostAffordableEligible(target1000ish) === false);
+coins = cost1000ish + 200;
+__check('Case F (well above cost): normal upgrade only, no ad', almostAffordableEligible(target1000ish) === false);
+upgrades.jarCapTiers.simple = 0;
+
+// ---- exact-shortfall reward (E4 Section 30) ----
+upgrades.jarCapTiers.simple = 5;
+var costForReward = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+coins = costForReward - Math.round(costForReward * 0.1); // ~90%, comfortably eligible
+var expectedShortfall = costForReward - coins;
+rewardBehavior = 'success';
+var coinsBeforeAd = coins;
+requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' });
+return __tick(5).then(function(){
+  __check('a successful Almost Affordable ad grants EXACTLY the shortfall (' + expectedShortfall + '), never the full cost and never a fixed amount', coins === coinsBeforeAd + expectedShortfall && coins === costForReward, 'coins=' + coins + ' cost=' + costForReward);
+  __check('requestRewardedAd was called with the reserved WORKSHOP_SMALL_UPGRADE id, not a new one', rewardCalls[rewardCalls.length - 1] === 'lumora-workshop-small-upgrade');
+  __check('the granted coins persist through the existing saveData mechanism -- no new save field', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
+  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+
+  // ---- one ad = one shortfall: purchasing immediately afterward drains the balance to exactly 0, no leftover ----
+  var boughtOk = tryUpgradeJarCap('simple');
+  __check('the upgrade purchases normally immediately after the ad reward', boughtOk === true);
+  __check('one ad = one shortfall -- after purchasing, the balance is exactly 0, no leftover reward retained', coins === 0, 'coins=' + coins);
+  upgrades.jarCapTiers.simple = 0;
+
+  // ---- duplicate callback protection: a double-tap while a request is pending fires the ad exactly once ----
+  upgrades.jarCapTiers.simple = 5;
+  var costDup = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+  coins = costDup - Math.round(costDup * 0.1);
+  var callsBeforeDup = rewardCalls.length;
+  requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' });
+  requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' }); // double tap while pending
+  __check('a double tap while an Almost Affordable request is pending does not fire a second ad request', rewardCalls.length === callsBeforeDup + 1, 'calls=' + (rewardCalls.length - callsBeforeDup));
+  return __tick(5).then(function(){
+    var coinsAfterDupAd = coins;
+    __check('the double-tap resolved into exactly one reward, not two', coinsAfterDupAd === costDup);
+    upgrades.jarCapTiers.simple = 0;
+
+    // ---- mid-ad balance change: the reward recalculates the shortfall AT CALLBACK TIME, never trusting the amount from when the ad was requested ----
+    // Both the initial AND the bumped balance must stay within the real
+    // 15% eligibility window (a balance too far below cost would make
+    // requestAlmostAffordable() correctly refuse to even request an ad at
+    // all, which would silently defeat this exact test -- caught live
+    // while writing it).
+    upgrades.jarCapTiers.simple = 5;
+    var costMid = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+    coins = costMid - 15;
+    var originalShortfall = almostAffordableShortfall({ kind: 'jarCap', jarKey: 'simple' });
+    __check('mid-ad setup: the shortfall at request time is a real, nonzero amount', originalShortfall > 0, 'got=' + originalShortfall);
+    __check('mid-ad setup: the initial balance is genuinely within the 15% eligible window', almostAffordableEligible({ kind: 'jarCap', jarKey: 'simple' }) === true, 'coins=' + coins + ' cost=' + costMid);
+    requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' });
+    coins += 10; // the player earns coins from real gameplay WHILE the ad is playing, before the callback fires
+    return __tick(5).then(function(){
+      __check('the actual reward reflects the balance AT CALLBACK TIME (originalShortfall-10), never the stale amount calculated when the ad was requested', coins === costMid, 'coins=' + coins + ' cost=' + costMid);
+      upgrades.jarCapTiers.simple = 0;
+
+      // ---- if the player already affords it by the time the callback fires, the reward is exactly 0 -- never an exploit ----
+      upgrades.jarCapTiers.simple = 5;
+      var costFull = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+      coins = costFull - 100;
+      requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' });
+      coins = costFull + 500; // the player fully affords it (and then some) before the callback fires
+      return __tick(5).then(function(){
+        __check('a callback that resolves after the player already affords the upgrade grants exactly 0 extra coins -- never a duplicate/excess grant', coins === costFull + 500, 'coins=' + coins);
+        upgrades.jarCapTiers.simple = 0;
+
+        // ---- ad failure/cancellation/rejection/throw: no coins granted, Workshop stays usable ----
+        upgrades.jarCapTiers.simple = 5;
+        var costFail = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+        coins = costFail - Math.round(costFail * 0.1);
+        var coinsBeforeFail = coins;
+        rewardBehavior = 'false';
+        requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' });
+        return __tick(5).then(function(){
+          __check('an explicitly declined/failed ad (res=false) grants no coins', coins === coinsBeforeFail);
+          rewardBehavior = 'reject';
+          requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' });
+          return __tick(5).then(function(){
+            __check('a rejected ad promise grants no coins', coins === coinsBeforeFail);
+            rewardBehavior = 'throw';
+            var threwSync = false;
+            try { requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' }); } catch (e) { threwSync = true; }
+            __check('a synchronous throw from requestRewardedAd() does not propagate out of requestAlmostAffordable()', !threwSync);
+            __check('a synchronous throw grants no coins', coins === coinsBeforeFail);
+            var threwDraw = false;
+            try { screen = 'shop'; shopTab = 'capacity'; draw(); } catch (e) { threwDraw = true; }
+            __check('the Workshop remains fully usable (draws without throwing) after an ad failure', !threwDraw);
+            rewardBehavior = 'success';
+            upgrades.jarCapTiers.simple = 0;
+
+            // ---- max level: Almost Affordable never appears once a line is maxed ----
+            var simpleJarE4 = JARS.find(function(j){ return j.key === 'simple'; });
+            upgrades.jarCapTiers.simple = simpleJarE4.maxCapacity - simpleJarE4.capacity; // fully maxed
+            coins = 0;
+            __check('a maxed line is never Almost-Affordable-eligible, regardless of balance', almostAffordableEligible({ kind: 'jarCap', jarKey: 'simple' }) === false);
+            var callsBeforeMaxed = rewardCalls.length;
+            requestAlmostAffordable({ kind: 'jarCap', jarKey: 'simple' });
+            __check('requesting an ad for a maxed line is a no-op -- no ad request fires', rewardCalls.length === callsBeforeMaxed);
+            upgrades.jarCapTiers.simple = 0;
+
+            // ---- Coin Value (the shared line) also supports Almost Affordable, using the exact same functions ----
+            upgrades.lightTier = 5;
+            var lightCost = TIER_LINES.light.prices[5];
+            coins = lightCost - Math.round(lightCost * 0.1);
+            __check('Coin Value (kind: light) is Almost-Affordable-eligible using the exact same threshold function', almostAffordableEligible({ kind: 'light' }) === true);
+            upgrades.lightTier = 60; coins = 0;
+            __check('a maxed Coin Value is never eligible', almostAffordableEligible({ kind: 'light' }) === false);
+            upgrades.lightTier = 0;
+
+            // ---- a per-jar STAT line (not just Capacity) also supports Almost Affordable ----
+            upgrades.reachTiers.simple = 10;
+            var reachCost = jarStatUpgradeCost('reach', JARS.find(function(j){ return j.key === 'simple'; }));
+            coins = reachCost - Math.round(reachCost * 0.1);
+            __check('a per-jar stat line (reach) is Almost-Affordable-eligible using the exact same threshold function', almostAffordableEligible({ kind: 'jarStat', statKey: 'reach', jarKey: 'simple' }) === true);
+            upgrades.reachTiers.simple = 0;
+
+            // ---- handleUpgradeButtonTap() routes correctly: ad when eligible, normal purchase otherwise ----
+            upgrades.jarCapTiers.simple = 5;
+            var costRoute = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+            coins = costRoute - Math.round(costRoute * 0.1); // eligible for the ad
+            var callsBeforeRoute = rewardCalls.length;
+            var buyFnCalled = false;
+            handleUpgradeButtonTap({ kind: 'jarCap', jarKey: 'simple' }, function(){ buyFnCalled = true; });
+            __check('handleUpgradeButtonTap() routes to the ad request when eligible, never calling the normal buy function', rewardCalls.length === callsBeforeRoute + 1 && buyFnCalled === false);
+            return __tick(5).then(function(){
+              coins = 100000; // now trivially affordable
+              var buyFnCalled2 = false;
+              handleUpgradeButtonTap({ kind: 'jarCap', jarKey: 'simple' }, function(){ buyFnCalled2 = true; });
+              __check('handleUpgradeButtonTap() routes to the normal buy function when already affordable, never requesting an ad', buyFnCalled2 === true && rewardCalls.length === callsBeforeRoute + 1);
+              upgrades.jarCapTiers.simple = 0; coins = 0;
+
+              // ---- drawing every upgrade card while Almost Affordable is actively eligible does not throw ----
+              upgrades.jarCapTiers.simple = 5;
+              var costDraw = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
+              coins = costDraw - Math.round(costDraw * 0.1);
+              upgrades.equippedJar = 'simple';
+              var threwCardDraw = false;
+              try {
+                screen = 'shop'; shopFrom = 'title';
+                ['capacity', 'range', 'magnet', 'light-value'].forEach(function(tab){ shopTab = tab; draw(); });
+              } catch (e) { threwCardDraw = true; }
+              __check('every Workshop tab draws without throwing while Almost Affordable is actively showing on a real card', !threwCardDraw);
+              upgrades.jarCapTiers.simple = 0; coins = 0;
+            });
+          });
+        });
+      });
+    });
+  });
+});
+});
+`);
+
+// A real fresh-context load confirms Almost Affordable eligibility is
+// computed correctly against a MIGRATED existing player's real state --
+// not a separate/duplicate check path.
+scenario('lumora2-e4-load-existing-player', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 5, coins: 0, upgrades: { tutorialDone: true, lightTier: 2, ownedJars: { simple: true }, equippedJar: 'simple', jarCapTiers: { simple: 0 } } }));
+return __tick(5).then(function(){
+  ytgame.ads = { requestRewardedAd: function(){ return Promise.resolve(true); }, requestInterstitialAd: function(){ return Promise.resolve(); } };
+  // migrated Coin Value level (per E2's own migration: old level 2 -> new level 16)
+  __check('an existing migrated player\\'s real Coin Value level is used for Almost Affordable eligibility, not a separate recomputation', upgrades.lightTier === 16);
+  var cost = TIER_LINES.light.prices[upgrades.lightTier];
+  coins = cost - Math.round(cost * 0.1); // within threshold
+  __check('an existing migrated player within the 15% threshold on their real migrated level sees Almost Affordable', almostAffordableEligible({ kind: 'light' }) === true);
+  coins = Math.floor(cost * 0.5); // well outside threshold
+  __check('the same existing migrated player far from affording it does NOT see Almost Affordable', almostAffordableEligible({ kind: 'light' }) === false);
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
