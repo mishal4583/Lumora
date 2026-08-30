@@ -1352,6 +1352,78 @@ const JARS=[
   // reads nowhere in gameplay math.
   {key:'aurora',  name:'Aurora Jar',      price:4000, capacity:12, maxCapacity:25, reachBase:110, reachMax:150, magnetReachBase:255, magnetReachMax:340, durationBase:7.0, durationMax:13.0, lightValueBase:1.40, lightValueMax:1.85, glass:'rgba(199,175,245,0.20)', glassStroke:'rgba(219,195,255,0.55)', lid:'#7a5a8a', lidRim:'#5c4268', glow:GLOW_Y, aurora:true, desc:'The last Glowkeeper never finished making this one. Perhaps they were waiting for someone.'}
 ];
+// Lumora 2.0 Phase 10: Jar Identity. Audit finding (see this phase's own
+// report): every JARS column above -- price, capacity, reach, magnetReach,
+// duration, lightValue -- already increases monotonically from simple to
+// aurora, with no jar ever trading a stat away for another. That's a real
+// "buy the next tier" progression, not a playstyle choice, and none of it
+// is touched here (per direct instruction: no price/capacity/reach/
+// magnetReach/duration/lightValue number changes in this phase). This is
+// purely an ADDITIVE identity layer: one small, distinct passive per jar,
+// layered on top via the existing multiplicative-layer discipline
+// (nightEventCoinMult()/contractCoinMult() already stack this way) rather
+// than a second stat system. Two jars deliberately get NO new passive:
+// simple (the free baseline -- "no bonus" is itself an honest, legitimate
+// identity) and aurora (already the highest stat in every single column;
+// stacking a 6th lever on the already-strongest jar would directly
+// contradict "no jar should be the universal best choice" -- its
+// identity is its own already-existing prestige treatment: highest raw
+// stats, exclusive Aurora Trail, shimmer FX). The remaining four each get
+// exactly one small (10-15%) bonus, deliberately smaller than every
+// existing comparable multiplier in the file (contractCoinMult() reaches
+// 1.65, nightEventCoinMult() 1.20) so no identity reads as "obviously
+// mandatory." Each bonus's THEME was picked to match that jar's own
+// existing name/flavor text, not assigned arbitrarily -- see each
+// entry's own comment.
+const JAR_IDENTITY={
+  simple:  { name:'Balanced',     effect:'No bonus, no drawback — the honest baseline every other jar is measured against.' },
+  // "Made for Glowkeepers who learned to carry the light farther" -- its
+  // own existing desc already names range; the identity effect is a small
+  // EXTRA boost specifically while the Glow Magnet buff is active (not a
+  // flat passive reach increase, which would just be another stat), so it
+  // rewards actually chasing the magnet pickup, a playstyle choice.
+  lantern: { name:'Range Keeper', effect:'The Glow Magnet reaches 10% farther while active.' },
+  // "Its glass holds a little moonlight of its own" -- ties directly to
+  // Phase 4's existing Night Event system (S.eventActive), not a new
+  // detector.
+  moon:    { name:'Night Watcher', effect:'+10% coins on deliveries during an active Night Event.' },
+  // "Cut facets scatter each spark into a dozen smaller ones" -- ties to
+  // the existing Glow Chain milestone rewards (CHAIN_MILESTONES), not a
+  // new chain mechanic.
+  crystal: { name:'Chain Keeper', effect:'Glow Chain milestone rewards are 15% larger.' },
+  // Named after the Elder firefly type itself -- ties to the existing
+  // isRareType() rarity classification (the same one Weekly Progression's
+  // own 'rare' goal already reuses), not a new rarity system.
+  elder:   { name:'Rare Seeker',  effect:'+15% coins on deliveries that include a rare firefly.' },
+  // Kept deliberately short (unlike the other 5 effect strings) -- Aurora's
+  // OWN desc already wraps to 2 lines in the equipped-jar hero card
+  // (jar.aurora shifts the identity block's start down), leaving less
+  // vertical room before the card's fixed Capacity anchor than any other
+  // jar has. A longer sentence here was verified live to overflow into
+  // "CAPACITY" below it -- found and fixed during this phase's own live
+  // browser check, not guessed at.
+  aurora:  { name:'Prestige',     effect:'Its already-leading stats are its own bonus.' }
+};
+function jarIdentity(jarObjOrKey){
+  const key=typeof jarObjOrKey==='string'?jarObjOrKey:jarObjOrKey.key;
+  return JAR_IDENTITY[key]||JAR_IDENTITY.simple;
+}
+// One small function per effect, each a single equipped-jar key check --
+// cheap (currentJar() is already called many times per frame elsewhere in
+// this file), never a scan of all jars, no per-frame polling of its own.
+function jarIdentityCoinMult(type){
+  const jar=currentJar();
+  if(jar.key==='elder'&&isRareType(type))return 1.15;
+  if(jar.key==='moon'&&S.eventActive)return 1.10;
+  return 1;
+}
+function jarIdentityMagnetRangeMult(){ return currentJar().key==='lantern'?1.10:1; }
+function jarIdentityChainRewardMult(){ return currentJar().key==='crystal'?1.15:1; }
+// The ONE place a chain milestone's base reward becomes its actual granted
+// amount -- used by BOTH advanceChain()'s real grant and the D2 reward-chip
+// display (see D2_REWARD_BY_N's own comment), so the on-screen number can
+// never disagree with what was actually added to coins.
+function chainMilestoneReward(baseReward){ return Math.round(baseReward*jarIdentityChainRewardMult()); }
 // Per-jar capacity progress: upgrades.jarCapTiers[key] is how many +1
 // upgrades that SPECIFIC jar has had purchased, independent of every other
 // jar and independent of which one is currently equipped — "equipped jar +
@@ -2348,7 +2420,13 @@ function advanceChain(){
   if(S.chain>S.bestChainThisRound)S.bestChainThisRound=S.chain; // D5: round-scoped peak, survives the chain itself resetting to 0 on a miss
   const m=CHAIN_MILESTONES.find(m=>m.n===S.chain);
   if(m){
-    coins+=m.reward;
+    // Phase 10: Crystal's Chain Keeper identity (+15% on this exact
+    // reward) -- via chainMilestoneReward(), the same function the D2
+    // reward-chip display reads, so the two can never disagree. Rounded
+    // since coins is always a whole number (chain rewards bypass
+    // grantDeliveryCoins()'s own coinFraction accumulator entirely, same
+    // as before this phase; only the value going in changes).
+    coins+=chainMilestoneReward(m.reward);
     if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
     // D2: the readout itself flares and pays out (see drawChainMoment()) --
     // NOT capMilestoneFx()'s shared banner slot any more. Duration escalates
@@ -4541,7 +4619,14 @@ function update(dt){
   // single magnetRadiusForRun(base) -- passive and buffed reach are now two
   // independently purchasable tiers (see TIER_LINES), not one shared bonus
   // applied to both.
-  const radius=S.magnetT>0?magnetReachForRun():jarReachForRun();
+  // Phase 10: Lantern's Range Keeper identity (+10% reach) applies ONLY to
+  // the magnet-buffed radius, never the passive one -- a situational
+  // playstyle bonus (rewards chasing the Magnet pickup), not a flat stat
+  // increase. Mirrored byte-for-byte at the draw-only reticle below (see
+  // that site's own comment) so the visible guide circle can never drift
+  // from the real catch radius -- the exact "reticle bug" class this
+  // file's own history already flags as a real bug once fixed.
+  const radius=S.magnetT>0?magnetReachForRun()*jarIdentityMagnetRangeMult():jarReachForRun();
   const maxLocks=S.magnetT>0?3:1;
   const jx=S.jar.x, jy=S.jar.y-14;
 
@@ -4816,7 +4901,14 @@ function update(dt){
       // D3: a 5th layer, contractCoinMult() -- Peaceful/Rush/Moth's own
       // "+N% coins" reward, defaulting to 1 for Collector (a flat Workshop
       // Token instead, granted once at finalizeNight()) and for no contract.
-      grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun()*nightEventCoinMult()*contractCoinMult());
+      // Phase 10: a 6th layer, jarIdentityCoinMult(s.type) -- Elder's Rare
+      // Seeker (+15% when THIS delivered firefly is a rare type) / Moon's
+      // Night Watcher (+10% during an active event), defaulting to 1 for
+      // every other jar/situation. Checked per-delivered-firefly, matching
+      // how this whole call site already runs once per s (spark), not once
+      // per batch -- Elder's bonus correctly applies only to the rare
+      // firefly itself within a mixed-type jar, never the whole delivery.
+      grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun()*nightEventCoinMult()*contractCoinMult()*jarIdentityCoinMult(s.type));
       questProgress('deliver',s.type); // any type counts toward "deliver 20 fireflies" — same delivery moment as coins/score above
       // Lumora 2.0 Phase 1: same authoritative delivery-success moment, not
       // catch time -- "deliver X" must count actual successful deliveries,
@@ -5483,8 +5575,10 @@ function drawJar(){
   // Reticle Fix: this dashed guide circle is the player-visible reticle for
   // the SAME radius update() uses to acquire locks -- it calls the real
   // jarReachForRun()/magnetReachForRun() functions, so it always reflects
-  // real current reach, both tier lines included.
-  const rad=S.magnetT>0?magnetReachForRun():jarReachForRun();
+  // real current reach, both tier lines included. Phase 10: also mirrors
+  // the SAME jarIdentityMagnetRangeMult() factor the real lock-radius site
+  // applies, for the same reason.
+  const rad=S.magnetT>0?magnetReachForRun()*jarIdentityMagnetRangeMult():jarReachForRun();
   ctx.globalAlpha=S.magnetT>0?0.12:0.05;
   ctx.strokeStyle='#ffe9b0'; ctx.lineWidth=2; ctx.setLineDash([4,9]);
   ctx.beginPath(); ctx.arc(x,y-14,rad,0,6.28); ctx.stroke(); ctx.setLineDash([]);
@@ -6148,7 +6242,15 @@ const D2_T_WARM ={num:'#ffb347',   border:d2gold(0.30),wash:d2gold(0.05),bl:0.05
 const D2_T_HOT  ={num:'#ffb347',   border:d2gold(0.40),wash:d2gold(0.08),bl:0.08, glyph:'burst',gc:'#fbb541',     gr:6,  gb:8};
 const D2_T_BLAZE={num:'#ffd76a',   border:d2gold(0.55),wash:d2gold(0.12),bl:0.12, glyph:'burst',gc:'#ffd76a',     gr:6.5,gb:12};
 function d2TierOf(n){ return n>=15?D2_T_BLAZE:n>=10?D2_T_HOT:n>=5?D2_T_WARM:D2_T_LIVE; }
-const D2_REWARD_BY_N={}; CHAIN_MILESTONES.forEach(m=>D2_REWARD_BY_N[m.n]='+'+m.reward); // derived, not duplicated
+// Phase 10: this used to be a pre-formatted '+N' string, baked once at
+// load from CHAIN_MILESTONES' own base reward. Now that Crystal's Chain
+// Keeper identity can boost the ACTUAL granted amount (see
+// chainMilestoneReward()), a static string would silently go stale --
+// this stays the base-reward-by-length lookup only; the displayed string
+// is formatted live at the draw call below, through the exact same
+// chainMilestoneReward() function advanceChain()'s real grant uses, so
+// the readout can never disagree with the payout.
+const D2_REWARD_BY_N={}; CHAIN_MILESTONES.forEach(m=>D2_REWARD_BY_N[m.n]=m.reward);
 function d2EmberGlyph(cx,cy,r,col,blur){
   ctx.save(); if(blur){ ctx.shadowColor=col; ctx.shadowBlur=blur; }
   ctx.beginPath(); ctx.moveTo(cx,cy-r*1.4);
@@ -6324,7 +6426,7 @@ function d2DrawChainMoment(elapsed,n){
       ctx.restore();
     }
   }
-  d2DrawRewardChip(m,D2_REWARD_BY_N[n]||'+5',d2seg(elapsed,0.10,high?0.74:0.62));
+  d2DrawRewardChip(m,'+'+chainMilestoneReward(D2_REWARD_BY_N[n]||5),d2seg(elapsed,0.10,high?0.74:0.62));
   const cnt=top?18:n>=15?14:high?10:0;
   const rr=d2rnd(613);
   for(let i=0;i<cnt;i++){
@@ -8177,7 +8279,16 @@ function drawEquippedJarHero(){
     ctx.fillText('★ ULTIMATE JAR ★',tx,r.y+82);
   }
   ctx.fillStyle=LUM_LAVENDER; ctx.font='14px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='top';
-  wrapText(jar.desc,tx,jar.aurora?r.y+92:r.y+80,r.x+r.w-tx-16,18,'left');
+  const descEnd=wrapText(jar.desc,tx,jar.aurora?r.y+92:r.y+80,r.x+r.w-tx-16,18,'left');
+  // Phase 10: Jar Identity -- one small name+effect line, positioned off
+  // wrapText()'s own returned end-Y so it can never overlap the
+  // description above regardless of how many lines that wrapped to, per
+  // direct instruction not to bury identity inside a long description.
+  const identity=jarIdentity(jar);
+  ctx.fillStyle=WS_GOLD_HEADER; ctx.font='600 11px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText('◆ '+identity.name.toUpperCase(),tx,descEnd+4);
+  ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 11px Georgia,serif';
+  wrapText(identity.effect,tx,descEnd+12,r.x+r.w-tx-16,14,'left');
   lumEyebrow('Capacity',tx,r.y+r.h-46,'left',12,WS_GOLD_HEADER);
   // Golden Typography Color Refinement: capacity number is a "stat value"
   // -> warm ivory-gold (WS_GOLD_SOFT), not plain ivory.
@@ -8275,6 +8386,12 @@ function drawJarCardsGrid(){
       ctx.fillText('★ ULTIMATE JAR ★',rect.x,top+61);
       artY=top+128;
     }
+    // Phase 10: a short identity name only (the full effect line lives in
+    // the roomier Equipped Jar Hero above, not squeezed into this compact
+    // grid card) -- shifted down 13px on Aurora's card so it never crowds
+    // the ULTIMATE JAR tag right above it.
+    ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='italic 10px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+    ctx.fillText('◆ '+jarIdentity(jar).name.toUpperCase()+' ◆',rect.x,jar.aurora?top+74:top+58);
     lumJarHalo(rect.x,artY,jar.aurora?'rgba(168,107,255,1)':jar.glow,37,jar.aurora?0.48:0.36);
     drawJarPreview(rect.x,artY,0.76,jar,0.55);
     const stateY=top+rect.h-20;

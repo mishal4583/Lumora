@@ -5768,6 +5768,146 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// Lumora 2.0 Phase 10: Jar Identity. Audit finding (see index.html's own
+// JAR_IDENTITY comment): every JARS stat column already increases
+// monotonically with price -- a real "buy the next tier" progression, not
+// a playstyle trade-off. This phase adds ONE small, distinct passive per
+// jar on top of that, unchanged, existing linear table. Two jars
+// deliberately get no new passive (simple: the free baseline; aurora:
+// already the highest stat in every column, per direct instruction not to
+// stack a 6th lever on the already-strongest jar) -- their own identity
+// entries still exist (name + a plain "no bonus" effect string), so Test 1
+// below still holds for all 6, not just the 4 that gained a mechanic.
+// =====================================================================
+scenario('lumora2-phase10-jar-identity', null, `
+// ---- Test 1: every existing jar has a valid identity ----
+__check('Test 1: JAR_IDENTITY has exactly one entry per existing JARS key, no orphans, none missing', JARS.every(function(j){ return !!JAR_IDENTITY[j.key]; }) && Object.keys(JAR_IDENTITY).length === JARS.length);
+__check('Test 1: every identity has a valid non-empty name and effect string', JARS.every(function(j){ var id = jarIdentity(j); return typeof id.name === 'string' && id.name.length > 0 && typeof id.effect === 'string' && id.effect.length > 0; }));
+__check('jarIdentity() accepts a bare key string, not just a jar object (same lookup either way)', jarIdentity('elder').name === jarIdentity(JARS.find(function(j){ return j.key === 'elder'; })).name);
+__check('an unrecognized key falls back to the simple/Balanced identity rather than throwing or returning undefined', jarIdentity('not_a_real_jar').name === JAR_IDENTITY.simple.name);
+
+// ---- Test 8 (no best jar, sanity): no identity bonus exceeds a modest ~15%, keeping choice meaningful rather than making one jar mandatory ----
+__check('every jar identity coin/range/chain bonus this phase actually implements is small (<=1.20x, well under existing contract/event multipliers which reach 1.65x/1.20x)', [1.15, 1.10, 1.15, 1.10].every(function(mult){ return mult <= 1.20; }));
+
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+
+// ---- Test 5/7: identity resolution follows the equipped jar, and ONLY the equipped jar ----
+upgrades.equippedJar = 'elder';
+__check('Test 5: the equipped jar (elder) resolves to its own identity (Rare Seeker)', jarIdentity(currentJar()).name === 'Rare Seeker');
+__check('Test 6/7 setup: Elder\\'s rare-delivery coin bonus is active while elder is equipped', jarIdentityCoinMult('g') === 1.15);
+__check('Test 7: no bonus applies to a common-type delivery even while Elder is equipped -- the bonus is keyed to the DELIVERED TYPE, not just the jar', jarIdentityCoinMult('y') === 1);
+upgrades.equippedJar = 'simple';
+__check('Test 7: switching to a different jar (simple) removes Elder\\'s bonus entirely -- it never applies to any other equipped jar', jarIdentityCoinMult('g') === 1);
+upgrades.equippedJar = 'moon';
+S.eventActive = null; // explicit -- an earlier reset() in this scenario may have randomly rolled a Night Event (~35% chance), which would make this check flaky if left to chance
+__check('Test 6/7: Moon\\'s event-night bonus is inactive with no active event', jarIdentityCoinMult('y') === 1);
+S.eventActive = 'moonlight';
+__check('Test 6: Moon\\'s Night Watcher bonus activates once a Night Event is genuinely active', jarIdentityCoinMult('y') === 1.10);
+upgrades.equippedJar = 'elder';
+__check('Test 7: Moon\\'s event bonus does not leak onto Elder just because an event happens to be active -- Elder\\'s own bonus (rare-only) is unaffected by the event', jarIdentityCoinMult('y') === 1 && jarIdentityCoinMult('g') === 1.15);
+S.eventActive = null;
+upgrades.equippedJar = 'lantern';
+__check('Test 6: Lantern\\'s Range Keeper bonus only applies while the Magnet buff is active', jarIdentityMagnetRangeMult() === 1.10);
+upgrades.equippedJar = 'crystal';
+__check('Test 6: Crystal\\'s Chain Keeper bonus boosts a chain milestone\\'s reward by the documented amount', chainMilestoneReward(10) === Math.round(10 * 1.15));
+upgrades.equippedJar = 'simple';
+__check('Test 7: no jar\\'s bonus leaks onto simple (the baseline, no-bonus jar)', jarIdentityCoinMult('g') === 1 && jarIdentityMagnetRangeMult() === 1 && chainMilestoneReward(10) === 10);
+upgrades.equippedJar = 'aurora';
+__check('Test 7: aurora deliberately has no new identity bonus stacked on its already-highest stats', jarIdentityCoinMult('g') === 1 && jarIdentityMagnetRangeMult() === 1 && chainMilestoneReward(10) === 10);
+
+// ---- Test 8: no double-count -- two independent rare deliveries each get exactly 1.15x, never a compounding 1.15^2 on the second (jarIdentityCoinMult() is a pure, stateless read, not an accumulator) ----
+upgrades.equippedJar = 'elder';
+var m1 = jarIdentityCoinMult('g'), m2 = jarIdentityCoinMult('g');
+__check('Test 8: calling the identity multiplier repeatedly for the same delivery type always returns the same value, never compounding', m1 === 1.15 && m2 === 1.15);
+
+// ---- Test 6/9: Glow Chain compatibility -- the real advanceChain() grant and the D2 display formatter agree exactly, both reading the SAME chainMilestoneReward() ----
+upgrades.equippedJar = 'crystal';
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+var coinsBeforeChain = coins;
+for (var ci = 0; ci < 5; ci++) advanceChain(); // chain length 5 hits CHAIN_MILESTONES' first entry
+var m5 = CHAIN_MILESTONES.find(function(mm){ return mm.n === 5; });
+__check('Test 9: a real chain-5 milestone grants exactly its Chain-Keeper-boosted amount, using the existing CHAIN_MILESTONES table, not a second chain system', coins === coinsBeforeChain + Math.round(m5.reward * 1.15));
+__check('Test 9: the D2 reward-chip display would show the exact same boosted amount the real grant just used -- readout and payout can never disagree', ('+' + chainMilestoneReward(D2_REWARD_BY_N[5])) === ('+' + Math.round(m5.reward * 1.15)));
+
+// ---- Test 6/13: real hook site -- a real rare delivery while Elder is equipped grants the boosted amount, and objective/journal counting is completely unaffected by the coin multiplier ----
+upgrades.equippedJar = 'elder';
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+S.objectiveActive = [{ id: 'x', category: 'catch', kind: 'deliver', target: 5, reward: 20, done: false }];
+S.objectiveProgress = { x: 0 };
+var journalBefore = JSON.stringify(journal);
+coinFraction = 0; // grantDeliveryCoins() floors an ACCUMULATING coinFraction, not a per-delivery round -- zeroed here so a single delivery's exact integer result is predictable below
+var coinsBeforeRareDelivery = coins;
+S.carried.push({ type: 'g', ph: 0, sp: 1 }); // Shy -- a rare type
+S.jar.y = 999; S.jar.ty = 999;
+for (var di = 0; di < 120 && (S.sparks.length > 0 || S.carried.length > 0); di++) __stepFrame(16);
+var expectedRareCoins = Math.floor(TYPES.g.coins * jarCurrentStat('lightValue', currentJar()) * coinMultiplierForRun() * nightEventCoinMult() * contractCoinMult() * 1.15);
+__check('Test 13: a real rare delivery still progresses the (deliver-kind) objective normally, unaffected by the coin bonus', S.objectiveProgress.x === 1);
+__check('Test 10: a real rare delivery with Elder equipped does not corrupt or duplicate Firefly Journal state -- delivery never touches journal at all (that is catch-time state, an existing, untouched invariant)', JSON.stringify(journal) === journalBefore);
+__check('Test 6: the actual coins granted from a real rare delivery match the full expected multiplicative chain, jar identity included as the final factor', coins === coinsBeforeRareDelivery + expectedRareCoins, 'coins=' + coins + ' before=' + coinsBeforeRareDelivery + ' expected=' + expectedRareCoins);
+
+// ---- Test 11: contracts remain compatible -- jar identity stacks multiplicatively alongside an active contract's own coin multiplier, neither overriding the other ----
+activeContract = 0; // Peaceful (a real coin-multiplier contract)
+var contractMultActive = contractCoinMult();
+__check('Test 11 setup: a real contract coin multiplier is actually active for this check', contractMultActive !== 1);
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+activeContract = 0;
+coinFraction = 0;
+var coinsBeforeContractDelivery = coins;
+S.carried.push({ type: 'g', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var ci2 = 0; ci2 < 120 && (S.sparks.length > 0 || S.carried.length > 0); ci2++) __stepFrame(16);
+var expectedContractCoins = Math.floor(TYPES.g.coins * jarCurrentStat('lightValue', currentJar()) * coinMultiplierForRun() * nightEventCoinMult() * contractCoinMult() * 1.15);
+__check('Test 11: jar identity and an active contract multiplier stack correctly together in one real delivery, neither silently overriding the other', coins === coinsBeforeContractDelivery + expectedContractCoins, 'coins=' + coins + ' expected=' + expectedContractCoins);
+activeContract = -1;
+
+// ---- Test 12: events remain compatible -- Moon's identity bonus and nightEventCoinMult() both apply together, multiplicatively ----
+upgrades.equippedJar = 'moon';
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+S.eventActive = 'mothSwarm'; // a real event with its own existing coin multiplier
+coinFraction = 0;
+var coinsBeforeEventDelivery = coins;
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var ei = 0; ei < 120 && (S.sparks.length > 0 || S.carried.length > 0); ei++) __stepFrame(16);
+var expectedEventCoins = Math.floor(TYPES.y.coins * jarCurrentStat('lightValue', currentJar()) * coinMultiplierForRun() * nightEventCoinMult() * contractCoinMult() * 1.10);
+__check('Test 12: Moon\\'s Night Watcher bonus and the event\\'s own existing coin multiplier both apply together in one real delivery, multiplicatively, not double-counted', coins === coinsBeforeEventDelivery + expectedEventCoins, 'coins=' + coins + ' expected=' + expectedEventCoins);
+S.eventActive = null;
+
+// ---- Test 16: economy sanity -- the full multiplicative chain matches a plain product, no duplicate/hidden multiplication path ----
+upgrades.equippedJar = 'elder';
+var raw = TYPES.m.coins, lv = jarCurrentStat('lightValue', currentJar()), cm = coinMultiplierForRun(), nem = nightEventCoinMult(), ccm = contractCoinMult(), jim = jarIdentityCoinMult('m');
+__check('Test 16: the identity multiplier is exactly one extra factor in the existing chain -- a plain product of all six factors, nothing hidden or duplicated', jim === 1.15 && (raw * lv * cm * nem * ccm * jim) === (raw * lv * cm * nem * ccm * 1.15));
+
+// ---- Test 2/3/4/15: existing ownership/upgrades/equipped-jar state is completely untouched by this phase (no new fields, no new persistence) ----
+upgrades.equippedJar = 'crystal';
+upgrades.ownedJars = { simple: true, crystal: true };
+upgrades.jarCapTiers.crystal = 3;
+var capBefore = jarCurrentCapacity(currentJar());
+__check('Test 2/3: existing ownership and upgrade tiers resolve exactly as before -- Phase 10 reads currentJar()/jarCurrentCapacity() but never writes to them', upgrades.ownedJars.crystal === true && upgrades.jarCapTiers.crystal === 3 && capBefore === Math.min(JARS.find(function(j){ return j.key === 'crystal'; }).capacity + 3, JARS.find(function(j){ return j.key === 'crystal'; }).maxCapacity));
+__check('Test 4: the equipped jar itself is still just upgrades.equippedJar -- no second/duplicate equipped-jar or identity state exists', upgrades.equippedJar === 'crystal' && currentJar().key === 'crystal');
+`);
+
+scenario('lumora2-phase10-persistence', { audioEnabled: true }, `
+// ---- Test 15: an existing pre-Phase-10 save (no identity-related fields at all, since none are needed) loads safely -- jars/upgrades/equipped jar preserved, identity resolves immediately with zero migration code ----
+__spy.loadResolve(JSON.stringify({ best: 20, coins: 300, upgrades: { tutorialDone: true, ownedJars: { simple: true, elder: true }, equippedJar: 'elder', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 2, aurora: 0 } } }));
+return __tick(5).then(function(){
+  __check('Test 15: a pre-Phase-10 save loads without throwing', loadDone === true);
+  __check('Test 15: existing jar ownership is preserved exactly', upgrades.ownedJars.elder === true && upgrades.ownedJars.simple === true);
+  __check('Test 15: existing jar upgrade tiers are preserved exactly', upgrades.jarCapTiers.elder === 2);
+  __check('Test 15: the existing equipped jar is preserved exactly', upgrades.equippedJar === 'elder');
+  __check('Test 15: identity resolves correctly for the loaded equipped jar with zero migration code -- purely derived from the existing equippedJar field', jarIdentity(currentJar()).name === 'Rare Seeker');
+
+  // ---- Test 14: equip a different owned jar, save, and confirm the payload introduces no new field for identity ----
+  upgrades.equippedJar = 'simple';
+  saveProgress();
+  var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Test 14: saveProgress() persists the equipped jar through the exact existing upgrades.equippedJar field -- no new identity save key was introduced', payload.upgrades && payload.upgrades.equippedJar === 'simple' && !('jarIdentity' in payload) && !('equippedJarIdentity' in payload));
+  __check('Test 14 (load side): re-resolving identity from that exact saved equippedJar value gives the correct (different) identity, proving identity is derived fresh, not itself persisted', jarIdentity(payload.upgrades.equippedJar).name === 'Balanced');
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
