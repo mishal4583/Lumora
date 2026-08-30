@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1054,7 +1054,7 @@ function continueFromOver(){
     // already is. Persisted immediately, before the interstitial branch below's
     // early `return`, so it survives even if that ad request never resolves.
     nightNumber++;
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens})); }catch(e){} }
     weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
@@ -1510,6 +1510,16 @@ let cosmeticsUnlocked=[]; // Reserved for a NEW cosmetic category a future phase
 // (upgrades.ownedJars/equippedJar, upgrades.ownedTrails/equippedTrail) is
 // completely UNCHANGED and remains the live system for jars/trails specifically
 // -- this is deliberately a separate, empty bucket, not a duplicate of either.
+// Phase 7: this is now that reserved bucket's first real tenant -- Village
+// Theme ownership. Entries are bare theme ids (VILLAGE_THEMES' own stable
+// ids, e.g. 'default'), no prefix needed since nothing else writes to this
+// array. 'default' is always considered owned regardless of what's in this
+// array (see isThemeOwned() below) -- the one fallback that can never be
+// missing, per direct instruction.
+let equippedTheme='default';
+// Session-only, NEVER persisted/saved (see startThemePreview() below) --
+// previewing a theme must not accidentally equip or survive a reload.
+let previewTheme=null;
 if(!YT){
   try{
     const l2=JSON.parse(localStorage.getItem('gk2_lumora2')||'{}');
@@ -1518,6 +1528,15 @@ if(!YT){
     if(Array.isArray(l2.eventHistory))eventHistory=l2.eventHistory;
     if(Array.isArray(l2.contractsCompleted))contractsCompleted=l2.contractsCompleted;
     if(Array.isArray(l2.cosmeticsUnlocked))cosmeticsUnlocked=l2.cosmeticsUnlocked;
+    // Not validated against VILLAGE_THEMES here on purpose -- VILLAGE_THEMES
+    // is declared much later in the file (see the ordering-hazard rule in
+    // CLAUDE.md: nothing at this top-level point may depend on a const
+    // declared below it). Storing the raw string is safe either way --
+    // effectiveTheme() (declared alongside VILLAGE_THEMES) re-validates on
+    // EVERY read and falls back to 'default' if it's ever invalid/unowned,
+    // so a corrupted or since-removed theme id sitting here is inert, never
+    // trusted, and never crashes anything.
+    if(typeof l2.equippedTheme==='string')equippedTheme=l2.equippedTheme;
     if(typeof l2.workshopTokens==='number'&&l2.workshopTokens>=0)workshopTokens=l2.workshopTokens;
   }catch(e){}
 }
@@ -1858,7 +1877,7 @@ function generateNightEvent(){
     // save, which already ran before this executes inside reset()).
     eventHistory.push(S.eventActive);
     weeklyProgress('events',1); // Lumora 2.0 Phase 9: same "the moment it's rolled" authoritative site
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,workshopTokens})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens})); }catch(e){} }
     saveProgress();
   } else {
     S.eventActive=null;
@@ -2474,6 +2493,74 @@ const TRAIL_COLORS=[
 // violet->blue->cyan->gold->violet cycle, distinctly more elaborate (4
 // hues, not 1-3) than any purchasable trail.
 const AURORA_TRAIL_HUES=['rgba(150,110,220,1)','rgba(110,150,230,1)','rgba(110,210,225,1)','rgba(225,195,140,1)'];
+// Lumora 2.0 Phase 7: Village Themes / Landscape Skins -- a cosmetic-only
+// catalog, same "stable id, never a display name" discipline as JARS/
+// TRAIL_COLORS above. Deliberately NOT the same thing as SEASON_PALETTES
+// (declared much earlier, near heartTier()) -- that's a pre-existing,
+// AUTOMATIC 6-skin system driven by the player's own best score (a
+// progression signal: "how good is your best run"), not a player-chosen
+// cosmetic, and this phase does not touch it, rename it, or repurpose it.
+// Confirmed by inspection before writing anything here: this project has
+// NO image/sprite asset pipeline at all (every visual is procedural canvas
+// drawing) and NO design_handoff folder for this phase (unlike D1-D5's
+// real Claude Design handoffs) -- so of the 7 requested themes (Moonlit,
+// Spring, Autumn, Winter, Rainy, Aurora, Mystic), NONE has an approved
+// visual design/palette/particle config to implement. Per direct
+// instruction ("do not fabricate, do not ship fake themes"), only the one
+// theme that already has real content is listed here: 'default', meaning
+// literally "render the village exactly as every existing system already
+// does" -- no override, no new palette, nothing to apply. The other 6 are
+// deliberately NOT listed as fake/locked stub entries with invented
+// descriptions (see this phase's final report for the exact missing-asset
+// list) -- adding them now with placeholder text would be exactly the
+// "fake theme" the instructions rule out, even if visually inert/locked.
+const VILLAGE_THEMES=[
+  { id:'default', name:'Village', desc:'The village as it has always looked.' }
+];
+// 'default' is always owned, unconditionally, regardless of what's in
+// cosmeticsUnlocked -- the one guaranteed-valid fallback, per direct
+// instruction ("there must always be a valid fallback/default theme").
+function isThemeOwned(id){ return id==='default'||cosmeticsUnlocked.includes(id); }
+function validVillageTheme(id){ return typeof id==='string'&&VILLAGE_THEMES.some(t=>t.id===id); }
+// The one centralized lookup a renderer would consult -- "currentTheme ->
+// theme configuration -> existing rendering systems," per direct
+// instruction, rather than scattering if(theme==='x') checks through
+// gameplay code. Re-validates EVERY call (cheap: at most a handful of
+// entries) rather than trusting a cached value, so a corrupted/since-
+// removed equippedTheme can never leak into a live read -- see the load-
+// site comments for why validation is deferred to here instead of at load
+// time. previewTheme takes priority when set, without ever touching the
+// persisted equippedTheme (see startThemePreview() below) -- this is also
+// the ONE seam a future real theme's visual override would hook into; with
+// only 'default' actually implemented, currentThemeConfig() always
+// resolves to "no override," so nothing downstream changes yet.
+function effectiveTheme(){
+  const id=previewTheme||equippedTheme;
+  return (validVillageTheme(id)&&isThemeOwned(id))?id:'default';
+}
+function currentThemeConfig(){ return VILLAGE_THEMES.find(t=>t.id===effectiveTheme())||VILLAGE_THEMES[0]; }
+// Session-only -- previewing never writes equippedTheme, never persists,
+// and is silently ignored for an unknown id (nothing to preview). Reusing
+// the SAME rendering systems everything else already uses (via
+// effectiveTheme()/currentThemeConfig()) rather than a second duplicate
+// village renderer, per direct instruction.
+function startThemePreview(id){ if(validVillageTheme(id))previewTheme=id; }
+function clearThemePreview(){ previewTheme=null; }
+// Equip: validates the id is a real theme AND actually owned before ever
+// touching equippedTheme -- an invalid or locked id is rejected outright,
+// the existing equipped theme is left completely alone (never partially
+// applied). Selecting the theme already equipped is a deliberate no-op
+// (still reports success) rather than a duplicate save, per direct
+// instruction. Persists through the exact existing mechanism cosmeticsUnlocked/
+// nightNumber/etc. already use -- no new save key.
+function equipTheme(id){
+  if(!validVillageTheme(id)||!isThemeOwned(id))return false;
+  if(equippedTheme===id)return true;
+  equippedTheme=id;
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens})); }catch(e){} }
+  saveProgress();
+  return true;
+}
 function currentJar(){ return JARS.find(j=>j.key===upgrades.equippedJar)||JARS[0]; }
 // normalizes a jar's `glow` field (either a hex string or an existing
 // 'rgba(r,g,b,a)' GLOW_* constant) down to a bare 'r,g,b' triple, for
@@ -2611,6 +2698,10 @@ if(YT&&YT.game&&YT.game.loadData){
       if(Array.isArray(d.eventHistory))eventHistory=d.eventHistory;
       if(Array.isArray(d.contractsCompleted))contractsCompleted=d.contractsCompleted;
       if(Array.isArray(d.cosmeticsUnlocked))cosmeticsUnlocked=d.cosmeticsUnlocked;
+      // Phase 7: same "store raw, effectiveTheme() re-validates on every
+      // read" reasoning as the non-YT load path's own comment -- a
+      // corrupted/since-removed theme id here is inert, never trusted.
+      if(typeof d.equippedTheme==='string')equippedTheme=d.equippedTheme;
       if(typeof d.workshopTokens==='number'&&d.workshopTokens>=0)workshopTokens=d.workshopTokens;
     }catch(e){}
   }).catch(()=>{})
@@ -2717,7 +2808,7 @@ function tutorialCheckAdvance(){
     if(!tutFirstMagnetHinted&&S.magnet){ tutFirstMagnetHinted=true; S.tutMagnetHintT=3; }
   }
 }
-let screen='title'; // 'title' | 'play' | 'shop' | 'village' | 'journal' | 'contract'
+let screen='title'; // 'title' | 'play' | 'shop' | 'village' | 'journal' | 'contract' | 'themes'
 // D3 (Claude Design spec): Contract Selection screen state. NOT part of S --
 // this screen exists BEFORE reset() ever runs for the night it's choosing
 // (S at this point is still whichever round just ended, or doesn't
@@ -3229,6 +3320,7 @@ const WELCOME_CLOSE_BTN={x:W/2,y:H*0.62,r:56}; // "tap to continue" — a big, g
 const SHOP_CLOSE_BTN={x:W-38,y:56,r:20}; // echoes PAUSE_BTN's corner, one screen up
 const VILLAGE_CLOSE_BTN={x:W-38,y:56,r:20};
 const JOURNAL_CLOSE_BTN={x:W-38,y:56,r:20};
+const THEMES_CLOSE_BTN={x:W-38,y:56,r:20}; // Phase 7
 // First-Night Tutorial panel geometry -- one fixed size/position for every
 // step (INTRO through MAGNET) rather than varying per step, so these rects
 // (single source of truth for both drawTutorialPanel() and the
@@ -3644,6 +3736,22 @@ cv.addEventListener('pointerdown',e=>{
     // cleanly via journalReading, so no reason to settle for "just open
     // the Journal" per the spec's own fallback clause.
     if(inRect(p.x,p.y,villageReadJournalRect())){ journalFrom='village'; journalTab='story'; journalReading=latestUnlockedChapterKey(); screen='journal'; return; }
+    // Phase 7: a second quiet text link, same pattern/style as the Journal
+    // link right above it -- Village Themes are about the village's
+    // APPEARANCE, so this is the natural existing home for it (per direct
+    // instruction to reuse an existing area rather than add new top-level
+    // navigation).
+    if(inRect(p.x,p.y,villageThemesLinkRect())){ screen='themes'; return; }
+    return;
+  }
+  if(screen==='themes'){
+    if(dist(p.x,p.y,THEMES_CLOSE_BTN.x,THEMES_CLOSE_BTN.y)<=hitR(THEMES_CLOSE_BTN)){ clearThemePreview(); screen='village'; return; }
+    for(const rect of themeRowRects()){
+      if(inRect(p.x,p.y,rect)){
+        if(isThemeOwned(rect.key))equipTheme(rect.key);
+        return;
+      }
+    }
     return;
   }
   if(screen==='journal'){
@@ -8515,6 +8623,13 @@ function villageReadJournalRect(){
   const q=currentQuest(), reqH=q?(q.done?100:210):88;
   return {x:W/2,y:reqY+reqH+28,w:220,h:26};
 }
+// Phase 7: a second quiet text link, 30px below the Journal one -- same
+// "single source of truth shared by draw and hit-test" discipline as
+// villageReadJournalRect() right above it.
+function villageThemesLinkRect(){
+  const rj=villageReadJournalRect();
+  return {x:rj.x,y:rj.y+30,w:220,h:26};
+}
 function drawVillageScreen(){
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
   const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
@@ -8657,6 +8772,66 @@ function drawVillageScreen(){
   ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillStyle='rgba(251,210,107,0.8)'; ctx.font='italic 13px Georgia,serif';
   ctx.fillText('Read Journal →',rj.x,rj.y);
+  // Phase 7: same quiet-link treatment, one row below -- minimal by design
+  // (see VILLAGE_THEMES' own comment): there is exactly one real theme
+  // right now, so this opens onto a short, honest list rather than a
+  // grid/carousel built ahead of any approved design or real content.
+  const vt=villageThemesLinkRect();
+  ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='italic 13px Georgia,serif';
+  ctx.fillText('🎨 Village Themes',vt.x,vt.y);
+  ctx.textAlign='center'; ctx.textBaseline='top';
+}
+// ---------- Phase 7: Village Themes screen ----------
+// Deliberately minimal -- same row-list shape journalRowRects()/
+// weeklyRowRects() already established (lumPanel row, glyph dot, name,
+// description, right-aligned status), not a new visual language, and not a
+// grid/carousel/preview-with-live-canvas invented ahead of any approved
+// design. With exactly one real theme, this list is honestly short; the
+// row shape already scales to more without changing anything here once
+// real themes exist.
+function themeRowRects(){
+  const top=230, h=78, gap=10;
+  return VILLAGE_THEMES.map((t,i)=>({key:t.id,x:20,y:top+i*(h+gap),w:W-40,h}));
+}
+function drawThemesScreen(){
+  const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
+  const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
+  scrim.addColorStop(0,'rgba(8,10,26,0.6)');
+  scrim.addColorStop(1,'rgba(8,10,26,0.85)');
+  ctx.fillStyle=scrim; ctx.fillRect(0,0,W,H);
+  wordmark(H*0.06,32,1);
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 16px Georgia,serif';
+  ctx.fillText('village themes',W/2,H*0.06+34);
+  ctx.fillStyle='rgba(25,33,67,0.6)'; ctx.strokeStyle='rgba(174,184,203,0.3)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(THEMES_CLOSE_BTN.x,THEMES_CLOSE_BTN.y,THEMES_CLOSE_BTN.r,0,6.28); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=LUM_CREAM; ctx.font='600 18px Georgia,serif';
+  ctx.fillText('✕',THEMES_CLOSE_BTN.x,THEMES_CLOSE_BTN.y+1);
+
+  ctx.fillStyle=LUM_HAZE; ctx.font='13px Georgia,serif';
+  ctx.fillText('More landscapes are on the way',W/2,172);
+
+  themeRowRects().forEach(rect=>{
+    const t=VILLAGE_THEMES.find(x=>x.id===rect.key);
+    // The REAL persisted equip, not effectiveTheme() -- this list must show
+    // what is actually saved, never a transient preview state.
+    const owned=isThemeOwned(t.id), equipped=equippedTheme===t.id;
+    lumPanel(rect.x,rect.y,rect.w,rect.h,16);
+    const moteX=rect.x+40, moteY=rect.y+rect.h/2;
+    ctx.save();
+    ctx.shadowColor=owned?LUM_GOLD:'transparent'; ctx.shadowBlur=owned?18:0;
+    ctx.fillStyle=owned?LUM_GOLD:'rgba(90,98,136,0.5)';
+    ctx.beginPath(); ctx.arc(moteX,moteY,13,0,6.28); ctx.fill();
+    ctx.restore();
+    const tx=rect.x+76;
+    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.fillStyle=LUM_CREAM; ctx.font='500 16px Georgia,serif';
+    ctx.fillText(t.name,tx,rect.y+28);
+    ctx.fillStyle='rgba(174,184,203,0.8)'; ctx.font='italic 12px Georgia,serif'; ctx.textBaseline='top';
+    ctx.fillText(t.desc,tx,rect.y+38);
+    ctx.fillStyle=equipped?LUM_GOLD:'rgba(174,184,203,0.7)'; ctx.font='600 10px Georgia,serif'; ctx.textAlign='right'; ctx.textBaseline='alphabetic';
+    ctx.fillText(equipped?'EQUIPPED':(owned?'TAP TO EQUIP':'LOCKED'),rect.x+rect.w-16,rect.y+28);
+  });
   ctx.textAlign='center'; ctx.textBaseline='top';
 }
 // ---------- Glowkeeper Story (Journal narrative pass) ----------
@@ -9028,6 +9203,8 @@ function draw(){
     drawVillageScreen();
   } else if(screen==='journal'){
     drawJournalScreen();
+  } else if(screen==='themes'){
+    drawThemesScreen();
   } else {
     drawTitle();
     // welcome-back is an overlay ON TOP of the title screen, not its own

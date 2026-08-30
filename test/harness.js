@@ -3092,7 +3092,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3166,7 +3166,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -3611,7 +3611,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','quests','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','quests','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -5271,8 +5271,145 @@ return __tick(5).then(function(){
   best = 25; nightNumber = 10; // a village-level-2 state
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
+});
+`);
+
+// =====================================================================
+// Lumora 2.0 Phase 7: Village Themes / Landscape Skins. Only ONE theme has
+// real content right now ('default' -- literally "render exactly as
+// today," no override); the other 6 requested themes have no approved
+// visual design/asset in this project (see index.html's own VILLAGE_THEMES
+// comment for the full reasoning) and are deliberately not listed as fake
+// stub entries. To still prove the general lock/unlock/equip/preview
+// mechanism end-to-end without fabricating real content, these tests push
+// ONE hand-crafted 'test_theme' entry onto VILLAGE_THEMES for the duration
+// of this scenario only -- each scenario runs in its own isolated vm
+// context, so this can never leak into another scenario or real content,
+// same "hand-craft a controlled object" discipline the Phase 1 objective
+// tests already established (setObjectives()) for an analogous problem.
+// =====================================================================
+scenario('lumora2-phase7-village-themes', null, `
+// ---- Test 1: theme definitions ----
+__check('every implemented theme has a valid, non-empty, stable string id', VILLAGE_THEMES.every(function(t){ return typeof t.id === 'string' && t.id.length > 0; }));
+__check('every implemented theme has a valid, non-empty name', VILLAGE_THEMES.every(function(t){ return typeof t.name === 'string' && t.name.length > 0; }));
+__check('theme ids are unique', new Set(VILLAGE_THEMES.map(function(t){ return t.id; })).size === VILLAGE_THEMES.length);
+__check('exactly one theme is actually implemented right now (default) -- the other 6 requested themes have no approved assets and are not fabricated', VILLAGE_THEMES.length === 1 && VILLAGE_THEMES[0].id === 'default');
+
+// ---- Test 2: default theme ----
+__check('Test 2: a fresh player starts equipped with the default theme', equippedTheme === 'default');
+__check('Test 2: a fresh player\\'s effective (rendered) theme is default', effectiveTheme() === 'default');
+__check('the default theme is always owned', isThemeOwned('default') === true);
+
+// ---- hand-crafted test theme (see this scenario's own header comment) ----
+VILLAGE_THEMES.push({ id: 'test_theme', name: 'Test Theme', desc: 'a hand-crafted theme for testing the equip mechanism only' });
+
+// ---- Test 3: unlock ----
+__check('Test 3: an unimplemented/not-yet-owned theme id starts locked', isThemeOwned('test_theme') === false);
+cosmeticsUnlocked.push('test_theme');
+__check('Test 3: unlocking a theme (locked -> unlocked)', isThemeOwned('test_theme') === true);
+
+// ---- Test 4: equip ----
+__check('Test 4: equipping an unlocked theme succeeds and sets equippedTheme to it', equipTheme('test_theme') === true && equippedTheme === 'test_theme');
+__check('Test 4: the effective (rendered) theme reflects the new equip', effectiveTheme() === 'test_theme');
+
+// ---- Test 5: locked theme ----
+equippedTheme = 'default'; // clean before/after
+__check('Test 5: equipping a locked/unknown theme fails', equipTheme('some_locked_theme_id') === false);
+__check('Test 5: the existing equipped theme is completely unchanged after a failed equip attempt', equippedTheme === 'default');
+
+// ---- Test 6: preview must not accidentally equip ----
+equipTheme('test_theme');
+__check('Test 6 setup: equipped is test_theme', equippedTheme === 'test_theme');
+startThemePreview('default');
+__check('Test 6: previewing a different theme changes the EFFECTIVE (rendered) theme...', effectiveTheme() === 'default');
+__check('Test 6: ...but does NOT change the actual equipped theme', equippedTheme === 'test_theme');
+clearThemePreview();
+__check('Test 6: closing the preview reverts the effective theme back to whatever is actually equipped', effectiveTheme() === 'test_theme');
+__check('Test 6: the equipped theme was never touched by the preview at any point', equippedTheme === 'test_theme');
+startThemePreview('does_not_exist');
+__check('previewing an unknown theme id is silently ignored, effective theme unaffected', effectiveTheme() === 'test_theme');
+clearThemePreview();
+
+// ---- equipping the theme that is already equipped is a harmless no-op ----
+__check('equipping the already-equipped theme reports success (not a failure)', equipTheme('test_theme') === true);
+
+// ---- Test 11: gameplay isolation ----
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false;
+var scoreBefore = S.score, missesBefore = S.misses, capBefore = S.cap;
+var flyValuesBefore = TYPES.y.pts + '|' + TYPES.b.coins + '|' + TYPES.g.pts;
+equipTheme('default');
+startThemePreview('test_theme');
+__check('Test 11: equipping/previewing a theme does not change S.score', S.score === scoreBefore);
+__check('Test 11: equipping/previewing a theme does not change S.misses', S.misses === missesBefore);
+__check('Test 11: equipping/previewing a theme does not change jar capacity', S.cap === capBefore);
+__check('Test 11: equipping/previewing a theme does not change firefly point/coin values', TYPES.y.pts + '|' + TYPES.b.coins + '|' + TYPES.g.pts === flyValuesBefore);
+clearThemePreview(); equipTheme('default');
+
+// ---- Test 10: village restoration/level compatibility ----
+best = 25; nightNumber = 15;
+var pctBefore = restorationPct(best), levelBefore2 = villageLevel();
+equipTheme('test_theme');
+__check('Test 10: equipping a theme does not change restoration %', restorationPct(best) === pctBefore);
+__check('Test 10: equipping a theme does not change Village Level', villageLevel() === levelBefore2);
+__check('Test 10: Dawn Chorus (100% restoration) is unaffected by theme state', VILLAGE_MILESTONES.every(function(m){ return restorationPct(best) >= m.pct; }));
+equipTheme('default');
+
+// ---- Test 12: collection compatibility ----
+var journalBefore = JSON.stringify(journal), variantJournalBefore = JSON.stringify(variantJournal);
+equipTheme('test_theme');
+startThemePreview('default'); clearThemePreview();
+__check('Test 12: theme changes do not affect Firefly Journal discoveries/counts', JSON.stringify(journal) === journalBefore);
+__check('Test 12: theme changes do not affect variant discoveries/counts', JSON.stringify(variantJournal) === variantJournalBefore);
+equipTheme('default');
+
+// ---- UI: renders without throwing, hit-test geometry is sane ----
+var threwUI = false;
+try {
+  screen = 'village'; drawVillageScreen();
+  screen = 'themes'; drawThemesScreen();
+} catch (e) { threwUI = true; }
+__check('drawVillageScreen()/drawThemesScreen() render without throwing', threwUI === false);
+__check('themeRowRects() returns exactly one rect per VILLAGE_THEMES entry', themeRowRects().length === VILLAGE_THEMES.length);
+screen = 'title';
+
+// ---- cleanup: remove the hand-crafted test theme so nothing later in this scenario sees it ----
+VILLAGE_THEMES.pop();
+cosmeticsUnlocked = cosmeticsUnlocked.filter(function(id){ return id !== 'test_theme'; });
+equippedTheme = 'default';
+__check('cleanup: VILLAGE_THEMES is back to exactly the one real theme', VILLAGE_THEMES.length === 1 && VILLAGE_THEMES[0].id === 'default');
+`);
+
+scenario('lumora2-phase7-persistence', { audioEnabled: true }, `
+// ---- Test 8: an old save with no theme data at all loads safely, defaults to 'default', preserves everything else ----
+__spy.loadResolve(JSON.stringify({ best: 20, coins: 200, nightNumber: 8, journal: { y: 3, b: 1, g: 0, e: 0, m: 0 }, objectivesCompleted: {}, eventHistory: [], contractsCompleted: [], cosmeticsUnlocked: [] }));
+return __tick(5).then(function(){
+  __check('Test 8: an old save with no theme data loads without throwing', loadDone === true && nightNumber === 8);
+  __check('Test 8: existing progression (best/coins/journal) is fully preserved', best === 20 && coins === 200 && journal.y === 3);
+  __check('Test 8: equippedTheme safely defaults to \\'default\\' for a save that predates themes', effectiveTheme() === 'default' && equippedTheme === 'default');
+  __check('Test 8: no theme is spuriously unlocked for an old save', cosmeticsUnlocked.length === 0);
+
+  // ---- Test 9: an invalid/unrecognized equipped theme id falls back safely, without corrupting anything else ----
+  equippedTheme = 'nonexistent_theme_from_a_corrupted_or_future_save';
+  __check('Test 9: an invalid/unrecognized equipped theme id falls back safely to default when actually read', effectiveTheme() === 'default');
+  __check('Test 9: the raw save is not corrupted -- everything else remains intact', best === 20 && coins === 200 && journal.y === 3);
+  equippedTheme = 'default';
+
+  // ---- Test 7: equip, then save, and confirm the payload carries it (the load-side of the round-trip -- a real payload with a real equippedTheme string loading back correctly -- is proven by lumora2-phase7-load-with-theme below, in its own fresh context; the mock loadData() Promise here has already resolved once and can't be resolved a second time in this same script run, same limitation noted in the Phase 5/6 persistence scenarios) ----
+  saveProgress();
+  var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Test 7: saveProgress() writes equippedTheme into the existing save payload -- no new save key/mechanism', payload.equippedTheme === 'default');
+  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'quests', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+});
+`);
+
+scenario('lumora2-phase7-load-with-theme', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 10, coins: 50, equippedTheme: 'default', cosmeticsUnlocked: [] }));
+return __tick(5).then(function(){
+  __check('Test 7 (load side): a loaded save\\'s equippedTheme is restored exactly', equippedTheme === 'default');
+  __check('Test 7 (load side): the loaded equipped theme reads correctly as the effective theme', effectiveTheme() === 'default');
 });
 `);
 
