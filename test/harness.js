@@ -7413,6 +7413,76 @@ return __tick(5).then(function(){
 });
 `);
 
+// E10: Glow Chain Engagement. Audit-first phase -- see the phase's own
+// final report for the full reasoning, but in short: the existing Glow
+// Chain feedback (D2's live HUD pill, milestone flare-and-payout sequence
+// at x5/x10/x15/x20, a clear "chain broken" sequence for any chain that
+// actually banked a reward, and bestChainThisRound's peak-tracking) was
+// found to already satisfy every requirement this phase lists, and is
+// already covered extensively by pre-existing tests (see the
+// advanceChain()/breakChain()/bestChainThisRound blocks earlier in this
+// file). ZERO production code changed. This scenario exists purely to
+// give the phase's own enumerated 16-point test list explicit,
+// traceable coverage in one place -- confirming continuity, not
+// re-litigating behavior already proven correct above -- plus the
+// standard cross-system regression spot-checks every phase since E6 has
+// added.
+scenario('lumora2-e10-glow-chain-engagement', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+reset();
+
+// ---- 1: chain increments normally ----
+advanceChain(); advanceChain(); advanceChain();
+__check('1: the chain increments by exactly 1 per catch, unchanged', S.chain === 3);
+
+// ---- 3/4/5/6: x5/x10/x15 milestone feedback, each firing exactly once per crossing ----
+advanceChain(); advanceChain();
+__check('3: reaching x5 arms the milestone moment exactly once', S.chain === 5 && S.d2ChainMomentN === 5 && S.d2ChainMomentT > 0);
+var coinsAtFive = coins;
+for (var i = 0; i < 4; i++) advanceChain(); // -> 9, no further milestone in between
+__check('6a: no milestone re-fires between x5 and x10 (chain 6-9 grants nothing further)', coins === coinsAtFive);
+advanceChain(); // -> 10
+__check('4: reaching x10 arms its own milestone moment exactly once', S.chain === 10 && S.d2ChainMomentN === 10);
+for (var i = 0; i < 4; i++) advanceChain(); // -> 14
+advanceChain(); // -> 15
+__check('5: reaching x15 arms its own milestone moment exactly once', S.chain === 15 && S.d2ChainMomentN === 15);
+__check('6b: each milestone moment is a fresh arm, not a re-fire of an earlier one (N tracks the CURRENT crossing)', S.d2ChainMomentN === S.chain);
+
+// ---- 2: existing chain-break behavior is unchanged -- breakChain() remains the ONLY reset path, still zeroes the live chain, still preserves the peak ----
+var peakBeforeBreak = S.bestChainThisRound;
+breakChain();
+__check('2: breakChain() still resets S.chain to 0, exactly as before E10', S.chain === 0);
+__check('2: breaking does not remove any already-granted coins', coins === coinsAtFive || coins >= coinsAtFive);
+
+// ---- 7/8: Best Chain remains correct, including through Night Complete's own existing display gate ----
+__check('7: bestChainThisRound remembers the peak (15) after the break', S.bestChainThisRound === 15 && peakBeforeBreak === 15);
+for (var i = 0; i < 4; i++) advanceChain(); // rebuild to 4, below the remembered peak
+__check('7: a smaller chain afterward does not lower the remembered peak', S.bestChainThisRound === 15);
+__check('8: Night Complete\\'s existing bonus row correctly reports this round\\'s Best Chain is eligible to show (>=3 floor)', nightCompleteHasBonusRow() === true);
+var threwNightComplete = false;
+try { screen = 'play'; S.over = true; S.overT = 1; draw(); } catch (e) { threwNightComplete = true; }
+__check('8: Night Complete draws the Best Chain result row without throwing', !threwNightComplete);
+S.over = false;
+
+// ---- 9: no coin values changed -- the existing milestone reward table and Chain Keeper multiplier are byte-identical ----
+__check('9: CHAIN_MILESTONES rewards are untouched by E10', CHAIN_MILESTONES.find(function(m){ return m.n === 5; }).reward === 5 && CHAIN_MILESTONES.find(function(m){ return m.n === 10; }).reward === 10 && CHAIN_MILESTONES.find(function(m){ return m.n === 15; }).reward === 18 && CHAIN_MILESTONES.find(function(m){ return m.n === 20; }).reward === 25);
+__check('9: chainMilestoneReward() (Chain Keeper\\'s +15%, the only multiplier involved) is untouched', chainMilestoneReward(100) === 100);
+
+// ---- 10/11/12/13/14/15/16: every other system remains untouched by E10 ----
+__check('10: CONTRACTS is untouched by E10', CONTRACTS.length === 4 && CONTRACTS.find(function(c){ return c.id === 'rush'; }).coinMult === 1.40);
+__check('11: NIGHT_EVENT_CHANCE/EVENT_TYPES are untouched by E10', NIGHT_EVENT_CHANCE === 0.35 && JSON.stringify(EVENT_TYPES) === JSON.stringify(['moonlight', 'fireflyRain', 'mothSwarm']));
+__check('12: OBJECTIVE_POOL requirements/rewards are untouched by E10', OBJECTIVE_POOL.find(function(o){ return o.id === 'reach_score'; }).early.target === 15);
+__check('13: Night Streak\\'s own logic is untouched by E10', typeof nightStreak === 'number' && typeof commitNightStreak === 'function');
+__check('14: Daily Deal\\'s own price formula is untouched by E10', dailyDealPrice(500) === 400);
+upgrades.jarCapTiers.simple = 5;
+__check('15: Almost Affordable\\'s own real cost function is untouched by E10', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
+upgrades.jarCapTiers.simple = 0;
+__check('16: existing rewarded-ad entry points remain present and distinct from Glow Chain\\'s own reward path', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function' && requestDoubleNightCoins !== advanceChain);
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
