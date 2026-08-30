@@ -3137,7 +3137,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3217,7 +3217,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -3662,7 +3662,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastPlayed','nightNumber','objectivesCompleted','prestigeLevel','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastNightCompletionDay','lastPlayed','nightNumber','nightStreak','objectivesCompleted','prestigeLevel','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -5382,7 +5382,7 @@ return __tick(5).then(function(){
   best = 25; nightNumber = 10; // a village-level-2 state
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
 });
 `);
@@ -5512,7 +5512,7 @@ return __tick(5).then(function(){
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
   __check('Test 7: saveProgress() writes equippedTheme into the existing save payload -- no new save key/mechanism', payload.equippedTheme === 'default');
-  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
 });
 `);
 
@@ -5800,7 +5800,7 @@ return __tick(5).then(function(){
   upgrades.tutorialDone = true;
   saveProgress();
   var payload1 = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
 
   // ---- Test 20: Night Complete's existing layout is completely unaffected by Phase 8 monetization state (Mystery Chest/Lucky Firefly live OUTSIDE Night Complete entirely -- see this phase's own report for why) ----
   upgrades.tutorialDone = true;
@@ -6677,7 +6677,7 @@ return __tick(5).then(function(){
   __check('a successful Almost Affordable ad grants EXACTLY the shortfall (' + expectedShortfall + '), never the full cost and never a fixed amount', coins === coinsBeforeAd + expectedShortfall && coins === costForReward, 'coins=' + coins + ' cost=' + costForReward);
   __check('requestRewardedAd was called with the reserved WORKSHOP_SMALL_UPGRADE id, not a new one', rewardCalls[rewardCalls.length - 1] === 'lumora-workshop-small-upgrade');
   __check('the granted coins persist through the existing saveData mechanism -- no new save field', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastPlayed', 'nightNumber', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
 
   // ---- one ad = one shortfall: purchasing immediately afterward drains the balance to exactly 0, no leftover ----
   var boughtOk = tryUpgradeJarCap('simple');
@@ -7033,6 +7033,146 @@ return __tick(1).then(function(){
 
   Date.now = realDateNow;
 });
+});
+`);
+
+// E7: Night Streak & Return Momentum. Follows the SAME lightweight
+// "manually flip S.over=true then call continueFromOver()" pattern the
+// pre-existing lumora2-phase0-foundation scenario already established for
+// nightNumber -- no real gameplay simulation needed, since neither that
+// test nor this one is testing catching/delivery, only the completion
+// bookkeeping. Date.now() is monkey-patched (same technique as E6's Daily
+// Deal tests) to make "today" controllable.
+scenario('lumora2-e7-night-streak', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+var realDateNow = Date.now;
+var DAY_MS = 24*60*60*1000;
+var day0 = new Date(2026,0,1).getTime();
+Date.now = function(){ return day0; };
+
+// ---- 1: new player has no completed streak ----
+__check('a fresh player has no night streak yet', nightStreak === 0 && lastNightCompletionDay === '');
+
+// ---- 2: completing the first real night -> streak 1 ----
+reset(); S.over = true; S.overT = 1;
+continueFromOver();
+__check('completing the first real night sets the streak to 1', nightStreak === 1, 'nightStreak=' + nightStreak);
+__check('lastNightCompletionDay is stamped with today\\'s real day key', lastNightCompletionDay === localDayKey(day0));
+
+// ---- 4: Restart Night (reset() called directly, bypassing continueFromOver()) does not increase the streak ----
+var streakBeforeRestart = nightStreak;
+reset(); reset(); reset();
+__check('calling reset() directly (Restart Night) never changes the streak', nightStreak === streakBeforeRestart && nightStreak === 1);
+
+// ---- 5a: duplicate Night Complete / Continue calls on the SAME round never double-count ----
+// interstitialAdsAvailable() is false by default in this harness (no
+// ytgame.ads installed), so continueFromOver() takes its synchronous
+// enterContractScreen() path -- S is NOT replaced by reset() until a
+// contract is actually accepted, so S stays the SAME instance across a
+// rapid second call, exactly the double-tap window direct instruction
+// calls out.
+reset(); S.over = true; S.overT = 1;
+continueFromOver();
+var streakAfterFirstCall = nightStreak, coinsAfterFirstCall = coins;
+__check('setup: S.streakCommitted is now true after one real completion call, S not yet replaced', S.streakCommitted === true);
+continueFromOver(); // duplicate call, same S instance -- simulates a rapid double-tap / duplicate callback
+__check('a duplicate continueFromOver() call on the SAME completed round does not advance the streak again', nightStreak === streakAfterFirstCall);
+__check('a duplicate continueFromOver() call on the SAME completed round grants no extra coins', coins === coinsAfterFirstCall);
+__acceptAnyContract();
+
+// ---- 5b: a SECOND genuinely separate round completed on the SAME calendar day does not double-count either ----
+var streakBeforeSameDayRound2 = nightStreak;
+reset(); S.over = true; S.overT = 1;
+continueFromOver();
+__check('a second real completed round on the SAME calendar day leaves the streak unchanged (it already advanced today)', nightStreak === streakBeforeSameDayRound2, 'nightStreak=' + nightStreak);
+__acceptAnyContract();
+
+// ---- direct commitNightStreak() idempotency (the function's own core guarantee, independent of the S.streakCommitted call-site guard above) ----
+var beforeDirectDup = nightStreak;
+commitNightStreak(); commitNightStreak(); commitNightStreak();
+__check('calling commitNightStreak() directly, repeatedly, the same day is fully idempotent', nightStreak === beforeDirectDup);
+
+// ---- 6: the next CONSECUTIVE calendar day continues the streak ----
+Date.now = function(){ return day0 + DAY_MS; };
+reset(); S.over = true; S.overT = 1;
+continueFromOver();
+__check('completing a night on the very next consecutive calendar day increases the streak', nightStreak === 2, 'nightStreak=' + nightStreak);
+__acceptAnyContract();
+Date.now = function(){ return day0 + DAY_MS*2; };
+reset(); S.over = true; S.overT = 1;
+// coins captured right before this exact commit, not several nights back --
+// an unrelated pre-existing system (Weekly Progression's own 'nights'
+// milestone) legitimately also reacts to a 3rd night completed this same
+// week, so isolating the delta around ONLY this one commit is the only way
+// to attribute a coin change to Night Streak specifically, not "nothing
+// else in the whole game is allowed to grant coins around night 3."
+var coinsBeforeMilestone3 = coins;
+continueFromOver();
+__check('a third consecutive calendar day continues the streak to 3', nightStreak === 3, 'nightStreak=' + nightStreak);
+__acceptAnyContract();
+
+// ---- 10: milestone reward (3) granted exactly once, via the existing coin reward path ----
+__check('reaching the 3-night milestone granted exactly the +15 coin bonus, through the existing coins balance', coins === coinsBeforeMilestone3 + 15, 'coins=' + coins + ' expected=' + (coinsBeforeMilestone3 + 15));
+var coinsAfterMilestone3 = coins;
+// a same-day duplicate never re-grants the milestone it already paid out
+commitNightStreak();
+__check('a duplicate commit on the milestone day does not re-grant the streak-3 bonus', coins === coinsAfterMilestone3);
+
+// ---- 7: missing a calendar day resets the streak to 1 ----
+Date.now = function(){ return day0 + DAY_MS*5; }; // skips days 3 and 4 entirely
+reset(); S.over = true; S.overT = 1;
+continueFromOver();
+__check('missing a calendar day resets the streak to 1, not merely holding or decrementing by one', nightStreak === 1, 'nightStreak=' + nightStreak);
+__acceptAnyContract();
+
+// ---- 9 / 11: Night Complete integration -- streak row appended LAST, every earlier row's position is byte-identical whether or not the streak row is present ----
+var rowsWithoutStreak = nightCompleteTailRows(true, true, true, true, true, false);
+var rowsWithStreak = nightCompleteTailRows(true, true, true, true, true, true);
+__check('every pre-existing tail row (contract/event/bonus/villageLevelUp) keeps the EXACT same position whether or not the streak row is shown', JSON.stringify(rowsWithoutStreak) === JSON.stringify(rowsWithStreak.slice(0, rowsWithoutStreak.length)), 'without=' + JSON.stringify(rowsWithoutStreak) + ' with=' + JSON.stringify(rowsWithStreak));
+__check('the streak row, when present, is always the LAST row in the stack', rowsWithStreak[rowsWithStreak.length - 1].kind === 'streak');
+__check('nightCompleteTailRows() never adds a streak row when hasStreak is false', rowsWithoutStreak.every(function(r){ return r.kind !== 'streak'; }));
+
+// ---- the tutorial's own first night never shows (or counts) a streak, even though upgrades.tutorialDone may already be true by the time its OWN Night Complete is drawn ----
+(function(){
+  var savedStreak = nightStreak, savedDay = lastNightCompletionDay, savedTutorial = upgrades.tutorialDone;
+  upgrades.tutorialDone = false;
+  reset(); S.over = true; S.overT = 1;
+  var threwTutorialDraw = false;
+  try { screen = 'play'; draw(); } catch (e) { threwTutorialDraw = true; }
+  __check('the tutorial\\'s own Night Complete screen draws fine and never increments the streak (upgrades.tutorialDone gate, same as nightNumber)', !threwTutorialDraw);
+  continueFromOver();
+  __check('completing the tutorial night itself (tutorialDone false at continueFromOver time) does not touch the streak at all', nightStreak === savedStreak && lastNightCompletionDay === savedDay);
+  upgrades.tutorialDone = savedTutorial;
+})();
+
+// ---- draw-safety: a real night's Night Complete screen (streak row showing) never throws ----
+reset(); S.over = true; S.overT = 1;
+var threwRealDraw = false;
+try { screen = 'play'; draw(); } catch (e) { threwRealDraw = true; }
+__check('a real (non-tutorial) Night Complete screen with the streak row draws without throwing', !threwRealDraw);
+S.over = false; // leave the round in a normal state, not mid-completion, before the checks below
+
+// ---- 12/13/14: Daily Deal, Almost Affordable, and existing ads are all untouched by Night Streak ----
+__check('Daily Deal\\'s own price formula is untouched by Night Streak', dailyDealPrice(500) === 400);
+upgrades.jarCapTiers.simple = 5;
+__check('Almost Affordable\\'s own real cost function is untouched by Night Streak', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
+upgrades.jarCapTiers.simple = 0;
+__check('existing rewarded-ad entry points remain present and distinct from anything Night Streak added', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function' && requestDoubleNightCoins !== commitNightStreak);
+
+Date.now = realDateNow;
+});
+`);
+
+// A real fresh-context load confirms the streak survives a reload exactly
+// as persisted -- not recomputed, not reset, matching the "reload
+// preserves streak" requirement.
+scenario('lumora2-e7-load-existing-streak', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 5, coins: 0, nightStreak: 4, lastNightCompletionDay: '2026-0-15', upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  __check('a reloaded save restores nightStreak exactly as persisted, not recomputed', nightStreak === 4);
+  __check('a reloaded save restores lastNightCompletionDay exactly as persisted', lastNightCompletionDay === '2026-0-15');
 });
 `);
 
