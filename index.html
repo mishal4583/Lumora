@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed}})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed},villageProgression})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -2043,6 +2043,92 @@ function commitNightStreak(){
     if(before<m&&nightStreak>=m)applyCoinsOrLuckReward('coins',NIGHT_STREAK_MILESTONE_REWARDS[m]);
   });
 }
+// ---------- E18: Village 1 Persistent Restoration ----------
+// A NEW, deliberately SEPARATE meter from the pre-existing restorationPct(best)
+// system (score-based, drives the Village screen's "Village Restored X%" and
+// VILLAGE_MILESTONES list further below -- both left completely untouched by
+// this phase, see E17's "two competing restoration percentages" risk finding).
+// This one is driven by CUMULATIVE LIFETIME DELIVERED FIREFLIES, lives
+// entirely outside S (never touched by reset()), and never regresses --
+// exactly the dev plan's "Delivered Fireflies -> Village restoration, Coins
+// -> Workshop" principle. Thresholds are E17-locked, not re-derived here.
+const VILLAGE1_MILESTONES=[
+  {id:'m1', threshold:15,  name:'First Window'},
+  {id:'m2', threshold:40,  name:'Second House'},
+  {id:'m3', threshold:80,  name:'East Cluster'},
+  {id:'m4', threshold:130, name:'Firefly Garden'},
+  {id:'m5', threshold:190, name:'Bridge Lanterns'},
+  {id:'m6', threshold:260, name:'The Fountain'},
+  {id:'m7', threshold:340, name:'West Row'},
+  {id:'m8', threshold:450, name:'Final Beacon'}
+];
+const VILLAGE1_COMPLETION_THRESHOLD=450;
+function defaultVillageProgression(){
+  return {
+    currentVillage:'lumora',
+    villages:[{
+      id:'lumora', name:'Lumora',
+      restorationProgress:0,
+      completionThreshold:VILLAGE1_COMPLETION_THRESHOLD,
+      milestones:VILLAGE1_MILESTONES.map(m=>({id:m.id, threshold:m.threshold, state:'locked'})),
+      completed:false
+    }]
+    // villages[1]/[2] (Moonfall/Aurora) are appended by future phases -- not created here.
+  };
+}
+let villageProgression=defaultVillageProgression();
+// milestones[].state and .completed are NEVER trusted from a loaded save --
+// always fully recomputed from restorationProgress (the one real persisted
+// number), same "one canonical source of truth" discipline jarCanAcceptCatch()
+// established. This closes off an entire bug class (a stale/tampered save
+// claiming a milestone is 'restored' while restorationProgress itself
+// disagrees) for free, and is exactly what "defensively handle ... invalid
+// milestone state" means here -- there's no milestone state to validate,
+// because none is ever read.
+function rebuildVillageMilestones(v){
+  v.milestones=VILLAGE1_MILESTONES.map(m=>({id:m.id, threshold:m.threshold, state:v.restorationProgress>=m.threshold?'restored':'locked'}));
+  v.completed=v.restorationProgress>=v.completionThreshold;
+}
+function currentVillageProgress(){ return villageProgression.villages.find(v=>v.id===villageProgression.currentVillage)||villageProgression.villages[0]; }
+function persistVillageLocal(){ if(!YT){ try{ localStorage.setItem('gk2_village',JSON.stringify(villageProgression)); }catch(e){} } }
+// The ONE place Village 1's persistent restoration counter ever advances --
+// called only from the delivery-success site (the same s.t>=1 block
+// score/coins/quest progress already use), and only once the caller has
+// already confirmed this is a real, non-tutorial delivery. Re-checks
+// v.completed immediately before mutating, not just trusting an earlier
+// gate -- same "check right before the mutation itself" discipline
+// jarCanAcceptCatch()/finalizeNight()'s own re-entry guard already
+// established. Mirrors grantDeliveryCoins()'s own shape: mutate + immediate
+// non-YT localStorage mirror, no saveProgress() call here -- villageProgression
+// rides along in the SAME saveProgress() payload coins/best already do,
+// checkpointed at the same existing cadence (night end, purchases, etc.),
+// not a new per-delivery cloud-save frequency.
+function grantVillageProgress(){
+  const v=currentVillageProgress();
+  if(v.completed)return;
+  v.restorationProgress=Math.max(0,Math.min(VILLAGE1_COMPLETION_THRESHOLD,v.restorationProgress+1));
+  const justHit=VILLAGE1_MILESTONES.find(m=>m.threshold===v.restorationProgress);
+  rebuildVillageMilestones(v);
+  persistVillageLocal();
+  // Minimal feedback (E18 §11): reuses the existing generic celebration
+  // banner (sound + particle puff + on-screen text) rather than any new UI --
+  // fires only on the 8 real milestone crossings for the whole village, not
+  // once per delivery.
+  if(justHit)capMilestoneFx('✨ '+justHit.name+' restored ✨');
+}
+// LIGHTS thresholds that also correspond to a completed Village 1 milestone
+// (E17 §4 mapping). Layered as an ADDITIONAL, persistent way to reach "lit" --
+// see lightGroupRestored()'s one call site further below -- never replacing
+// the existing round-scoped S.score gate. A milestone already earned keeps
+// that light group lit from the very start of every future night, instead of
+// visually "going dark" again until S.score climbs back up to the same
+// number. thr:30 (bridge lanterns) is a 3-lantern group -- last so it isn't
+// mistaken for one of the score-order groups (5/10/20/35) above/below it.
+const LIGHTS_THR_VILLAGE_MILESTONE={5:15, 10:40, 20:80, 30:190, 35:340};
+function lightGroupRestored(thr){
+  const need=LIGHTS_THR_VILLAGE_MILESTONE[thr];
+  return need!==undefined&&currentVillageProgress().restorationProgress>=need;
+}
 let objectivesCompleted={}; // Night Objectives (Phase 1) -- historical record of
 // completed objectives, keyed by objective id. Always {} until Phase 1 exists.
 let eventHistory=[]; // Night Events (future phase) -- past event ids the player has
@@ -3299,6 +3385,46 @@ function villageLevelFor(bestVal,nights){
   return 1;
 }
 function villageLevel(){ return villageLevelFor(best,nightNumber); }
+// E18: non-YT load + one-time migration. Deliberately placed here rather
+// than alongside villageProgression's own `let` above -- RESTORATION_THRESH/
+// RESTORATION_PCT/restorationPct() (needed for the migration check below)
+// are declared further up this file but AFTER that `let`, and this is plain
+// top-level code that runs immediately, top-to-bottom, during initial script
+// execution -- calling restorationPct() any earlier than its own const
+// dependencies have themselves finished initializing would throw "Cannot
+// access before initialization" and kill the whole script on load, the
+// exact ordering hazard CLAUDE.md documents. (The YT loadData().then()
+// callback below has no such constraint -- it only ever runs after the
+// ENTIRE synchronous script, including these consts, has finished.)
+if(!YT){
+  let hadVillageSave=false;
+  try{
+    const dv=JSON.parse(localStorage.getItem('gk2_village')||'null');
+    if(dv&&typeof dv==='object'&&Array.isArray(dv.villages)){
+      hadVillageSave=true;
+      dv.villages.forEach(sv=>{
+        if(!sv||typeof sv!=='object')return;
+        const v=villageProgression.villages.find(x=>x.id===sv.id);
+        if(!v)return; // unknown village id (future/older build) -- ignore rather than guess
+        if(typeof sv.restorationProgress==='number'&&sv.restorationProgress>v.restorationProgress)
+          v.restorationProgress=Math.max(0,Math.min(v.completionThreshold,Math.floor(sv.restorationProgress)));
+      });
+    }
+  }catch(e){}
+  // One-time migration (E17 §5 / E18 §8): a player who already reached the
+  // OLD score-based restorationPct(best)===100% before this system existed
+  // (no gk2_village save at all yet) is granted Village 1 already complete
+  // under the NEW system too -- the one migration case with a principled
+  // answer. Every other existing player starts at 0 (the const default
+  // above): the true historical lifetime delivered-firefly count was never
+  // recorded anywhere, at any point in this project's history (S.deliveredN
+  // is round-scoped, never persisted), so it genuinely cannot be
+  // reconstructed. Only applies when there was NO villageProgression save at
+  // all -- never overwrites a genuine, already-in-progress one.
+  if(!hadVillageSave&&restorationPct(best)>=100)villageProgression.villages[0].restorationProgress=VILLAGE1_COMPLETION_THRESHOLD;
+  villageProgression.villages.forEach(rebuildVillageMilestones);
+  persistVillageLocal();
+}
 // ---- Part C / Shop Restructure / Remove In-Run Capacity Growth: real
 // upgrade effects. jarCapacityForRun sets S.cap for the WHOLE run now —
 // gainCap() no longer exists as a capacity mechanic (see capMilestoneFx
@@ -3786,6 +3912,29 @@ if(YT&&YT.game&&YT.game.loadData){
       if(typeof d.seasonProgress==='number'&&d.seasonProgress>=0)seasonProgress=Math.min(d.seasonProgress,currentSeason().milestones);
       // Phase 12: same defensive clamp as the non-YT load path's own comment.
       if(typeof d.prestigeLevel==='number'&&d.prestigeLevel>=0)prestigeLevel=Math.min(Math.floor(d.prestigeLevel),PRESTIGE_MAX);
+      // E18: Village 1 persistent restoration -- same defensive per-field
+      // ratchet as every other field above. milestones[]/completed are never
+      // read from the save at all, always rebuilt from restorationProgress
+      // itself right after (see rebuildVillageMilestones()) -- there is no
+      // milestone shape to validate because none is ever trusted. Safe to
+      // call restorationPct(best) here (unlike the non-YT load path further
+      // up the file) since this whole callback only ever runs after the
+      // complete synchronous script, including every const it depends on,
+      // has already finished executing.
+      let hadVillageSave=false;
+      if(d.villageProgression&&typeof d.villageProgression==='object'&&Array.isArray(d.villageProgression.villages)){
+        hadVillageSave=true;
+        d.villageProgression.villages.forEach(dv=>{
+          if(!dv||typeof dv!=='object')return;
+          const v=villageProgression.villages.find(x=>x.id===dv.id);
+          if(!v)return;
+          if(typeof dv.restorationProgress==='number'&&dv.restorationProgress>v.restorationProgress)
+            v.restorationProgress=Math.max(0,Math.min(v.completionThreshold,Math.floor(dv.restorationProgress)));
+        });
+      }
+      // One-time migration (E17 §5 / E18 §8) -- same rule as the non-YT path.
+      if(!hadVillageSave&&restorationPct(best)>=100)villageProgression.villages[0].restorationProgress=VILLAGE1_COMPLETION_THRESHOLD;
+      villageProgression.villages.forEach(rebuildVillageMilestones);
     }catch(e){}
   }).catch(()=>{})
     .then(()=>{
@@ -5510,7 +5659,12 @@ function update(dt){
   }
   if(S.weatherBannerT>0)S.weatherBannerT=Math.max(0,S.weatherBannerT-dt);
   if(S.score>=30)S.constA=Math.min(1,S.constA+dt*0.15); // 100->30, same reasoning as the shooting-star threshold above
-  LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr)S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
+  // E18: a light group also stays lit once its matching Village 1 milestone
+  // is persistently restored -- see lightGroupRestored()'s own comment.
+  // Additive OR only; the original S.score gate is completely unchanged for
+  // any group without a milestone mapping, or for a player who hasn't
+  // reached it yet.
+  LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr||lightGroupRestored(L.thr))S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
   // milestone "awaken" fades — cat/windmill used to pop in instantly at their
   // score gate; fade them in over ~0.8s instead so the milestone reads as a
   // brief transition, matching how the village lights already fade in above
@@ -5955,6 +6109,12 @@ function update(dt){
     if(s.t>=1){
       const prev=S.score;
       S.score+=TYPES[s.type].pts; S.deliveredN++;
+      // E18: Village 1 persistent restoration -- same delivery-success
+      // moment as score/coins/quest progress below, gated on
+      // upgrades.tutorialDone so tutorial-night deliveries never count (per
+      // direct instruction), and living entirely outside S so it survives
+      // reset()/Restart Night/reload exactly like coins/best already do.
+      if(upgrades.tutorialDone)grantVillageProgress();
       // Phase 1 economy pass: THREE independent layers now, stacked
       // multiplicatively -- TYPES[type].coins (the raw firefly value, same
       // for every player) x the EQUIPPED JAR's own Light Value (per-jar

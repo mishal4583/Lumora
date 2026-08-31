@@ -3152,7 +3152,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3232,7 +3232,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -3677,7 +3677,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','cachedNightEvent','cachedNightEventFor','cachedNightObjectives','cachedNightObjectivesFor','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastNightCompletionDay','lastPlayed','nightNumber','nightStreak','objectivesCompleted','prestigeLevel','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','cachedNightEvent','cachedNightEventFor','cachedNightObjectives','cachedNightObjectivesFor','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastNightCompletionDay','lastPlayed','nightNumber','nightStreak','objectivesCompleted','prestigeLevel','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','villageProgression','weekly','workshopTokens']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -5405,7 +5405,7 @@ return __tick(5).then(function(){
   best = 25; nightNumber = 10; // a village-level-2 state
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
 });
 `);
@@ -5535,7 +5535,7 @@ return __tick(5).then(function(){
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
   __check('Test 7: saveProgress() writes equippedTheme into the existing save payload -- no new save key/mechanism', payload.equippedTheme === 'default');
-  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
 });
 `);
 
@@ -5823,7 +5823,7 @@ return __tick(5).then(function(){
   upgrades.tutorialDone = true;
   saveProgress();
   var payload1 = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
 
   // ---- Test 20: Night Complete's existing layout is completely unaffected by Phase 8 monetization state (Mystery Chest/Lucky Firefly live OUTSIDE Night Complete entirely -- see this phase's own report for why) ----
   upgrades.tutorialDone = true;
@@ -6700,7 +6700,7 @@ return __tick(5).then(function(){
   __check('a successful Almost Affordable ad grants EXACTLY the shortfall (' + expectedShortfall + '), never the full cost and never a fixed amount', coins === coinsBeforeAd + expectedShortfall && coins === costForReward, 'coins=' + coins + ' cost=' + costForReward);
   __check('requestRewardedAd was called with the reserved WORKSHOP_SMALL_UPGRADE id, not a new one', rewardCalls[rewardCalls.length - 1] === 'lumora-workshop-small-upgrade');
   __check('the granted coins persist through the existing saveData mechanism -- no new save field', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'weekly', 'workshopTokens']));
+  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
 
   // ---- one ad = one shortfall: purchasing immediately afterward drains the balance to exactly 0, no leftover ----
   var boughtOk = tryUpgradeJarCap('simple');
@@ -7788,6 +7788,122 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// E18: Village 1 Persistent Restoration. Real deliveries are driven through
+// the exact same S.carried -> village-zone -> S.sparks -> s.t>=1 pipeline
+// the pre-existing delivery tests above already use (push to S.carried,
+// force S.jar.y into the village zone, step frames until sparks/carried
+// drain) -- not a re-implementation of delivery, reuse of the established
+// technique. Milestone-idempotency/completion-at-450 calls
+// grantVillageProgress() directly for the last few checks only, since
+// proving "the ONE canonical function is idempotent/clamped" doesn't
+// require re-proving "a real delivery reaches that function", already
+// covered by the earlier checks in this same scenario.
+scenario('lumora2-e18-delivery-progression', null, `
+__check('1: fresh player starts Village 1 at restorationProgress 0, not completed', currentVillageProgress().restorationProgress === 0 && currentVillageProgress().completed === false);
+
+// ---- 2: tutorial-night delivery does not count ----
+upgrades.tutorialDone = false;
+reset();
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i = 0; i < 120 && (S.sparks.length > 0 || S.carried.length > 0); i++) __stepFrame(16);
+__check('2: a delivery during the tutorial (tutorialDone still false) grants 0 Village Progress', currentVillageProgress().restorationProgress === 0, 'progress=' + currentVillageProgress().restorationProgress);
+__check('2b: the tutorial delivery still earns its normal score, unaffected', S.score === 1);
+
+// ---- 3: a real (post-tutorial) delivery adds exactly +1 ----
+upgrades.tutorialDone = true;
+reset();
+var vBefore = currentVillageProgress().restorationProgress;
+var rawBefore = coins + coinFraction; // combined so a sub-1-coin fractional carry (from the earlier tutorial delivery in test 2) can't read as "no reward"
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i2 = 0; i2 < 120 && (S.sparks.length > 0 || S.carried.length > 0); i2++) __stepFrame(16);
+__check('3: a real delivery adds exactly +1 Village Progress', currentVillageProgress().restorationProgress === vBefore + 1, 'progress=' + currentVillageProgress().restorationProgress);
+__check('3b: the existing score/coin reward is completely unaffected by this addition', S.score === 1 && (coins + coinFraction) > rawBefore);
+
+// ---- 4: multiple deliveries add correctly ----
+reset();
+var vBefore2 = currentVillageProgress().restorationProgress;
+for (var k = 0; k < 5; k++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i3 = 0; i3 < 300 && (S.sparks.length > 0 || S.carried.length > 0); i3++) __stepFrame(16);
+__check('4: 5 real deliveries add exactly +5 Village Progress', currentVillageProgress().restorationProgress === vBefore2 + 5, 'progress=' + currentVillageProgress().restorationProgress);
+
+// ---- 5: a missed firefly adds 0 ----
+reset(); screen = 'play';
+var vBefore3 = currentVillageProgress().restorationProgress;
+S.misses = 4;
+spawnFly('y');
+var mf = S.flies[S.flies.length - 1];
+mf.patience = 0.01; mf.rest = 0; mf.pause = 0;
+for (var i4 = 0; i4 < 60 && !S.over; i4++) __stepFrame(16);
+__check('5: a missed firefly (round-ending 5th miss) grants 0 Village Progress', S.over === true && currentVillageProgress().restorationProgress === vBefore3, 'progress=' + currentVillageProgress().restorationProgress);
+
+// ---- 6: Restart Night (reset()) does not reset persistent progress ----
+var vBeforeRestart = currentVillageProgress().restorationProgress;
+reset();
+__check('6: reset() (Restart Night) does not reset Village Progress', currentVillageProgress().restorationProgress === vBeforeRestart);
+
+// ---- 8/9: each milestone triggers exactly once ----
+villageProgression.villages[0].restorationProgress = 14;
+rebuildVillageMilestones(villageProgression.villages[0]);
+var bannerCalls = 0, realCapFx = capMilestoneFx;
+capMilestoneFx = function(msg){ bannerCalls++; realCapFx(msg); };
+grantVillageProgress(); // 14 -> 15, crosses M1
+__check('8: M1 triggers at exactly 15', villageProgression.villages[0].milestones[0].state === 'restored' && bannerCalls === 1, 'progress=' + villageProgression.villages[0].restorationProgress);
+grantVillageProgress(); // 15 -> 16, crosses nothing else
+__check('9: a milestone does not re-trigger on a later delivery', bannerCalls === 1);
+capMilestoneFx = realCapFx;
+
+// ---- 10/11: M8 completes Village 1 at 450, progress can never exceed 450 ----
+villageProgression.villages[0].restorationProgress = 449;
+rebuildVillageMilestones(villageProgression.villages[0]);
+grantVillageProgress(); // 449 -> 450
+__check('10: M8 completes Village 1 at exactly 450', villageProgression.villages[0].restorationProgress === 450 && villageProgression.villages[0].completed === true && villageProgression.villages[0].milestones[7].state === 'restored');
+grantVillageProgress(); // already completed -- must be a safe no-op
+__check('11: progress can never exceed 450 (a completed village is a no-op, not an overflow)', villageProgression.villages[0].restorationProgress === 450);
+`);
+
+// =====================================================================
+// E18 §5-§7: Decor/Fountain remain plain coin purchases (no automatic
+// grant, no new lock added, no price change, no second ownership system),
+// and the existing purchase path itself is completely untouched.
+scenario('lumora2-e18-shop-unaffected', null, `
+__check('12/13: Decor/Fountain still have no restoration lock -- E18 deliberately did not add one (locked-until-milestone was optional per spec; see report)', !SHOP_ITEMS.deco.locked && !SHOP_ITEMS.fountain.locked);
+upgrades.deco = true; upgrades.fountain = true;
+villageProgression.villages[0].restorationProgress = 130;
+rebuildVillageMilestones(villageProgression.villages[0]);
+grantVillageProgress(); // crosses no NEW milestone here, just exercises the path with items already owned
+__check('12: an already-owned Decor item stays owned across Village milestone crossings', upgrades.deco === true);
+__check('13: an already-owned Fountain item stays owned across Village milestone crossings', upgrades.fountain === true);
+__check('14: Decor/Fountain purchase prices are completely unchanged by E18', SHOP_ITEMS.deco.price === 1000 && SHOP_ITEMS.fountain.price === 2500);
+upgrades.deco = false; coins = 5000;
+var ok = tryPurchase('deco');
+__check('16/18: a normal Decor purchase still succeeds through the unchanged tryPurchase() path, deducting the unchanged price', ok === true && upgrades.deco === true && coins === 4000);
+`);
+
+// =====================================================================
+// E18 §9/§10: reload preserves an in-progress save (via the non-YT
+// gk2_village key, seeded before this scenario's own script runs -- see
+// the runner's seed hook above), and never regresses/duplicates it.
+scenario('lumora2-e18-reload-preserves', null, `
+__check('7: reload preserves a previously-saved Village Progress value (47) exactly', currentVillageProgress().restorationProgress === 47, 'progress=' + currentVillageProgress().restorationProgress);
+__check('7b: milestones are correctly rebuilt from the loaded value, not read from the (empty) saved array', villageProgression.villages[0].milestones[0].state === 'restored' && villageProgression.villages[0].milestones[1].state === 'restored' && villageProgression.villages[0].milestones[2].state === 'locked');
+reset(); // Restart Night after a reload must not disturb the reloaded value either
+__check('7c: Restart Night after a reload still does not reset it', currentVillageProgress().restorationProgress === 47);
+`);
+
+// =====================================================================
+// E18 §8: the one migration case with a principled answer -- a player who
+// already reached the OLD score-based restorationPct(best)===100% (best=30
+// here, seeded before this scenario's own script runs) with NO
+// villageProgression save at all yet is granted Village 1 already complete.
+scenario('lumora2-e18-migration-old-100', null, `
+__check('migration: an existing player already at the old restorationPct(best)=100% is granted Village 1 complete at 450', restorationPct(best) === 100 && currentVillageProgress().restorationProgress === 450 && currentVillageProgress().completed === true);
+__check('migration: existing unrelated progress (best itself) is left completely untouched by this migration', best === 30);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -7799,7 +7915,14 @@ async function main() {
     const prelude = buildPrelude(sc.playablesOpts);
 
     // Seed localStorage with a known value for the standalone scenario's fallback-load check.
-    const seed = sc.name === 'standalone' ? `try{ localStorage.setItem('gk2_best','7'); }catch(e){}\n` : '';
+    // E18: two more named scenarios seed localStorage BEFORE the game script's
+    // own top-level non-YT load block runs, the only way to test that
+    // one-time load-time logic (reload-survival, the old-100%-restoration
+    // migration) without a second vm context mid-driver.
+    const seed = sc.name === 'standalone' ? `try{ localStorage.setItem('gk2_best','7'); }catch(e){}\n`
+      : sc.name === 'lumora2-e18-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:47,completionThreshold:450,milestones:[],completed:false}]})); }catch(e){}\n`
+      : sc.name === 'lumora2-e18-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
+      : '';
 
     // The IIFE call is the script's last statement, so its completion value
     // (undefined for the sync scenario, a Promise for the async ones) is
