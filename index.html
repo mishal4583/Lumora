@@ -2063,20 +2063,34 @@ const VILLAGE1_MILESTONES=[
   {id:'m8', threshold:450, name:'Final Beacon'}
 ];
 const VILLAGE1_COMPLETION_THRESHOLD=450;
+// E19: Village Journey foundation -- villages[] now holds all three
+// destinations from the start (not just Lumora), so an existing player's
+// save (a 1-entry array, from before E19 existed) merges Lumora's real
+// progress into this SAME template on load (see the non-YT/YT load blocks
+// further below, which merge BY ID and never replace the array) and simply
+// gains Moonfall/Aurora as locked placeholders for free -- no separate
+// migration code needed for this phase, reusing E18's own by-id-merge design.
+// Moonfall/Aurora have no defined milestones or completion threshold yet
+// (completionThreshold:null, milestones:[]) -- deliberately NOT invented
+// here, per direct instruction that this phase establishes state only, not
+// Village 2/3 gameplay.
 function defaultVillageProgression(){
   return {
     currentVillage:'lumora',
-    villages:[{
-      id:'lumora', name:'Lumora',
-      restorationProgress:0,
-      completionThreshold:VILLAGE1_COMPLETION_THRESHOLD,
-      milestones:VILLAGE1_MILESTONES.map(m=>({id:m.id, threshold:m.threshold, state:'locked'})),
-      completed:false
-    }]
-    // villages[1]/[2] (Moonfall/Aurora) are appended by future phases -- not created here.
+    villages:[
+      { id:'lumora', name:'Lumora', restorationProgress:0, completionThreshold:VILLAGE1_COMPLETION_THRESHOLD, milestones:[], completed:false },
+      { id:'moonfall', name:'Moonfall', restorationProgress:0, completionThreshold:null, milestones:[], completed:false },
+      { id:'aurora', name:'Aurora', restorationProgress:0, completionThreshold:null, milestones:[], completed:false }
+    ]
   };
 }
 let villageProgression=defaultVillageProgression();
+// Per-village milestone definitions -- keyed by village id, deliberately
+// NOT a single flat array any more (that was only ever Lumora's own shape).
+// Moonfall/Aurora are absent on purpose: no milestones exist for them yet,
+// and rebuildVillageMilestones() below treats an absent id as "no
+// milestones defined", not an error.
+const VILLAGE_MILESTONE_DEFS={ lumora: VILLAGE1_MILESTONES };
 // milestones[].state and .completed are NEVER trusted from a loaded save --
 // always fully recomputed from restorationProgress (the one real persisted
 // number), same "one canonical source of truth" discipline jarCanAcceptCatch()
@@ -2085,11 +2099,31 @@ let villageProgression=defaultVillageProgression();
 // disagrees) for free, and is exactly what "defensively handle ... invalid
 // milestone state" means here -- there's no milestone state to validate,
 // because none is ever read.
+// E19: completed is FALSE whenever completionThreshold is null (Moonfall/
+// Aurora right now) -- without this explicit guard, `0>=null` is `true` in
+// JS, which would silently mark an undefined village "completed" from the
+// moment it's created. Genuinely load-bearing, not defensive filler.
 function rebuildVillageMilestones(v){
-  v.milestones=VILLAGE1_MILESTONES.map(m=>({id:m.id, threshold:m.threshold, state:v.restorationProgress>=m.threshold?'restored':'locked'}));
-  v.completed=v.restorationProgress>=v.completionThreshold;
+  const defs=VILLAGE_MILESTONE_DEFS[v.id]||[];
+  v.milestones=defs.map(m=>({id:m.id, threshold:m.threshold, state:v.restorationProgress>=m.threshold?'restored':'locked'}));
+  v.completed=v.completionThreshold!=null&&v.restorationProgress>=v.completionThreshold;
 }
 function currentVillageProgress(){ return villageProgression.villages.find(v=>v.id===villageProgression.currentVillage)||villageProgression.villages[0]; }
+// E19: generic across any number of villages -- the FIRST village is always
+// unlocked; every other one is unlocked exactly when the one before it (by
+// array order, not by name) is completed. No isMoonfallUnlocked()/
+// isAuroraUnlocked() -- one function serves all three today and any future
+// fourth village for free, per direct instruction not to create
+// village-specific progression functions.
+function isVillageUnlocked(id){
+  const idx=villageProgression.villages.findIndex(v=>v.id===id);
+  if(idx<=0)return true; // first village, or an unrecognized id -- permissive default, never a lockout
+  return !!villageProgression.villages[idx-1].completed;
+}
+function isVillageCompleted(id){
+  const v=villageProgression.villages.find(x=>x.id===id);
+  return !!v&&v.completed;
+}
 function persistVillageLocal(){ if(!YT){ try{ localStorage.setItem('gk2_village',JSON.stringify(villageProgression)); }catch(e){} } }
 // The ONE place Village 1's persistent restoration counter ever advances --
 // called only from the delivery-success site (the same s.t>=1 block
@@ -2115,6 +2149,36 @@ function grantVillageProgress(){
   // fires only on the 8 real milestone crossings for the whole village, not
   // once per delivery.
   if(justHit)capMilestoneFx('✨ '+justHit.name+' restored ✨');
+  // E19: completion is reached in this SAME call, the instant restorationProgress
+  // hits completionThreshold -- v.completed was already checked false at the
+  // top of this function (the early return above), so reaching here means
+  // this call is the ONE time it flips true; every later call for this
+  // village hits that same early return and never re-enters this block --
+  // no separate "has this already fired" flag needed, the completed
+  // boolean itself IS the idempotency guard, same as jarCanAcceptCatch().
+  if(v.completed){
+    const idx=villageProgression.villages.indexOf(v);
+    const next=villageProgression.villages[idx+1]||null;
+    // Round-scoped ON PURPOSE (S, not villageProgression) -- this only needs
+    // to say "Village 1 finished THIS night" for tonight's Night Complete
+    // screen (see drawVillageCompletedRow()); a future night reading
+    // v.completed===true (already permanently true) must NOT re-show this
+    // banner every night after. reset() wipes it automatically like every
+    // other per-round completion flag (S.batchPerfect, etc.) -- no explicit
+    // clear needed, it simply isn't set again unless grantVillageProgress()
+    // itself reaches this exact branch again, which it structurally cannot.
+    S.villageCompletedThisNight={villageName:v.name, nextVillageName:next?next.name:null};
+    // Deliberately NOT the phrase "VILLAGE RESTORED" -- the Night Complete
+    // screen's own pre-existing top stat row already reads "VILLAGE
+    // RESTORED +N%" for the OLD score-based restorationPct(best) delta (see
+    // the live-verification screenshot that caught this: both would have
+    // read "VILLAGE RESTORED" on the exact same screen, one meaning a %
+    // delta, one meaning a whole-village milestone -- the E17 audit's "two
+    // competing restoration percentages" risk, made concrete). Named after
+    // the specific village instead, so it also reads correctly for
+    // Moonfall/Aurora later without touching this line again.
+    capMilestoneFx('🌟 '+v.name.toUpperCase()+' COMPLETE'+(next?(' — '+next.name+' unlocked'):'')+' 🌟');
+  }
 }
 // LIGHTS thresholds that also correspond to a completed Village 1 milestone
 // (E17 §4 mapping). Layered as an ADDITIONAL, persistent way to reach "lit" --
@@ -4089,6 +4153,13 @@ function reset(){
   coinsAtRoundStart=coins; // Lumora UI port: same idea, for the RunSummary's "Coins Earned" delta
   S={
     score:0, misses:0, caughtN:0, deliveredN:0, over:false, overT:0, tip:'',
+    // E19: set at most once per round, only inside grantVillageProgress()'s
+    // own completion branch (see its comment) -- so tonight's Night Complete
+    // can show a one-time village-completion row for the night it actually
+    // happened, without re-showing it on every night after. Round-scoped
+    // like every other per-night completion flag; cleared for free by
+    // reset() replacing S wholesale, no explicit clear needed.
+    villageCompletedThisNight:null,
     // rewarded-ad state, per round like everything else here -- a fresh
     // round always gets a fresh opportunity at each offer. Never persisted.
     rewardedDoubleCoinsPending:false, rewardedDoubleCoinsClaimed:false, rewardedDoubleCoinsAmount:0, coinsEarnedThisNight:0,
@@ -4955,7 +5026,19 @@ const SHOP_ITEMS={
   // exact same generic tryPurchase()/shopItemOwned() path, still the same
   // locked() gate, still field:'statueOwned'.
   // E16: purchase price only (3500->12000).
-  statue: {vendor:'decor', name:'Master Glowkeeper Statue', price:12000, desc:'Every Glowkeeper eventually learns that the light was never theirs to keep.', field:'statueOwned', locked:()=>restorationPct(best)<100}
+  // E19: the smallest safe compatibility change between this OLD score-based
+  // gate and the NEW delivery-based Village 1 completion -- an ADDITIONAL
+  // OR condition, never a replacement. A player who finishes Village 1 via
+  // the new 450-delivery system unlocks the purchase even if their
+  // score-based restorationPct(best) never reaches 100; a player who
+  // already reaches old-100% (the original, still-fully-intact path) is
+  // completely unaffected. Purely a widening of WHEN it unlocks -- price,
+  // ownership, equip behavior, and drawStatueCard()'s own rendering are
+  // all untouched. See the E19 report for the one known gap this doesn't
+  // close: the Village screen's "NEW LANDMARK DISCOVERED" callout is still
+  // gated on the OLD condition only, since fixing that means touching
+  // drawVillageScreen() itself, out of scope for this phase.
+  statue: {vendor:'decor', name:'Master Glowkeeper Statue', price:12000, desc:'Every Glowkeeper eventually learns that the light was never theirs to keep.', field:'statueOwned', locked:()=>restorationPct(best)<100&&!isVillageCompleted('lumora')}
 };
 function itemsForVendor(v){ return Object.keys(SHOP_ITEMS).filter(k=>SHOP_ITEMS[k].vendor===v).map(k=>Object.assign({key:k},SHOP_ITEMS[k])); }
 // generalized over field TYPE (boolean vs numeric tier) rather than hardcoding
@@ -8077,13 +8160,20 @@ function drawContractChip(){
 // than reordering anything, so every old shipped position for the first 3
 // rows is completely unaffected when this one isn't present (the ordinary
 // case for the overwhelming majority of nights).
-function nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasStreak){
+function nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasStreak,hasVillageCompleted){
   let base=hasObjectives?306:164;
   const rows=[];
   if(hasContract){ rows.push({kind:'contract',b:base}); base+=26; }
   if(hasEvent){ rows.push({kind:'event',b:base}); base+=26; }
   if(hasBonus){ rows.push({kind:'bonus',b:base}); base+=26; }
   if(hasVillageLevelUp){ rows.push({kind:'villageLevelUp',b:base}); base+=26; }
+  // E19: the NEW delivery-based Village 1 completion row -- deliberately
+  // its own kind, not merged into villageLevelUp above (that one is the
+  // OLD score-based Village Level system, a completely different meter,
+  // see grantVillageProgress()'s own comment). Placed right after it in the
+  // stack, before Night Streak, so Streak keeps its existing "last line
+  // before CONTINUE" position untouched.
+  if(hasVillageCompleted){ rows.push({kind:'villageCompleted',b:base}); base+=26; }
   // E7: Night Streak -- last in the stack, deliberately (it reads as "and
   // see you tomorrow", the final line before CONTINUE, matching the
   // spec's own mockup ordering).
@@ -8190,6 +8280,32 @@ function drawVillageLevelUpRow(panelR,b){
   try{ ctx.letterSpacing='0px'; }catch(e){}
   ctx.textAlign='right'; ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.95);
   ctx.fillText('LEVEL '+villageLevel(),panelR.x+panelR.w-18,panelR.y+b+5);
+}
+// E19: the NEW delivery-based Village 1 completion row -- same grammar/
+// glyph/two-column shape as drawVillageLevelUpRow() right above (label
+// left, short value right), reused rather than inventing a new row style.
+// Reads S.villageCompletedThisNight (set exactly once, only inside
+// grantVillageProgress()'s own completion branch) so this can be redrawn
+// any number of times -- reopening this screen, a resize, a repeated
+// render call -- without ever re-triggering anything: drawing never
+// mutates state, same discipline every other row on this screen already
+// follows. Value column names the newly-unlocked village (generic --
+// whichever villages[idx+1] actually is, not hardcoded to "Moonfall").
+function drawVillageCompletedRow(panelR,b){
+  const info=S.villageCompletedThisNight;
+  if(!info)return;
+  star4Glyph(panelR.x+22,panelR.y+b,6.5,d2gold(0.95),d2gold(0.5),8);
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.font='600 10.5px Georgia,serif'; try{ ctx.letterSpacing='1.4px'; }catch(e){}
+  ctx.fillStyle='rgba(230,217,188,0.90)';
+  // Deliberately NOT "VILLAGE RESTORED" -- see grantVillageProgress()'s own
+  // comment on the exact label collision this avoids with the pre-existing
+  // "VILLAGE RESTORED +N%" stat row a few lines above this one on the same
+  // screen.
+  ctx.fillText('🌟 '+(info.villageName||'VILLAGE').toUpperCase()+' COMPLETE',panelR.x+40,panelR.y+b+4);
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  ctx.textAlign='right'; ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.95);
+  ctx.fillText(info.nextVillageName?info.nextVillageName.toUpperCase():'',panelR.x+panelR.w-18,panelR.y+b+5);
 }
 // E7: Night Streak result row -- same grammar as the contract/event/village
 // rows above, exactly. star4Glyph is the SAME existing sparkle already
@@ -8446,7 +8562,11 @@ function drawOver(){
   // tutorial's own first night never shows a streak line at all, per
   // direct instruction.
   const hasStreak=upgrades.tutorialDone;
-  const tailRows=nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasStreak);
+  // E19: purely a read of the flag grantVillageProgress() already set this
+  // round (see its own comment) -- nothing here decides completion, this
+  // just decides whether tonight's screen shows the row for it.
+  const hasVillageCompleted=!!S.villageCompletedThisNight;
+  const tailRows=nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasStreak,hasVillageCompleted);
   const panelH=tailRows.length?(tailRows[tailRows.length-1].b+20):(hasObjectives?280:150);
   const panelR={x:W/2-160,y:H*0.34,w:320,h:panelH};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
@@ -8527,6 +8647,7 @@ function drawOver(){
       if(row.kind==='contract')drawContractResultRow(panelR,row.b);
       else if(row.kind==='event')drawEventResultRow(panelR,row.b);
       else if(row.kind==='villageLevelUp')drawVillageLevelUpRow(panelR,row.b);
+      else if(row.kind==='villageCompleted')drawVillageCompletedRow(panelR,row.b);
       else if(row.kind==='streak')drawStreakResultRow(panelR,row.b);
       else drawBonusRow(panelR,row.b);
     });

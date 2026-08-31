@@ -7904,6 +7904,66 @@ __check('migration: an existing player already at the old restorationPct(best)=1
 __check('migration: existing unrelated progress (best itself) is left completely untouched by this migration', best === 30);
 `);
 
+// =====================================================================
+// E19: Village 1 Completion + Village Journey Foundation. Real completion
+// is driven through the same S.carried -> village-zone -> S.sparks
+// pipeline lumora2-e18-delivery-progression already established -- this
+// scenario only adds checks for genuinely NEW E19 behavior (completion
+// itself was already exercised by E18's own test 10/11; those are not
+// re-proven here).
+scenario('lumora2-e19-village-completion', null, `
+// ---- 1: incomplete below 450, Moonfall/Aurora locked ----
+villageProgression.villages[0].restorationProgress = 449;
+rebuildVillageMilestones(villageProgression.villages[0]);
+__check('1: Village 1 is incomplete below 450', villageProgression.villages[0].completed === false);
+__check('1b: Moonfall is locked while Village 1 is incomplete', isVillageUnlocked('moonfall') === false);
+__check('1c: Aurora is locked while Village 1 is incomplete', isVillageUnlocked('aurora') === false);
+
+// ---- 2/3/6/7: one real delivery crosses 450 ----
+upgrades.tutorialDone = true;
+reset();
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i = 0; i < 200 && (S.sparks.length > 0 || S.carried.length > 0); i++) __stepFrame(16);
+__check('2: Village 1 completes at exactly 450 via a real delivery', villageProgression.villages[0].restorationProgress === 450 && villageProgression.villages[0].completed === true);
+__check('3: the Statue purchase unlocks through the new OR-condition even though the OLD restorationPct(best) has NOT reached 100', restorationPct(best) < 100 && SHOP_ITEMS.statue.locked() === false);
+__check('6: Moonfall becomes unlocked the instant Village 1 completes', isVillageUnlocked('moonfall') === true);
+__check('7: Aurora remains locked (Moonfall itself is not complete)', isVillageUnlocked('aurora') === false);
+__check('6b: currentVillage stays lumora -- E19 never auto-advances the player into a non-existent Village 2 scene', villageProgression.currentVillage === 'lumora');
+__check('Night Complete row: S.villageCompletedThisNight is set with the correct next village name', !!S.villageCompletedThisNight && S.villageCompletedThisNight.nextVillageName === 'Moonfall');
+
+// ---- 4/10: cannot progress above 450; duplicate completion does not re-fire ----
+var bannerCalls = 0, realFx = capMilestoneFx;
+capMilestoneFx = function(){ bannerCalls++; };
+grantVillageProgress();
+capMilestoneFx = realFx;
+__check('4: progress can never exceed 450', villageProgression.villages[0].restorationProgress === 450);
+__check('10: an already-completed village is a safe no-op -- no duplicate completion banner/state change', bannerCalls === 0);
+
+// ---- 9: Restart Night does not remove completion ----
+reset();
+__check('9: Restart Night does not remove Village 1 completion or Moonfall\\'s unlock', villageProgression.villages[0].completed === true && isVillageUnlocked('moonfall') === true);
+
+// ---- 11/12/13: existing systems remain functional/unchanged ----
+__check('11: Decor/Fountain remain plain, unlocked coin purchases -- E19 did not touch this', !SHOP_ITEMS.deco.locked && !SHOP_ITEMS.fountain.locked && SHOP_ITEMS.deco.price === 1000);
+__check('12: firefly coin values are unchanged', TYPES.y.coins === 0.65 && TYPES.m.coins === 8);
+__check('12b: jar/trail prices are unchanged', JARS.find(function(j){ return j.key === 'aurora'; }).price === 30000 && TRAIL_COLORS.find(function(t){ return t.key === 'celestial'; }).price === 15000);
+__check('13: quests/contracts/weekly progression are still live and untouched', Array.isArray(quests) && Array.isArray(contractsCompleted) && typeof weeklyStats === 'object');
+`);
+
+// =====================================================================
+// E19 §9: reload preserves completion/unlock exactly, including an old
+// (pre-E19, 1-entry villages[]) save gaining Moonfall/Aurora as locked
+// placeholders for free -- see the runner's seed hook above.
+scenario('lumora2-e19-reload-preserves-completion', null, `
+__check('5/8: reload preserves Village 1 completion exactly', currentVillageProgress().restorationProgress === 450 && currentVillageProgress().completed === true);
+__check('6: Moonfall is unlocked after reloading an already-complete Village 1', isVillageUnlocked('moonfall') === true);
+__check('7: Aurora is still locked after reload', isVillageUnlocked('aurora') === false);
+__check('old-save compatibility: Moonfall/Aurora exist as locked placeholders even though the loaded save only ever had one village entry', villageProgression.villages.length === 3 && villageProgression.villages[1].id === 'moonfall' && villageProgression.villages[2].id === 'aurora');
+reset();
+__check('9: Restart Night after a reload still does not disturb completion/unlock state', currentVillageProgress().completed === true && isVillageUnlocked('moonfall') === true);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -7922,6 +7982,12 @@ async function main() {
     const seed = sc.name === 'standalone' ? `try{ localStorage.setItem('gk2_best','7'); }catch(e){}\n`
       : sc.name === 'lumora2-e18-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:47,completionThreshold:450,milestones:[],completed:false}]})); }catch(e){}\n`
       : sc.name === 'lumora2-e18-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
+      // E19: a save written BEFORE E19 existed -- a 1-entry villages[] array
+      // (no moonfall/aurora at all), Village 1 already completed. Proves the
+      // "old 1-entry save gains Moonfall/Aurora as locked placeholders for
+      // free, via the same by-id merge, no new migration code" claim for
+      // real, not just for a fresh player.
+      : sc.name === 'lumora2-e19-reload-preserves-completion' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:450,completionThreshold:450,milestones:[],completed:true}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value
