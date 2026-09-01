@@ -7991,14 +7991,22 @@ __check('setup: Lumora completes at 450', villageProgression.villages[0].complet
 __check('4: Moonfall becomes available after Lumora completion', isVillageUnlocked('moonfall') === true);
 __check('5: entering Moonfall now succeeds and persists currentVillage', enterVillage('moonfall') === true && villageProgression.currentVillage === 'moonfall');
 
-// ---- 5b: a REAL bug caught live in the browser -- switching currentVillage
-// does NOT call reset(), so S.moonfallAnim must never have been polluted by
-// ticking against LUMORA's own (already-450) restorationProgress while
-// Lumora was still the current village (Moonfall's own thresholds happen to
-// be the identical numbers). Deliberately checked BEFORE the next reset()
-// below, which would otherwise mask this by re-zeroing S.moonfallAnim.
+// ---- 5b: the E21 v2 rewrite ports the real design-canvas villageScene()
+// renderer, which reads restorationProgress fresh on every single call
+// (drawMoonfallVillage(ctx,pct,t) takes pct as a plain argument, computed
+// new each frame in drawVillage() -- there is no S.moonfallAnim or other
+// per-frame eased/remembered state any more). That structurally closes off
+// the exact cross-village pollution bug the FIRST E21 pass hit live in the
+// browser (switching currentVillage doesn't call reset(), so an eased
+// value computed while playing Lumora could survive into Moonfall) --
+// there is simply nothing left to carry that pollution. Confirmed
+// directly: the pct Moonfall would render at right now is genuinely 0,
+// not anything inherited from Lumora's own already-450 progress (which
+// happens to share the same threshold numbers).
 for (var ib = 0; ib < 5; ib++) __stepFrame(16);
-__check('5b: Moonfall\\'s landmark reveal is not pre-lit by having just been unlocked via Lumora\\'s own completion', MOONFALL_MILESTONES.every(function(_, idx){ return !S.moonfallAnim[idx]; }));
+var mfPct = villageProgression.villages[1].completionThreshold != null
+  ? villageProgression.villages[1].restorationProgress / villageProgression.villages[1].completionThreshold : 1;
+__check('5b: Moonfall\\'s render pct is genuinely 0 right after being unlocked via Lumora\\'s own completion, not inherited from it', mfPct === 0);
 
 // ---- 6: a real delivery while IN Moonfall grants Moonfall its own +1, and never touches Lumora's already-completed progress ----
 reset();

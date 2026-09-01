@@ -4344,13 +4344,6 @@ function reset(){
     hitch:0, cricketT:rand(0.5,2), owlT:rand(9,20), batT:rand(12,24),
     bloomT:rand(24,34), bloomBanner:0, deliverT:0, deliverN:0,
     lightAnim:{},
-    // E21/E22: Moonfall's own landmark-reveal animation, mirroring
-    // S.lightAnim's exact shape (an index-keyed object, eased 0->1 per
-    // group) so its render code can reuse the identical "ease toward
-    // target" pattern LIGHTS already uses. Harmless to always initialize --
-    // costs nothing while currentVillage is 'lumora', since nothing reads
-    // it unless drawVillage() takes the Moonfall branch.
-    moonfallAnim:{},
     hintFade:(hintStage===0?1:0), shootT:rand(4,8), shots:[], aurora:0, constA:0, deliverHint:0, statuePulse:0, mothFlash:0, mothHint:0, seenMoth:false, seenShy:false, shyHint:0,
     deliverExplainT:0, missHintT:0,
     // moth-collision warning flash (always-on gameplay feedback, not
@@ -4372,14 +4365,6 @@ function reset(){
     weather:'clear', weatherT:rand(18,30), weatherBannerT:0, weatherMsg:'', mysteryT:rand(45,70)
   };
   LIGHTS.forEach((L,i)=>S.lightAnim[i]=0);
-  // Sized off MOONFALL_MILESTONES (declared far above, near the other
-  // village-progression consts) rather than the render-only MOONFALL_LANDMARKS
-  // table (declared later, near drawMoonfallVillage()) -- MOONFALL_LANDMARKS
-  // isn't declared yet at this point in the file's first, top-level reset()
-  // call, and would hit the exact "Cannot access before initialization"
-  // ordering hazard CLAUDE.md documents. The two arrays are index-aligned by
-  // construction (one milestone per landmark group), so this sizes it identically.
-  MOONFALL_MILESTONES.forEach((L,i)=>S.moonfallAnim[i]=0);
   pointer.down=false;
   KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
@@ -5886,26 +5871,6 @@ function update(dt){
   // any group without a milestone mapping, or for a player who hasn't
   // reached it yet.
   LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr||lightGroupRestored(L.thr))S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
-  // E21/E22: Moonfall's own landmark reveal -- same ease-toward-1 rate as
-  // LIGHTS above, but driven purely by the PERSISTENT restorationProgress
-  // (no round-scored S.score component -- Moonfall has no per-round preview
-  // concept, only permanent milestone state). MUST be guarded to only run
-  // while Moonfall is actually the current village -- a real bug, caught
-  // live in the browser, not just reasoned about: this only ever RATCHETS
-  // UP (Math.min(1,...+dt*1.5), never eased back down, exactly like
-  // S.lightAnim's own one-way "once lit, never dims" design), so evaluating
-  // it while playing LUMORA would have permanently pre-lit Moonfall's
-  // landmarks -- since Lumora's own thresholds happen to share the same
-  // numbers (15/40/80/.../450) -- and that pollution would still be sitting
-  // in S.moonfallAnim the instant the player switched into Moonfall,
-  // because switching currentVillage does NOT call reset(). Confirmed via
-  // live repro: completing Lumora, entering Moonfall, and returning to
-  // title (no reset() in between) rendered the Conservatory already
-  // green-glowing at 0 real Moonfall progress. Guarding here means the tick
-  // simply never touches S.moonfallAnim while any other village is current,
-  // so it can never inherit a different village's progress.
-  if(villageProgression.currentVillage==='moonfall')
-    MOONFALL_MILESTONES.forEach((m,i)=>{ if(currentVillageProgress().restorationProgress>=m.threshold)S.moonfallAnim[i]=Math.min(1,(S.moonfallAnim[i]||0)+dt*1.5); });
   // milestone "awaken" fades — cat/windmill used to pop in instantly at their
   // score gate; fade them in over ~0.8s instead so the milestone reads as a
   // brief transition, matching how the village lights already fade in above
@@ -6747,280 +6712,1162 @@ function drawEnvironmentalDetail(dTier){
   // all, which would just be a second unexplained floating decoration in
   // its place. Removed as part of the same pass, not left orphaned.
 }
-// ---------- E21/E22: Moonfall (Village 2) -- real, playable, restorable ----------
-// Repurposes the "D7 Completed Lumora" design reference's own village
-// structure (domed hall, spire tower, cottages, fountain square,
-// conservatory, gardens, bridge, stream, surrounding forest/mountains) as
-// Moonfall's architectural vocabulary, per direct instruction -- this is
-// NOT a redesign of Lumora. Lumora's own renderBG()/drawVillage() body/
-// LIGHTS/bg canvas below are completely untouched; everything here is new
-// and isolated behind ONE branch at the very top of drawVillage() (see its
-// comment), so Lumora's render path executes byte-for-byte as before
-// whenever currentVillage isn't 'moonfall'.
+// ---------- E21/E22 (v2): Moonfall (Village 2) -- ported from the actual
+// design-canvas renderer (lumora-canvas.js's villageScene() and its v*
+// helpers, from the "D7 Completed Lumora" design reference, repurposed as
+// Moonfall per direct instruction), NOT a hand-rolled reinterpretation.
+// Ported function-for-function -- same math, same geometry, same palette --
+// wrapped in one IIFE so its internal names (many deliberately short/
+// generic: rr, bloom, lerp, clamp, gold...) can never collide with anything
+// else in this 11,000-line file. The IIFE exposes exactly one function,
+// drawMoonfallVillage(ctx,pct,t), which is the only thing the rest of the
+// game calls.
 //
-// Two-layer structure, mirroring the EXISTING Lumora bg/LIGHTS split:
-//   1) a baked "forgotten" scene (renderMoonfallBG(), drawn ONCE to its own
-//      offscreen canvas, same "bake it, never redraw the static part"
-//      discipline renderBG() itself already uses) -- sky, moon, mountains,
-//      forest, ground, and every landmark's full COLD/DARK silhouette,
-//      always fully present regardless of restoration (per the D7 spec's
-//      own "forgotten state should not simply be a darkened copy" rule --
-//      it's the same structure, just unlit, exactly like Lumora's own
-//      house() silhouettes already are before LIGHTS turns their windows on).
-//   2) a dynamic "restored" overlay (drawMoonfallVillage(), drawn every
-//      frame Moonfall is the current village) -- warm window/lantern/water
-//      glow per landmark group, eased in via S.moonfallAnim exactly like
-//      S.lightAnim already eases LIGHTS in.
-//
-// Palette: a cool navy/blue-violet environment (sky, mountains, forest,
-// roofs, stone, water) that never rises to the brightness of a lit window;
-// warm amber/gold for every actual light source (windows, lanterns, the
-// fountain emblem, the spire finial) -- the one required contrast (cool
-// environment / warm light), per direct instruction not to make the whole
-// village uniformly blue.
-const MOONFALL_SKY_TOP='#050814', MOONFALL_SKY_MID='#10154a', MOONFALL_SKY_LOW='#1c2464';
-const MOONFALL_MTN_FAR='#232c5c', MOONFALL_MTN_NEAR='#141a3c';
-const MOONFALL_FOREST_FAR='#101a34', MOONFALL_FOREST_NEAR='#0b1226';
-const MOONFALL_ROOF='#233258', MOONFALL_WALL='#151d38', MOONFALL_STONE='#1e2748', MOONFALL_STONE_LT='#3c4874';
-const MOONFALL_WARM='rgba(255,205,120,1)'; // every lit window/lantern/emblem shares this one warm tone
-const MOONFALL_COOL='rgba(160,195,255,1)'; // the one cool magical accent -- fountain water, finial halo, stream shimmer
-// Landmark render data -- ids/positions taken directly from the D7 spec's
-// own "Corrected major landmark map" (section 3), which already fits this
-// game's exact 540x960 frame (same virtual resolution the design reference
-// itself assumes), just recentred slightly to sit fully inside this game's
-// existing play/village band. Index-aligned with MOONFALL_MILESTONES (same
-// order, same length: west cottages -> lantern/path -> bridge/stream ->
-// fountain -> east cottages -> conservatory -> spire tower -> domed hall).
-const MOONFALL_LANDMARKS=[
-  {key:'westCottages'},{key:'lanternPath'},{key:'bridgeStream'},{key:'fountain'},
-  {key:'eastCottages'},{key:'conservatory'},{key:'spireTower'},{key:'domedHall'}
-];
-const bgMoonfall=document.createElement('canvas'); bgMoonfall.width=W; bgMoonfall.height=H;
-// A thin, Moonfall-toned wrapper over the EXISTING cottagePrimitive() --
-// reused function, Moonfall-only colors, per direct instruction ("use
-// existing primitives... create Moonfall-specific geometry only where
-// necessary"). Windows are deliberately NEVER passed here (opts.windows
-// always omitted) -- cottagePrimitive() bakes window rects permanently into
-// whatever canvas it's called on, but a Moonfall window's brightness must
-// change over time as restoration climbs, so window glow is drawn
-// separately, every frame, in drawMoonfallVillage() below (exactly how
-// Lumora's own LIGHTS overlay works against its baked dark house bodies).
-function moonfallCottage(g,x,y,w,h,roofH,opts){
-  cottagePrimitive(g,x,y,w,h,roofH,MOONFALL_WALL,MOONFALL_ROOF,Object.assign({},opts,{windows:[]}));
-}
-// Baked once, at module load (same timing as renderBG()'s own unconditional
-// call below) -- nothing here is redrawn per-frame or per-tier; Moonfall
-// has no seasons, per direct instruction to give it its own fixed identity
-// rather than reusing Lumora's SEASON_PALETTES system.
-function renderMoonfallBG(){
-  const g=bgMoonfall.getContext('2d');
-  const sky=g.createLinearGradient(0,0,0,H);
-  sky.addColorStop(0,MOONFALL_SKY_TOP); sky.addColorStop(0.45,MOONFALL_SKY_MID); sky.addColorStop(1,MOONFALL_SKY_LOW);
-  g.fillStyle=sky; g.fillRect(0,0,W,H);
-  // dense fine stars + a few brighter ones, per D7's "sky is dominant, dense
-  // fine stars everywhere" -- baked once, no per-frame twinkle needed for a
-  // static backdrop layer.
-  for(let i=0;i<170;i++){ g.globalAlpha=0.25+Math.random()*0.5; g.fillStyle='#e8ecff'; g.beginPath(); g.arc(rand(10,W-10),rand(10,H*0.5),rand(0.5,1.4),0,6.28); g.fill(); }
-  for(let i=0;i<16;i++){ g.globalAlpha=0.6+Math.random()*0.3; g.fillStyle='#f4f7ff'; g.beginPath(); g.arc(rand(10,W-10),rand(10,H*0.42),rand(1,1.8),0,6.28); g.fill(); }
-  g.globalAlpha=1;
-  // crescent moon, high and near-centre per D7 -- same carve technique
-  // drawMoon() itself uses (fill circle, clip, fill a dark offset circle on
-  // top to leave a crescent), baked static rather than animated since
-  // Moonfall's own moon is a persistent environmental layer, not a
-  // per-round HUD readout (that's drawMoon()'s separate, untouched job).
-  g.save();
-  g.globalAlpha=0.9; g.drawImage(glowSprite('rgba(220,230,255,1)',46),270-46,182-46,92,92);
-  g.globalAlpha=1;
-  g.fillStyle='#eef4ff'; g.beginPath(); g.arc(270,182,25,0,6.28); g.fill();
-  g.beginPath(); g.arc(270,182,25,0,6.28); g.clip();
-  g.fillStyle=MOONFALL_SKY_MID; g.beginPath(); g.arc(270+14,182-4,24,0,6.28); g.fill();
-  g.restore();
-  // mountains -- two ridgeline() layers (the SAME existing helper Lumora's
-  // own renderBG() uses), far hazy / near solid, valley left open at centre
-  // by construction (ridgeline()'s own randomized peak spacing already
-  // avoids a flat wall; two different seeds keep the two layers from echoing).
-  g.save(); g.globalAlpha=0.55;
-  ridgeline(g,H*0.535,60,MOONFALL_MTN_FAR,11.4);
-  g.restore();
-  ridgeline(g,H*0.615,96,MOONFALL_MTN_NEAR,3.7);
-  // forest -- a full treeline() canopy plus forestEdge() clusters flanking
-  // both sides down toward the foreground, same helpers/parameters shape
-  // Lumora's own renderBG() already calls, just Moonfall-toned.
-  forestEdge(g,0,150,H-232,MOONFALL_FOREST_FAR,2.6);
-  forestEdge(g,390,W,H-228,MOONFALL_FOREST_FAR,7.9);
-  treeline(g,H-206,58,MOONFALL_FOREST_NEAR,9.3);
-  // ground plane
-  g.fillStyle='#0d1330';
-  g.beginPath(); g.moveTo(0,H); g.lineTo(0,H-150); g.quadraticCurveTo(W*0.5,H-196,W,H-136); g.lineTo(W,H); g.closePath(); g.fill();
-  // village paths, radiating from the plaza toward the four legs D7
-  // describes (centre/west/east/south) -- subtle, never brighter than a
-  // firefly, same restrained line treatment Lumora's own path drawing uses.
-  g.save();
-  g.strokeStyle='rgba(60,72,120,0.4)'; g.lineWidth=8; g.lineCap='round';
-  g.beginPath(); g.moveTo(262,828); g.quadraticCurveTo(262,720,262,612); g.stroke(); // centre, up to the domed hall
-  g.beginPath(); g.moveTo(262,828); g.quadraticCurveTo(180,830,110,820); g.stroke(); // west, to the cottages
-  g.beginPath(); g.moveTo(262,828); g.quadraticCurveTo(340,810,420,780); g.stroke(); // east, to the conservatory
-  g.beginPath(); g.moveTo(262,828); g.quadraticCurveTo(250,870,230,900); g.stroke(); // south, to the bridge
-  g.restore();
+// Reveal model: unlike Lumora's own discrete 8-milestone LIGHTS system,
+// this renders every landmark's reveal as a smooth, continuous function of
+// `pct` alone (0..1 = currentVillageProgress().restorationProgress /
+// completionThreshold) -- there is no eased/animated intermediate state to
+// maintain frame-to-frame (no S.moonfallAnim-equivalent), so the whole
+// class of "stale eased state leaking across a village switch" bug E21's
+// first pass hit is structurally impossible here: every frame is a pure
+// function of the CURRENT persistent progress, nothing is remembered
+// between frames. Moonfall's own discrete 8-milestone BANNER/Night-Complete
+// feedback (MOONFALL_MILESTONES, grantVillageProgress(), etc.) is completely
+// separate from this rendering and untouched by it.
+const drawMoonfallVillage = (function(){
+  const TAU=Math.PI*2, W=540, H=960;
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v, c01=v=>clamp(v,0,1);
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const rnd=seed=>{ let s=seed||1; return ()=>(s=(s*16807)%2147483647)/2147483647; };
+  const RGB_GOLD='251,210,107';
+  const gold=a=>`rgba(251,210,107,${a})`;
+  let g=null; // the active 2D context for this call -- set once at the top of the exported function below
 
-  // ---- landmark silhouettes, forgotten/cold, always fully present ----
-  // West Cottage Pair (D7 §3: 52,668,124,110 and 20,784,128,112)
-  moonfallCottage(g,58,778,70,54,32,{chimney:true,door:true});
-  moonfallCottage(g,22,878,74,56,34,{step:true,secondaryRoof:true,door:true});
-  // Stone Bridge & Stream (D7 §3: deck 166->308 @ y872) -- a simple arch
-  // deck + two rail posts; the stream itself is the dark ground gap under it.
-  g.fillStyle=MOONFALL_STONE;
-  g.beginPath(); g.moveTo(160,896); g.quadraticCurveTo(237,864,314,896); g.lineTo(314,910); g.quadraticCurveTo(237,880,160,910); g.closePath(); g.fill();
-  g.fillStyle='rgba(10,16,40,0.6)';
-  g.beginPath(); g.ellipse(237,908,120,16,0,0,6.28); g.fill();
-  // Fountain Square (D7 §3/§4: r110x39 @ 262,828) -- dry/cold plaza + basin,
-  // same concentric-ellipse construction drawFountain() already uses for
-  // Lumora's OWN (purchase-gated) fountain, just Moonfall-toned and never
-  // ownership-gated -- Moonfall's fountain is a pure restoration landmark,
-  // not a second Workshop purchase (per direct instruction: no new economy).
-  g.fillStyle=MOONFALL_STONE; g.beginPath(); g.ellipse(262,828,58,22,0,0,6.28); g.fill();
-  g.strokeStyle=MOONFALL_STONE_LT; g.globalAlpha=0.5; g.lineWidth=1.4;
-  g.beginPath(); g.ellipse(262,828,58,22,0,0,6.28); g.stroke();
-  g.beginPath(); g.ellipse(262,828,38,14,0,0,6.28); g.stroke();
-  g.globalAlpha=1;
-  g.fillStyle='rgba(20,28,50,0.7)'; g.beginPath(); g.ellipse(262,828,26,9,0,0,6.28); g.fill();
-  // East Cottages (D7 §3: 356,636,90,84 and 350,776,128,112)
-  moonfallCottage(g,362,700,54,44,26,{door:true});
-  moonfallCottage(g,356,860,72,54,32,{chimney:true,door:true});
-  // Glass Conservatory (D7 §3: 420,700,110,82)
-  g.fillStyle=MOONFALL_WALL; g.fillRect(424,704,86,60);
-  g.fillStyle=MOONFALL_STONE;
-  g.beginPath(); g.moveTo(414,704); g.lineTo(467,676); g.lineTo(520,704); g.closePath(); g.fill();
-  // Spire Tower (D7 §3/§5: 150,570,44,148, tip y556) -- the tallest
-  // structure, deliberately left of the domed hall per the reference.
-  g.fillStyle=MOONFALL_WALL; g.fillRect(158,588,28,130);
-  g.fillStyle=MOONFALL_ROOF;
-  g.beginPath(); g.moveTo(150,588); g.lineTo(172,540); g.lineTo(194,588); g.closePath(); g.fill();
-  g.strokeStyle=MOONFALL_STONE_LT; g.globalAlpha=0.5; g.lineWidth=1.5;
-  g.beginPath(); g.moveTo(172,540); g.lineTo(172,528); g.stroke(); // finial pole
-  g.globalAlpha=1;
-  // Domed Hall (D7 §3/§5: 210,552,116,132) -- the widest, most ornate mass;
-  // pairs with the spire tower as the composition's two tallest silhouettes.
-  g.fillStyle=MOONFALL_WALL; g.fillRect(214,616,108,68);
-  g.fillStyle=MOONFALL_ROOF;
-  g.beginPath(); g.arc(268,616,54,Math.PI,0); g.closePath(); g.fill();
-  g.beginPath(); g.rect(258,552,20,10); g.fill(); // small mounted lens on the dome crest
-}
-renderMoonfallBG();
-// Small helper for the dynamic "restored" overlay -- a cluster of warm glow
-// dots at fixed relative offsets from one anchor, faded in by `a` (0-1),
-// with the SAME gentle per-dot flicker LIGHTS' own overlay already uses.
-// Kept generic (color param) so the conservatory's green interior glow and
-// the fountain/finial's cool accent can reuse it too, not just warm windows.
-function moonfallGlowDots(anchorX,anchorY,dots,a,color){
-  if(a<=0.001)return;
-  dots.forEach((d,i)=>{
-    const flick=0.85+0.15*Math.sin(S.t*6+i*1.7);
-    const r=d.r||6;
-    ctx.globalAlpha=a*flick;
-    ctx.drawImage(glowSprite(color||MOONFALL_WARM,r*2.2),anchorX+d.x-r*2.2,anchorY+d.y-r*2.2,r*4.4,r*4.4);
-    ctx.fillStyle=color||'#ffd987';
-    ctx.beginPath(); ctx.arc(anchorX+d.x,anchorY+d.y,Math.min(2.6,r*0.4),0,6.28); ctx.fill();
-  });
-  ctx.globalAlpha=1;
-}
-// The dynamic restored-state overlay, drawn every frame Moonfall is current
-// (see drawVillage()'s own branch). Each block reads S.moonfallAnim[i] --
-// index-aligned with MOONFALL_MILESTONES/MOONFALL_LANDMARKS -- eased toward
-// 1 by the update() tick alongside LIGHTS' own S.lightAnim.
-function drawMoonfallVillage(){
-  ctx.drawImage(bgMoonfall,0,0);
-  const a=S.moonfallAnim;
-  // village-wide ambient warm bloom over the plaza, scaling with OVERALL
-  // progress -- the same "villageGlow grows with restoration" idea Lumora's
-  // own S.villageGlow already expresses, recomputed here from the
-  // persistent restorationProgress directly (no round-scored ramp needed).
-  const overall=clamp(currentVillageProgress().restorationProgress/MOONFALL_COMPLETION_THRESHOLD,0,1);
-  if(overall>0){
-    const gr=ctx.createRadialGradient(262,820,20,262,820,W*0.7);
-    gr.addColorStop(0,'rgba(255,195,110,'+(0.16*overall)+')');
-    gr.addColorStop(1,'rgba(255,195,110,0)');
-    ctx.fillStyle=gr; ctx.fillRect(0,H-420,W,420);
+  function rr(x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    g.beginPath();
+    g.moveTo(x+r,y);
+    g.lineTo(x+w-r,y); g.arcTo(x+w,y,x+w,y+r,r);
+    g.lineTo(x+w,y+h-r); g.arcTo(x+w,y+h,x+w-r,y+h,r);
+    g.lineTo(x+r,y+h); g.arcTo(x,y+h,x,y+h-r,r);
+    g.lineTo(x,y+r); g.arcTo(x,y,x+r,y,r);
+    g.closePath();
   }
-  // a handful of caught-light points seeded into the forest flanks, scaled
-  // by overall progress -- D7 §3's "warm points of light caught among the
-  // trunks", kept modest (not per-brick/hundreds of props).
-  MOONFALL_FLANK_LIGHTS.forEach((p,i)=>{
-    ctx.globalAlpha=overall*0.5*(0.7+0.3*Math.sin(S.t*3+i));
-    ctx.drawImage(glowSprite(MOONFALL_WARM,4),p.x-4,p.y-4,8,8);
-  });
-  ctx.globalAlpha=1;
-  // West Cottage Pair
-  moonfallGlowDots(0,0,[{x:78,y:762,r:3.2},{x:98,y:762,r:3.2},{x:44,y:862,r:3.2},{x:66,y:868,r:3.2}],a[0]);
-  // Lantern & Path Network -- posts along the four path legs drawn above;
-  // no baked post shape (mirrors LIGHTS' own lantern entries, which bake no
-  // unlit silhouette either), only the lit glow itself.
-  moonfallGlowDots(0,0,[{x:262,y:700,r:4},{x:150,y:824,r:4},{x:374,y:800,r:4},{x:240,y:882,r:4}],a[1]);
-  if(a[1]>0.001){ // lamplit path tint, same alpha as the posts that cast it
-    ctx.save(); ctx.globalAlpha=a[1]*0.5;
-    ctx.strokeStyle='rgba(230,180,110,0.5)'; ctx.lineWidth=8; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(262,828); ctx.quadraticCurveTo(262,720,262,612); ctx.stroke();
-    ctx.restore();
+  function bloom(x,y,r,rgb,a){
+    const gr=g.createRadialGradient(x,y,0,x,y,r);
+    gr.addColorStop(0,`rgba(${rgb},${a})`);
+    gr.addColorStop(.42,`rgba(${rgb},${a*.34})`);
+    gr.addColorStop(1,`rgba(${rgb},0)`);
+    g.save(); g.fillStyle=gr; g.beginPath(); g.arc(x,y,r,0,TAU); g.fill(); g.restore();
   }
-  // Stone Bridge & Stream
-  moonfallGlowDots(0,0,[{x:310,y:892,r:4}],a[2]); // bridge lantern, far post
-  if(a[2]>0.001){
-    ctx.save(); ctx.globalAlpha=a[2]*0.6;
-    ctx.strokeStyle=MOONFALL_COOL; ctx.lineWidth=3; ctx.lineCap='round';
-    const sh=Math.sin(S.t*2)*3;
-    ctx.beginPath(); ctx.ellipse(237,908+sh*0.1,116,14,0,0,6.28); ctx.stroke();
-    ctx.restore();
+  // solid-fill crescent sliver -- safe over lit surfaces (no dark cut-out disc)
+  function sliver(cx,cy,r,col,bulge){
+    g.save(); g.beginPath();
+    g.arc(cx,cy,r,Math.PI*.5,Math.PI*1.5,false);
+    g.quadraticCurveTo(cx+r*(bulge==null?.34:bulge),cy,cx,cy+r);
+    g.closePath(); g.fillStyle=col; g.fill(); g.restore();
   }
-  // Fountain Square -- water arcs + crescent emblem, cool accent (the one
-  // deliberately cool-lit element amid the warm windows, per D7 §3).
-  if(a[3]>0.001){
-    const shimmer=0.5+0.5*Math.sin(S.t*1.6);
-    ctx.globalAlpha=a[3]*(0.5+0.2*shimmer);
-    ctx.drawImage(glowSprite(MOONFALL_COOL,34),262-34,828-34,68,68);
-    ctx.globalAlpha=a[3];
-    ctx.strokeStyle='rgba(190,220,255,0.55)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.ellipse(262,828,26,9,0,0,6.28); ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(262,828,16,5.5,0,0,6.28); ctx.stroke();
-    moonfallGlowDots(262,802,[{x:0,y:0,r:5}],a[3],MOONFALL_WARM); // the floating crescent emblem, warm-lit
+  function crescent(cx,cy,r,col,carve){
+    g.save(); g.beginPath(); g.arc(cx,cy,r,0,TAU); g.fillStyle=col; g.fill();
+    g.beginPath(); g.arc(cx+r*.46,cy-r*.17,r*.92,0,TAU);
+    g.fillStyle=carve||'rgba(20,27,56,0.94)'; g.fill(); g.restore();
   }
-  ctx.globalAlpha=1;
-  // East Cottages -- includes the round rose-window medallion (D7 §3)
-  moonfallGlowDots(0,0,[{x:388,y:680,r:3},{x:378,y:830,r:3.4},{x:404,y:836,r:3.4}],a[4]);
-  moonfallGlowDots(0,0,[{x:414,y:820,r:6}],a[4]*0.9,MOONFALL_WARM); // rose window medallion
-  // Glass Conservatory -- green-lit interior + plant dots + sign, the one
-  // non-amber building light in the scene per D7 §3.
-  if(a[5]>0.001){
-    // Panes, not one flat wash -- a solid full-rect fill read as a plain
-    // green box rather than lit glass when this was live-verified in
-    // Chrome at full restoration. A small mullion grid (4x3 panes with gaps
-    // between them) is what actually reads as "glazed", cheaply, without a
-    // second geometry system.
-    ctx.globalAlpha=a[5]*0.75;
-    ctx.fillStyle='rgba(120,220,150,1)';
-    for(let gx=0;gx<4;gx++)for(let gy=0;gy<3;gy++)ctx.fillRect(424+gx*22+2,704+gy*20+2,18,16);
-    ctx.globalAlpha=1;
-    for(let i=0;i<10;i++){ ctx.globalAlpha=a[5]*0.7; ctx.fillStyle='rgba(150,235,170,1)'; ctx.beginPath(); ctx.arc(430+((i*8)%80),740+((i*13)%22),1.8,0,6.28); ctx.fill(); }
-    ctx.globalAlpha=1;
-    moonfallGlowDots(467,706,[{x:0,y:0,r:5}],a[5],MOONFALL_WARM); // sign sunburst, warm
+
+  const SLATE='#1b2749', ROOF='#22377a', ROOF2='#2c4796';
+  const STONE='#1f2739', STONE2='#252e44', WOOD='#2f2519';
+  const WARM='255,214,130', GLASSG='210,246,200';
+  // VISUAL milestone bands -- these are visual reading positions along the
+  // continuous pct (0..1), NOT the game's own 8 discrete delivery
+  // milestones (which use a different, unrelated threshold ladder for
+  // banner/Night-Complete feedback -- see MOONFALL_MILESTONES elsewhere).
+  const LMK={ west:.15, paths:.28, bridge:.42, plaza:.55, east:.66, glass:.78, clock:.88, dome:1.0 };
+  const ramp=(p,th,w)=>c01((p-th)/(w||.10));
+
+  function vStars(seed,n,ymax,a){
+    const r=rnd(seed);
+    for(let i=0;i<n;i++){
+      const x=r()*W, y=r()*ymax, s=.5+r()*1.1;
+      g.beginPath(); g.arc(x,y,s,0,TAU); g.fillStyle=`rgba(233,238,255,${(.22+r()*.55)*a})`; g.fill();
+    }
   }
-  // Spire Tower -- windows up the shaft + finial glow
-  moonfallGlowDots(0,0,[{x:172,y:606,r:2.6},{x:172,y:634,r:2.6},{x:172,y:662,r:2.6},{x:172,y:690,r:2.6}],a[6]);
-  moonfallGlowDots(0,0,[{x:172,y:526,r:5}],a[6],MOONFALL_COOL); // crescent finial, cool accent
-  // Domed Hall -- arch windows + doorway + dome crest, the widest lit mass,
-  // closing the sequence at completion.
-  moonfallGlowDots(0,0,[{x:238,y:636,r:3},{x:260,y:630,r:3},{x:282,y:630,r:3},{x:304,y:636,r:3},{x:268,y:672,r:4}],a[7]);
-  moonfallGlowDots(0,0,[{x:268,y:558,r:4}],a[7],MOONFALL_COOL); // dome crest lens
-}
-// Seeded once, module-level -- deterministic per session (not re-randomized
-// every frame), same "no per-frame Math.random() in a hot loop" discipline
-// forestEdge()'s own seeded sine spacing already follows.
-const MOONFALL_FLANK_LIGHTS=[];
-for(let i=0;i<12;i++)MOONFALL_FLANK_LIGHTS.push({x: i%2?rand(10,120):rand(420,530), y:rand(H-300,H-180)});
+  /* MOUNTAIN RIDGE -- a natural range, not low-poly. */
+  function vRidge(y,h,col,seed,n,o){
+    o=o||{};
+    const r=rnd(seed);
+    const am=[.40,.30,.19,.11], atot=1.0;
+    const ph=[r()*9,r()*9,r()*9,r()*9], fb=o.fq||1;
+    const fq=[(2.5+r()*1.5)*fb,(6+r()*3)*fb,(13+r()*5)*fb,(26+r()*8)*fb];
+    const dip=x=>1-(o.dip||0)*Math.pow(Math.cos(((x/W)*2-1)*1.5),2);
+    const crest=x=>{
+      const u=(x+20)/(W+40);
+      let v=0;
+      for(let k=0;k<4;k++) v+=am[k]*Math.sin(ph[k]+u*fq[k]*Math.PI*2);
+      v=(v/atot)*.5+.5;
+      return h*(.42+.58*v)*dip(x);
+    };
+    const pts=[];
+    for(let x=-20;x<=W+20;x+=6) pts.push([x,y+h-crest(x)]);
+    g.save();
+    g.beginPath(); g.moveTo(-20,y+h); g.lineTo(pts[0][0],pts[0][1]);
+    for(let i=1;i<pts.length-1;i++){
+      const a=pts[i], b=pts[i+1];
+      g.quadraticCurveTo(a[0],a[1],(a[0]+b[0])/2,(a[1]+b[1])/2);
+    }
+    g.lineTo(W+20,pts[pts.length-1][1]); g.lineTo(W+20,y+h); g.closePath();
+    g.fillStyle=col; g.fill();
+    g.save(); g.clip();
+    if(o.shade){
+      const sg=g.createLinearGradient(0,y,0,y+h);
+      sg.addColorStop(0,`rgba(120,150,210,${o.shade*.5})`);
+      sg.addColorStop(.55,'rgba(0,0,0,0)');
+      sg.addColorStop(1,`rgba(4,8,26,${o.shade})`);
+      g.fillStyle=sg; g.fillRect(-20,y-h,W+40,h*2.2);
+    }
+    const hz=g.createLinearGradient(0,y+h*.30,0,y+h);
+    hz.addColorStop(0,'rgba(46,70,138,0)');
+    hz.addColorStop(1,`rgba(56,84,158,${o.haze==null?.30:o.haze})`);
+    g.fillStyle=hz; g.fillRect(-20,y-h,W+40,h*2.2);
+    g.restore();
+    g.restore();
+  }
+  /* PINE ROW -- tapered tiered conifers with a trunk and a cool moonlit edge. */
+  function vTrees(y,h,col,seed,n,o){
+    o=o||{};
+    const r=rnd(seed), rim=o.rim==null?.10:o.rim;
+    for(let i=0;i<n;i++){
+      const x=-10+(W+20)*(i/(n-1))+(r()-.5)*(o.jitter||16);
+      const hh=h*(.5+r()*.95), wd=hh*(.24+r()*.10), top=y-hh*.18;
+      const base=y+hh*.30, lean=(r()-.5)*hh*.06, K=9;
+      g.fillStyle='rgba(9,16,14,0.9)';
+      g.fillRect(x-hh*.022,base-hh*.02,hh*.045,hh*.16);
+      const L=[], R=[];
+      for(let k=1;k<=K;k++){
+        const u=k/K, ax=x+lean*u*u;
+        const tap=Math.pow(u,.82);
+        const ty=top+(base-top)*u;
+        L.push([ax-wd*tap*(.80+r()*.32), ty+hh*.022*(.4+r()), ax-wd*tap*(.34+r()*.22), ty-hh*(.028+r()*.022)]);
+        R.push([ax+wd*tap*(.80+r()*.32), ty+hh*.022*(.4+r()), ax+wd*tap*(.34+r()*.22), ty-hh*(.028+r()*.022)]);
+      }
+      const outline=()=>{
+        g.beginPath(); g.moveTo(x,top);
+        for(let k=0;k<K;k++){ g.lineTo(L[k][2],L[k][3]); g.lineTo(L[k][0],L[k][1]); }
+        g.lineTo(x+lean,base+hh*.01);
+        for(let k=K-1;k>=0;k--){ g.lineTo(R[k][0],R[k][1]); g.lineTo(R[k][2],R[k][3]); }
+        g.closePath();
+      };
+      outline();
+      g.fillStyle=col; g.fill();
+      g.save(); outline(); g.clip();
+      const sg=g.createLinearGradient(x-wd,0,x+wd,0);
+      sg.addColorStop(0,'rgba(150,190,240,0.05)'); sg.addColorStop(.45,'rgba(0,0,0,0)');
+      sg.addColorStop(1,'rgba(0,0,0,0.30)');
+      g.fillStyle=sg; g.fillRect(x-wd*1.4,top,wd*2.8,base-top+4);
+      g.restore();
+      if(rim>.01){
+        g.strokeStyle=`rgba(126,164,216,${rim})`; g.lineWidth=1; g.lineJoin='round';
+        g.beginPath(); g.moveTo(x,top);
+        for(let k=0;k<K;k++){ g.lineTo(L[k][2],L[k][3]); g.lineTo(L[k][0],L[k][1]); }
+        g.stroke();
+      }
+      if(o.warm&&r()<.35){
+        const wgr=g.createRadialGradient(x,y+hh*.1,1,x,y+hh*.1,hh*.5);
+        wgr.addColorStop(0,`rgba(240,180,110,${.07*o.warm})`); wgr.addColorStop(1,'rgba(240,180,110,0)');
+        g.fillStyle=wgr; g.beginPath(); g.arc(x,y+hh*.1,hh*.5,0,TAU); g.fill();
+      }
+    }
+  }
+  function vTreeGlow(seed,n,a){
+    if(a<=.02) return;
+    const r=rnd(seed);
+    for(let i=0;i<n;i++){
+      const side=r()<.5, x=side?4+r()*150:386+r()*150, y=512+r()*300;
+      const k=(.35+r()*.65)*a;
+      bloom(x,y,8,RGB_GOLD,.34*k);
+      g.beginPath(); g.arc(x,y,1.2,0,TAU); g.fillStyle=gold(.72*k); g.fill();
+    }
+  }
+  function vConifer(x,y,h,col,seed){
+    const r=rnd(seed);
+    for(let k=0;k<3;k++){
+      const px=x+(r()-.5)*46, hh=h*(.65+r()*.55), py=y+(r()-.5)*22;
+      g.beginPath(); g.moveTo(px,py-hh);
+      g.lineTo(px-hh*.26,py-hh*.58); g.lineTo(px-hh*.16,py-hh*.55);
+      g.lineTo(px-hh*.32,py-hh*.16); g.lineTo(px+hh*.32,py-hh*.16);
+      g.lineTo(px+hh*.16,py-hh*.55); g.lineTo(px+hh*.26,py-hh*.58);
+      g.closePath(); g.fillStyle=col; g.fill();
+    }
+  }
+  /* WINDOW -- warm interior light that spills onto the wall below and the ground. */
+  function vWin(x,y,w,h,on,arch,kmul){
+    const cx=x+w/2, cy=y+h/2, big=Math.max(w,h);
+    const jitter=((Math.sin(x*12.9898+y*78.233)*43758.5453)%1+1)%1;
+    const k=c01((on>.02?(.66+jitter*.34):1)*(kmul==null?1:kmul));
+    const path=()=>{
+      if(arch){ g.beginPath(); g.moveTo(x,y+h); g.lineTo(x,y+w/2); g.arc(cx,y+w/2,w/2,Math.PI,0); g.lineTo(x+w,y+h); g.closePath(); }
+      else rr(x,y,w,h,1.5);
+    };
+    if(on>.02){
+      const lit=on*k;
+      const sp=g.createRadialGradient(cx,cy+h*.18,big*.12,cx,cy+h*.18,big*1.5);
+      sp.addColorStop(0,`rgba(255,196,110,${.20*lit})`);
+      sp.addColorStop(.55,`rgba(240,166,86,${.075*lit})`);
+      sp.addColorStop(1,'rgba(230,158,80,0)');
+      g.fillStyle=sp; g.beginPath(); g.ellipse(cx,cy+h*.18,big*1.5,big*1.25,0,0,TAU); g.fill();
+      const dn=g.createLinearGradient(0,y+h,0,y+h+big*1.1);
+      dn.addColorStop(0,`rgba(255,190,104,${.15*lit})`); dn.addColorStop(1,'rgba(255,190,104,0)');
+      g.fillStyle=dn;
+      g.beginPath(); g.moveTo(x-w*.12,y+h); g.lineTo(x+w*1.12,y+h);
+      g.lineTo(x+w*1.5,y+h+big*1.05); g.lineTo(x-w*.5,y+h+big*1.05); g.closePath(); g.fill();
+      path();
+      const lg=g.createLinearGradient(0,y,0,y+h);
+      lg.addColorStop(0,`rgba(255,228,166,${(.72+.24*k)*on})`);
+      lg.addColorStop(.55,`rgba(255,205,120,${(.74+.22*k)*on})`);
+      lg.addColorStop(1,`rgba(236,158,64,${(.62+.26*k)*on})`);
+      g.fillStyle=lg; g.fill();
+      const core=g.createRadialGradient(cx,y+h*.68,0,cx,y+h*.68,big*.8);
+      core.addColorStop(0,`rgba(255,244,206,${.55*lit})`); core.addColorStop(1,'rgba(255,236,180,0)');
+      g.save(); path(); g.clip(); g.fillStyle=core; g.fillRect(x-w,y-h,w*3,h*3); g.restore();
+      g.save(); path(); g.strokeStyle=`rgba(58,38,18,${.5+.3*lit})`; g.lineWidth=Math.max(1,big*.09); g.stroke(); g.restore();
+      g.strokeStyle=`rgba(52,34,16,${.42*(.5+lit)})`; g.lineWidth=Math.max(.8,big*.05);
+      g.beginPath(); g.moveTo(x,cy+h*.12); g.lineTo(x+w,cy+h*.12); g.stroke();
+      bloom(cx,cy,big*(1.35+.45*k),'255,196,112',.15*lit);
+      bloom(cx,cy+h*.2,big*.7,'255,232,178',.18*lit);
+    } else {
+      path();
+      const dgr=g.createLinearGradient(0,y,0,y+h);
+      dgr.addColorStop(0,'rgba(26,36,64,0.95)'); dgr.addColorStop(1,'rgba(13,19,38,0.95)');
+      g.fillStyle=dgr; g.fill();
+      g.save(); path(); g.strokeStyle='rgba(64,80,116,0.55)'; g.lineWidth=Math.max(1,big*.08); g.stroke(); g.restore();
+    }
+  }
+  function vIvy(x,y,w,h,seed,a){
+    if(a<=.02) return;
+    const r=rnd(seed);
+    for(let i=0;i<26;i++){
+      const px=x+r()*w, py=y+r()*h;
+      g.beginPath(); g.arc(px,py,.8+r()*1.5,0,TAU);
+      g.fillStyle=`rgba(${44+r()*30|0},${86+r()*40|0},${52+r()*20|0},${(.5+r()*.5)*a})`; g.fill();
+    }
+  }
+  /* COTTAGE -- three silhouette variants (v 0/1/2) */
+  function vCottage(o){
+    const x=o.x, y=o.y, w=o.w, h=o.h, on=o.on||0, cx=x+w*.5;
+    const seed=o.seed||9, r=rnd(seed), v=o.v==null?seed%3:o.v;
+    const wallTop=y+h*.42, base=y+h, foot=y+h*.87;
+    const ov=w*.16, eaveY=wallTop+h*.05, apex=y+(v===1?-h*.04:0);
+    const lx=x-ov, rx2=x+w+ov;
+    g.save();
+    if(on>.02) bloom(cx,y+h*.74,w*.95,WARM,.10*on);
+    g.beginPath(); g.ellipse(cx,base+h*.015,w*.64,h*.055,0,0,TAU);
+    g.fillStyle='rgba(2,5,9,0.72)'; g.fill();
+    if(o.chimney){
+      const chx=x+w*(v===1?.14:.74), chw=w*.12;
+      g.fillStyle='#242b3e'; g.fillRect(chx,y+h*.04,chw,h*.34);
+      g.fillStyle='#313a55'; g.fillRect(chx-chw*.20,y+h*.04,chw*1.4,h*.04);
+    }
+    g.fillStyle='#171d2d'; rr(x-w*.02,foot,w*1.04,base-foot+1,2); g.fill();
+    for(let i=0;i<9;i++){
+      g.fillStyle=`rgba(102,124,168,${.04+r()*.06})`;
+      g.fillRect(x+r()*w*.88,foot+r()*(base-foot)*.72,w*.10,1.8);
+    }
+    const wg=g.createLinearGradient(x,0,x+w,0);
+    wg.addColorStop(0,'#3e2f1f'); wg.addColorStop(.55,'#342719'); wg.addColorStop(1,'#281e13');
+    g.fillStyle=wg; g.fillRect(x,wallTop,w,foot-wallTop);
+    const wallH=foot-wallTop, mid=wallTop+wallH*.54;
+    g.fillStyle='rgba(70,58,42,0.30)';
+    [[.09,.19],[.34,.32],[.72,.20]].forEach(u=>g.fillRect(x+w*u[0],wallTop+wallH*.06,w*u[1],wallH*.42));
+    g.fillStyle='rgba(18,13,8,0.58)';
+    [.05,.29,.68,.93].forEach(u=>g.fillRect(x+w*u,wallTop,w*.034,wallH));
+    g.fillRect(x,mid,w,Math.max(1.5,h*.02));
+    g.strokeStyle='rgba(18,13,8,0.5)'; g.lineWidth=Math.max(1.2,w*.022);
+    g.beginPath(); g.moveTo(x+w*.07,mid); g.lineTo(x+w*.20,wallTop+wallH*.10);
+    g.moveTo(x+w*.93,mid); g.lineTo(x+w*.80,wallTop+wallH*.10); g.stroke();
+    g.beginPath(); g.moveTo(x+w*.30,foot); g.lineTo(x+w*.42,mid+wallH*.06);
+    g.moveTo(x+w*.68,foot); g.lineTo(x+w*.56,mid+wallH*.06); g.stroke();
+    g.fillStyle='rgba(24,17,10,0.62)';
+    g.fillRect(x-w*.012,wallTop,w*.045,wallH); g.fillRect(x+w*.967,wallTop,w*.045,wallH);
+    g.fillStyle='rgba(152,182,238,0.06)'; g.fillRect(x,wallTop,w,1.5);
+    g.fillStyle='rgba(4,7,14,0.34)'; g.fillRect(x,wallTop,w,h*.035);
+    if(v!==1){
+      const sx=v===0?x+w*1.00:x-w*.26, sw2=w*.26, sy=foot-h*.20;
+      g.fillStyle='#2c2116'; g.fillRect(sx,sy,sw2,foot-sy);
+      g.beginPath();
+      g.moveTo(sx-w*.05,sy); g.lineTo(sx+sw2+w*.05,sy-h*.07);
+      g.lineTo(sx+sw2+w*.05,sy-h*.02); g.lineTo(sx-w*.05,sy+h*.05); g.closePath();
+      g.fillStyle=ROOF2; g.fill();
+      g.strokeStyle='rgba(172,202,255,0.20)'; g.lineWidth=1; g.stroke();
+      g.fillStyle='#171d2d'; g.fillRect(sx,foot,sw2,base-foot);
+      vWin(sx+sw2*.22,sy+h*.05,sw2*.55,h*.07,on*.8,false);
+    }
+    g.beginPath(); g.moveTo(lx-2,eaveY+h*.045); g.lineTo(cx,apex+h*.045); g.lineTo(rx2+2,eaveY+h*.045);
+    g.closePath(); g.fillStyle='#0c1226'; g.fill();
+    g.beginPath();
+    if(v===2){
+      g.moveTo(lx,eaveY); g.quadraticCurveTo(x+w*.18,eaveY-h*.10,cx,apex);
+      g.quadraticCurveTo(x+w*.82,eaveY-h*.10,rx2,eaveY);
+    } else { g.moveTo(lx,eaveY); g.lineTo(cx,apex); g.lineTo(rx2,eaveY); }
+    g.closePath();
+    const rg=g.createLinearGradient(lx,apex,rx2,eaveY);
+    rg.addColorStop(0,ROOF2); rg.addColorStop(.48,o.roof||ROOF); rg.addColorStop(1,'#15224a');
+    g.fillStyle=rg; g.fill();
+    for(let i=1;i<7;i++){
+      const u=i/7, fy=apex+(eaveY-apex)*u, hw=(cx-lx)*u;
+      g.strokeStyle='rgba(9,14,32,0.55)'; g.lineWidth=1.4;
+      g.beginPath(); g.moveTo(cx-hw,fy); g.lineTo(cx+hw,fy); g.stroke();
+      g.strokeStyle='rgba(150,184,255,0.13)'; g.lineWidth=1;
+      g.beginPath(); g.moveTo(cx-hw,fy-1.4); g.lineTo(cx+hw,fy-1.4); g.stroke();
+      const step=Math.max(5,w*.085);
+      g.strokeStyle='rgba(9,14,32,0.34)'; g.lineWidth=.9;
+      for(let sx2=cx-hw+(i%2?step*.5:0);sx2<cx+hw;sx2+=step){
+        g.beginPath(); g.moveTo(sx2,fy); g.lineTo(sx2,fy-(eaveY-apex)/7); g.stroke();
+      }
+    }
+    g.strokeStyle='rgba(22,16,9,0.8)'; g.lineWidth=Math.max(1.2,w*.018);
+    for(let i=0;i<5;i++){
+      const px=lx+(rx2-lx)*(.08+i*.21);
+      g.beginPath(); g.moveTo(px,eaveY+h*.012); g.lineTo(px,eaveY+h*.05); g.stroke();
+    }
+    g.strokeStyle='rgba(172,202,255,0.30)'; g.lineWidth=1.4;
+    g.beginPath(); g.moveTo(lx,eaveY); g.lineTo(cx,apex); g.lineTo(rx2,eaveY); g.stroke();
+    const gTop=apex+h*.07, gL=x+w*.07, gR=x+w*.93, gB=wallTop+h*.015;
+    g.beginPath(); g.moveTo(gL,gB); g.lineTo(cx,gTop); g.lineTo(gR,gB); g.closePath();
+    g.fillStyle='#352718'; g.fill();
+    g.strokeStyle='rgba(16,11,6,0.62)'; g.lineWidth=1.2; g.stroke();
+    g.strokeStyle='rgba(20,14,8,0.45)';
+    g.beginPath(); g.moveTo(cx,gTop+h*.02); g.lineTo(cx,gB); g.stroke();
+    if(o.gable!==0){
+      const ay=gB-h*.11;
+      if(v===2){
+        const ar=w*.075;
+        g.beginPath(); g.arc(cx,ay,ar,0,TAU);
+        g.fillStyle=on>.02?`rgba(255,228,168,${.88*on})`:'rgba(15,21,40,0.92)'; g.fill();
+        g.strokeStyle='rgba(88,104,148,0.8)'; g.lineWidth=1;
+        g.beginPath(); g.arc(cx,ay,ar,0,TAU); g.stroke();
+        if(on>.02) bloom(cx,ay,ar*4,WARM,.24*on);
+      } else vWin(cx-w*.065,ay-h*.05,w*.13,h*.12,on,true);
+    }
+    if(v===0){
+      const dx=x+w*.18, dw=w*.20, dy2=eaveY-h*.09;
+      g.beginPath(); g.moveTo(dx-dw*.18,dy2+h*.06); g.lineTo(dx+dw*.5,dy2-h*.05); g.lineTo(dx+dw*1.18,dy2+h*.06);
+      g.closePath(); g.fillStyle='#1d2e5e'; g.fill();
+      g.strokeStyle='rgba(172,202,255,0.24)'; g.lineWidth=1; g.stroke();
+      g.fillStyle='#33261a'; g.fillRect(dx,dy2+h*.055,dw,h*.06);
+      vWin(dx+dw*.22,dy2+h*.07,dw*.56,h*.045,on,false);
+    }
+    const ww=w*.18, wh=h*.19;
+    vWin(x+w*.09,wallTop+h*.07,ww,wh,on,true);
+    vWin(x+w*.73,wallTop+h*.07,ww,wh,on,true);
+    g.strokeStyle='rgba(24,17,10,0.7)'; g.lineWidth=1;
+    [x+w*.09+ww/2,x+w*.73+ww/2].forEach(mx=>{
+      g.beginPath(); g.moveTo(mx,wallTop+h*.09); g.lineTo(mx,wallTop+h*.07+wh); g.stroke();
+      g.beginPath(); g.moveTo(mx-ww/2,wallTop+h*.07+wh*.5); g.lineTo(mx+ww/2,wallTop+h*.07+wh*.5); g.stroke();
+    });
+    [x+w*.09,x+w*.73].forEach(bx2=>{
+      g.strokeStyle='rgba(96,76,48,0.85)'; g.lineWidth=Math.max(1.2,w*.016);
+      g.strokeRect(bx2-w*.008,wallTop+h*.062,ww+w*.016,wh+h*.014);
+      g.fillStyle='#2b2013'; g.fillRect(bx2-w*.035,wallTop+h*.07+wh,ww+w*.07,h*.016);
+      g.fillStyle='rgba(30,22,13,0.9)';
+      g.fillRect(bx2-w*.05,wallTop+h*.07,w*.042,wh);
+      g.fillRect(bx2+ww+w*.008,wallTop+h*.07,w*.042,wh);
+      g.strokeStyle='rgba(120,96,60,0.5)'; g.lineWidth=1;
+      g.beginPath(); g.moveTo(bx2-w*.05,wallTop+h*.07+wh); g.lineTo(bx2-w*.008,wallTop+h*.07);
+      g.moveTo(bx2+ww+w*.008,wallTop+h*.07+wh); g.lineTo(bx2+ww+w*.05,wallTop+h*.07); g.stroke();
+    });
+    if(v===1) vWin(x+w*.42,wallTop+h*.09,w*.14,h*.12,on*.9,false);
+    if(o.rose){
+      const rx=x+w*.41, ry=y+h*.60, r0=w*.10;
+      g.beginPath(); g.arc(rx,ry,r0,0,TAU);
+      g.fillStyle=on>.02?`rgba(255,226,164,${.86*on})`:'rgba(16,22,42,0.92)'; g.fill();
+      g.strokeStyle='rgba(84,100,144,0.85)'; g.lineWidth=1.2;
+      for(let i=0;i<8;i++){ const A=i*Math.PI/4; g.beginPath(); g.moveTo(rx,ry); g.lineTo(rx+Math.cos(A)*r0,ry+Math.sin(A)*r0); g.stroke(); }
+      if(on>.02) bloom(rx,ry,r0*4.4,WARM,.28*on);
+    }
+    if(o.door){
+      const dxx=x+w*(o.rose?.68:.40), dw2=w*.18, dyy=foot-h*.26;
+      g.fillStyle='#1c130a'; g.fillRect(dxx-dw2*.12,dyy-h*.03,dw2*1.24,h*.03);
+      vWin(dxx,dyy,dw2,h*.26,on*.95,true);
+      g.strokeStyle='rgba(104,82,52,0.9)'; g.lineWidth=Math.max(1.2,w*.015);
+      g.strokeRect(dxx+dw2*.16,dyy+h*.04,dw2*.68,h*.08);
+      g.strokeRect(dxx+dw2*.16,dyy+h*.145,dw2*.68,h*.075);
+      g.beginPath(); g.arc(dxx+dw2*.82,dyy+h*.145,Math.max(1.3,w*.016),0,TAU);
+      g.fillStyle=on>.02?'rgba(226,192,124,0.95)':'rgba(72,80,102,0.9)'; g.fill();
+      g.fillStyle='rgba(24,17,10,0.55)';
+      g.fillRect(dxx+dw2*.06,dyy+h*.05,dw2*.30,h*.012);
+      g.fillRect(dxx+dw2*.06,dyy+h*.19,dw2*.30,h*.012);
+      g.fillStyle=on>.02?`rgba(88,74,52,${.6+.3*on})`:'rgba(28,32,46,0.85)';
+      rr(dxx-dw2*.22,base-h*.04,dw2*1.44,h*.04,1.5); g.fill();
+      if(on>.02){
+        const dcx=dxx+dw2*.5, dgy=base+h*.01;
+        const dp=g.createRadialGradient(dcx,dgy,1,dcx,dgy,dw2*2.6);
+        dp.addColorStop(0,`rgba(255,198,116,${.30*on})`);
+        dp.addColorStop(.55,`rgba(240,168,88,${.11*on})`);
+        dp.addColorStop(1,'rgba(230,158,80,0)');
+        g.fillStyle=dp; g.beginPath(); g.ellipse(dcx,dgy,dw2*2.6,h*.085,0,0,TAU); g.fill();
+      }
+    }
+    if(v===1){
+      const by=wallTop+(foot-wallTop)*.52;
+      g.fillStyle='#2b2013'; g.fillRect(x-w*.04,by,w*1.08,h*.022);
+      g.strokeStyle=on>.02?'rgba(160,130,88,0.85)':'rgba(54,60,78,0.8)'; g.lineWidth=1.4;
+      g.beginPath(); g.moveTo(x-w*.03,by-h*.05); g.lineTo(x+w*1.03,by-h*.05); g.stroke();
+      for(let i=0;i<7;i++){ const px=x+w*(-.02+i*.173); g.beginPath(); g.moveTo(px,by-h*.05); g.lineTo(px,by); g.stroke(); }
+    }
+    if(o.awning){
+      const ax=x+w*.04, aw=w*.40, ay=foot-h*.20;
+      for(let i=0;i<5;i++){
+        g.fillStyle=on>.02
+          ? (i%2?`rgba(${o.awning},${.82*on})`:`rgba(242,232,206,${.76*on})`)
+          : 'rgba(28,34,52,0.9)';
+        g.fillRect(ax+i*aw/5,ay,aw/5,h*.075);
+      }
+    }
+    if(o.porch){
+      g.strokeStyle=on>.02?'rgba(154,126,86,0.88)':'rgba(56,62,80,0.85)'; g.lineWidth=1.6;
+      g.beginPath(); g.moveTo(x+w*.04,base-h*.01); g.lineTo(x+w*.96,base-h*.01); g.stroke();
+      for(let i=0;i<6;i++){ const px=x+w*(.07+i*.175); g.beginPath(); g.moveTo(px,base-h*.01); g.lineTo(px,base+h*.06); g.stroke(); }
+    }
+    if(on>.02){
+      [x+w*.09,x+w*.73].forEach((bxx,i)=>{
+        g.fillStyle='rgba(38,28,17,0.95)'; g.fillRect(bxx-w*.01,wallTop+h*.07+wh,ww*1.1,h*.035);
+        vFlowers(seed*7+i,bxx-w*.01,wallTop+h*.055+wh,ww*1.1,h*.03,9,(o.bloom==null?1:o.bloom)*on);
+      });
+    }
+    if(on>.02){
+      const bp=g.createLinearGradient(0,base-h*.02,0,base+h*.10);
+      bp.addColorStop(0,`rgba(252,186,104,${.16*on})`); bp.addColorStop(1,'rgba(240,170,92,0)');
+      g.fillStyle=bp;
+      g.beginPath(); g.ellipse(cx,base+h*.012,w*.70,h*.075,0,0,TAU); g.fill();
+      const fw=g.createRadialGradient(cx,foot,w*.1,cx,foot,w*.78);
+      fw.addColorStop(0,`rgba(250,180,100,${.07*on})`); fw.addColorStop(1,'rgba(240,168,88,0)');
+      g.fillStyle=fw; g.fillRect(x-w*.1,wallTop,w*1.2,base-wallTop);
+    }
+    vFlowers((o.seed||9)*3+1,x+w*.02,base-h*.06,w*.96,h*.09,22,(o.bloom==null?1:o.bloom)*(.3+.7*on));
+    vIvy(x-w*.05,wallTop+h*.04,w*1.10,foot-wallTop,o.seed||9,(o.ivy==null?1:o.ivy)*.7);
+    g.restore();
+  }
+  /* OBSERVATORY -- domed hall with the telescope. Upper-centre, the final landmark. */
+  function vDome(o){
+    const x=o.x, y=o.y, w=o.w, h=o.h, on=o.on||0;
+    const cx=x+w*.5, dy=y+h*.42, dr=w*.38;
+    g.save();
+    if(on>.02) bloom(cx,y+h*.74,w*.92,WARM,.11*on);
+    g.beginPath(); g.ellipse(cx,y+h*1.03,w*.72,h*.11,0,0,TAU);
+    g.fillStyle=on>.02?`rgba(78,66,48,${.52+.26*on})`:'rgba(30,33,46,0.82)'; g.fill();
+    const bg=g.createLinearGradient(x,0,x+w,0);
+    bg.addColorStop(0,'#28304a'); bg.addColorStop(.55,STONE2); bg.addColorStop(1,'#171d2c');
+    g.fillStyle=bg; rr(x+w*.11,dy,w*.78,h*.62,4); g.fill();
+    g.fillStyle='#151b29'; rr(x+w*.07,dy+h*.58,w*.86,h*.07,2); g.fill();
+    g.fillStyle='#2e3752'; rr(x+w*.08,dy-h*.015,w*.84,h*.035,2); g.fill();
+    g.fillStyle='rgba(18,13,8,0.42)';
+    [.14,.40,.58,.84].forEach(u=>g.fillRect(x+w*u,dy+h*.04,w*.035,h*.54));
+    g.fillStyle='rgba(150,182,238,0.07)'; g.fillRect(x+w*.11,dy+h*.30,w*.78,1.5);
+    g.strokeStyle='rgba(120,144,196,0.16)'; g.lineWidth=1;
+    for(let i=1;i<5;i++){ const ly=dy+h*.62*(i/5); g.beginPath(); g.moveTo(x+w*.11,ly); g.lineTo(x+w*.89,ly); g.stroke(); }
+    for(let i=0;i<4;i++){
+      const wx=x+w*.19+i*w*.17;
+      vWin(wx,dy+h*.07,w*.11,h*.17,on,true);
+      g.strokeStyle='rgba(104,124,172,0.75)'; g.lineWidth=1.2;
+      g.beginPath(); g.arc(wx+w*.055,dy+h*.07,w*.055,Math.PI,0); g.stroke();
+      g.beginPath(); g.moveTo(wx+w*.055,dy+h*.07); g.lineTo(wx+w*.055,dy+h*.24); g.stroke();
+    }
+    vWin(cx-w*.10,dy+h*.36,w*.20,h*.26,on*.95,true);
+    g.fillStyle='#2a3350'; rr(cx-w*.16,dy+h*.32,w*.32,h*.035,2); g.fill();
+    g.strokeStyle='rgba(112,132,180,0.7)'; g.lineWidth=Math.max(1.2,w*.018);
+    g.beginPath(); g.moveTo(cx-w*.15,dy+h*.355); g.lineTo(cx-w*.15,dy+h*.62);
+    g.moveTo(cx+w*.15,dy+h*.355); g.lineTo(cx+w*.15,dy+h*.62); g.stroke();
+    if(on>.02) sliver(cx+2,dy+h*.30,5.5,`rgba(255,236,178,${.9*on})`);
+    g.fillStyle='#2b3352'; rr(x+w*.24,dy-h*.05,w*.52,h*.07,2); g.fill();
+    g.beginPath(); g.arc(cx,dy-h*.05,dr,Math.PI,0); g.closePath();
+    const dg=g.createLinearGradient(cx-dr,dy-dr,cx+dr,dy);
+    dg.addColorStop(0,ROOF2); dg.addColorStop(1,ROOF);
+    g.fillStyle=dg; g.fill();
+    g.strokeStyle='rgba(140,176,255,0.22)'; g.lineWidth=1;
+    for(let i=1;i<7;i++){
+      const A=Math.PI+i*Math.PI/7;
+      g.beginPath(); g.moveTo(cx,dy-h*.05); g.lineTo(cx+Math.cos(A)*dr,dy-h*.05+Math.sin(A)*dr); g.stroke();
+    }
+    for(let i=1;i<4;i++){
+      g.strokeStyle='rgba(9,14,32,0.42)'; g.lineWidth=1.2;
+      g.beginPath(); g.arc(cx,dy-h*.05,dr*(i/4),Math.PI,0); g.stroke();
+      g.strokeStyle='rgba(150,184,255,0.12)'; g.lineWidth=1;
+      g.beginPath(); g.arc(cx,dy-h*.05,dr*(i/4)-1.4,Math.PI,0); g.stroke();
+    }
+    if(on>.02){
+      bloom(cx,dy-dr*.46,22,WARM,.5*on);
+      g.beginPath(); g.arc(cx,dy-dr*.46,4.4,0,TAU); g.fillStyle=`rgba(255,234,176,${.92*on})`; g.fill();
+    }
+    g.save();
+    g.translate(cx+dr*.26,dy-dr*.80); g.rotate(-.62);
+    g.fillStyle='#39415c'; rr(-8,-7,44,14,6); g.fill();
+    g.fillStyle='#4a5474'; rr(28,-9,9,18,3); g.fill();
+    g.fillStyle=on>.02?`rgba(198,232,255,${.75*on})`:'rgba(40,50,74,0.9)'; rr(35,-6,4,12,2); g.fill();
+    g.restore();
+    for(let i=0;i<5;i++){
+      g.fillStyle=on>.02?`rgba(98,84,62,${.44+.22*on})`:'rgba(30,33,46,0.8)';
+      rr(cx-w*.17-i*2.6,y+h*1.08+i*6,w*.34+i*5.2,5,2); g.fill();
+    }
+    g.restore();
+  }
+  /* MOON CLOCK TOWER -- tallest landmark: tiered spire, moon dial, crescent finial. */
+  function vClockTower(o){
+    const x=o.x, y=o.y, w=o.w, h=o.h, on=o.on||0, mn=o.moon||0, cx=x+w*.5;
+    g.save();
+    if(on>.02) bloom(cx,y+h*.60,w*1.4,WARM,.11*on);
+    g.beginPath(); g.ellipse(cx,y+h+h*.01,w*.95,h*.028,0,0,TAU);
+    g.fillStyle='rgba(2,5,9,0.7)'; g.fill();
+    g.fillStyle='#161c2c'; rr(x-w*.10,y+h*.90,w*1.20,h*.10,2); g.fill();
+    const sg=g.createLinearGradient(x,0,x+w,0);
+    sg.addColorStop(0,'#2c3550'); sg.addColorStop(.5,'#232b42'); sg.addColorStop(1,'#1a2032');
+    g.fillStyle=sg; g.fillRect(x,y+h*.26,w,h*.64);
+    g.fillStyle='rgba(150,182,238,0.06)'; g.fillRect(x,y+h*.26,w,1.5);
+    g.strokeStyle='rgba(120,144,196,0.13)'; g.lineWidth=1;
+    for(let i=1;i<9;i++){ const ly=y+h*.26+h*.64*(i/9); g.beginPath(); g.moveTo(x,ly); g.lineTo(x+w,ly); g.stroke(); }
+    g.fillStyle='rgba(58,70,102,0.55)';
+    for(let i=0;i<8;i++){
+      const qy=y+h*.28+i*h*.078;
+      g.fillRect(x-w*.04,qy,w*.16,h*.034); g.fillRect(x+w*.88,qy+h*.039,w*.16,h*.034);
+    }
+    g.fillStyle='rgba(46,34,20,0.72)';
+    [.52,.74].forEach(u=>g.fillRect(x-w*.06,y+h*u,w*1.12,h*.022));
+    g.fillStyle='rgba(18,13,8,0.4)'; g.fillRect(x+w*.46,y+h*.34,w*.07,h*.54);
+    g.beginPath(); g.moveTo(x-w*.26,y+h*.28); g.lineTo(cx,y+h*.06); g.lineTo(x+w*1.26,y+h*.28); g.closePath();
+    g.fillStyle='#0c1226'; g.fill();
+    g.beginPath(); g.moveTo(x-w*.22,y+h*.27); g.lineTo(cx,y+h*.04); g.lineTo(x+w*1.22,y+h*.27); g.closePath();
+    const rg=g.createLinearGradient(x-w*.2,y,x+w*1.2,y+h*.27);
+    rg.addColorStop(0,ROOF2); rg.addColorStop(1,ROOF); g.fillStyle=rg; g.fill();
+    g.strokeStyle='rgba(172,202,255,0.30)'; g.lineWidth=1.3;
+    g.beginPath(); g.moveTo(x-w*.22,y+h*.27); g.lineTo(cx,y+h*.04); g.lineTo(x+w*1.22,y+h*.27); g.stroke();
+    g.beginPath(); g.moveTo(x-w*.10,y+h*.12); g.lineTo(cx,y-h*.06); g.lineTo(x+w*1.10,y+h*.12); g.closePath();
+    g.fillStyle=ROOF; g.fill(); g.strokeStyle='rgba(172,202,255,0.26)'; g.stroke();
+    g.fillStyle='rgba(10,15,32,0.85)';
+    [[x+w*.10,y+h*.305],[x+w*.58,y+h*.305]].forEach(p=>{
+      g.fillRect(p[0],p[1],w*.32,h*.05);
+      g.strokeStyle='rgba(96,112,158,0.5)'; g.lineWidth=.9;
+      for(let i=1;i<4;i++){ const ly=p[1]+h*.05*(i/4); g.beginPath(); g.moveTo(p[0],ly); g.lineTo(p[0]+w*.32,ly); g.stroke(); }
+    });
+    g.fillStyle='#2c3450'; g.fillRect(x-w*.16,y+h*.29,w*1.32,h*.035);
+    g.strokeStyle='rgba(120,140,190,0.6)'; g.lineWidth=1;
+    for(let i=0;i<8;i++){ const px=x-w*.14+i*w*.19; g.beginPath(); g.moveTo(px,y+h*.29); g.lineTo(px,y+h*.245); g.stroke(); }
+    const dr=w*.30, dy=y+h*.40;
+    g.beginPath(); g.arc(cx,dy,dr,0,TAU);
+    g.fillStyle=on>.02?`rgba(255,232,176,${.88*on})`:'rgba(16,22,42,0.92)'; g.fill();
+    g.strokeStyle='rgba(96,112,158,0.9)'; g.lineWidth=1.4; g.beginPath(); g.arc(cx,dy,dr,0,TAU); g.stroke();
+    if(on>.02){
+      sliver(cx+dr*.22,dy,dr*.58,`rgba(78,56,20,${.72*on})`);
+      bloom(cx,dy,dr*4,WARM,.26*on);
+    }
+    for(let i=0;i<3;i++){
+      vWin(x+w*.13,y+h*(.56+i*.12),w*.26,h*.075,on,true);
+      vWin(x+w*.61,y+h*(.56+i*.12),w*.26,h*.075,on,true);
+    }
+    vWin(cx-w*.17,y+h*.90,w*.34,h*.10,on*.95,true);
+    g.strokeStyle='rgba(96,110,156,0.75)'; g.lineWidth=1.4;
+    g.beginPath(); g.moveTo(cx,y-h*.06); g.lineTo(cx,y-h*.13); g.stroke();
+    if(mn>.02){
+      bloom(cx,y-h*.18,24,RGB_GOLD,.38*mn);
+      crescent(cx,y-h*.18,7.5,`rgba(255,236,178,${.95*mn})`,'rgba(7,10,30,1)');
+    }
+    vIvy(x-w*.12,y+h*.46,w*1.24,h*.48,31,(o.ivy||0)*.7);
+    g.restore();
+  }
+  /* GLASS CONSERVATORY -- the village's shop-equivalent, right side + hanging sign. */
+  function vGreenhouse(o){
+    const x=o.x, y=o.y, w=o.w, h=o.h, on=o.on||0;
+    g.save();
+    if(on>.02) bloom(x+w*.5,y+h*.56,w*.85,GLASSG,.12*on);
+    g.fillStyle='#242b3c'; rr(x,y+h*.74,w,h*.26,3); g.fill();
+    g.beginPath(); g.moveTo(x,y+h*.34); g.lineTo(x+w*.5,y+h*.02); g.lineTo(x+w,y+h*.34); g.closePath();
+    g.fillStyle=on>.02?`rgba(184,228,192,${.18+.16*on})`:'rgba(22,30,50,0.92)'; g.fill();
+    g.fillStyle=on>.02?`rgba(198,238,198,${.15+.18*on})`:'rgba(18,26,46,0.92)';
+    rr(x+w*.03,y+h*.32,w*.94,h*.44,2); g.fill();
+    if(on>.02){
+      const r=rnd(52);
+      for(let i=0;i<24;i++){
+        g.beginPath(); g.arc(x+w*.08+r()*w*.84,y+h*.40+r()*h*.32,1.3+r()*1.7,0,TAU);
+        g.fillStyle=`rgba(${120+r()*60|0},${196+r()*54|0},${138+r()*44|0},${(.5+r()*.4)*on})`; g.fill();
+      }
+      bloom(x+w*.5,y+h*.54,w*.62,GLASSG,.15*on);
+    }
+    g.strokeStyle='rgba(92,110,152,0.85)'; g.lineWidth=1.4;
+    for(let i=1;i<7;i++){ const mx=x+w*(i/7); g.beginPath(); g.moveTo(mx,y+h*.32); g.lineTo(mx,y+h*.76); g.stroke(); }
+    g.strokeStyle='rgba(92,110,152,0.55)'; g.lineWidth=1;
+    [.44,.52,.64].forEach(u=>{ g.beginPath(); g.moveTo(x+w*.03,y+h*u); g.lineTo(x+w*.97,y+h*u); g.stroke(); });
+    g.strokeStyle='rgba(140,172,224,0.16)'; g.lineWidth=2.4;
+    for(let i=0;i<4;i++){
+      const gx=x+w*(.10+i*.22);
+      g.beginPath(); g.moveTo(gx,y+h*.72); g.lineTo(gx+w*.10,y+h*.36); g.stroke();
+    }
+    g.strokeStyle='rgba(92,110,152,0.85)'; g.lineWidth=1.4;
+    g.beginPath(); g.moveTo(x,y+h*.34); g.lineTo(x+w*.5,y+h*.02); g.lineTo(x+w,y+h*.34); g.stroke();
+    g.beginPath(); g.moveTo(x+w*.5,y+h*.02); g.lineTo(x+w*.5,y+h*.34); g.stroke();
+    for(let i=1;i<4;i++){
+      const u=i/4, hw=w*.5*u, ry=y+h*.02+(h*.32)*u;
+      g.strokeStyle='rgba(92,110,152,0.45)'; g.lineWidth=1;
+      g.beginPath(); g.moveTo(x+w*.5-hw,ry); g.lineTo(x+w*.5+hw,ry); g.stroke();
+    }
+    g.fillStyle='#3a4560'; rr(x+w*.44,y+h*.00,w*.12,h*.045,2); g.fill();
+    g.fillStyle='#2b2013'; g.fillRect(x-w*.02,y+h*.715,w*1.04,h*.045);
+    g.fillStyle='#2b2013'; g.fillRect(x-w*.02,y+h*.30,w*1.04,h*.035);
+    const dgx=x+w*.42, dgw=w*.16;
+    g.fillStyle=on>.02?`rgba(214,244,206,${.28+.3*on})`:'rgba(20,28,48,0.94)';
+    g.fillRect(dgx,y+h*.50,dgw,h*.24);
+    g.strokeStyle='rgba(72,62,48,0.95)'; g.lineWidth=1.6; g.strokeRect(dgx,y+h*.50,dgw,h*.24);
+    g.beginPath(); g.moveTo(dgx,y+h*.60); g.lineTo(dgx+dgw,y+h*.60); g.stroke();
+    if(on>.02){
+      const rr2=rnd(77);
+      for(let i=0;i<5;i++){
+        const px=x+w*(.10+i*.19), py=y+h*.36;
+        g.strokeStyle=`rgba(96,168,110,${.6*on})`; g.lineWidth=1.2;
+        g.beginPath(); g.moveTo(px,py); g.quadraticCurveTo(px+3,py+h*.06,px-2,py+h*.11); g.stroke();
+        for(let k=0;k<3;k++){
+          g.beginPath(); g.arc(px+(rr2()-.5)*6,py+h*(.03+k*.035),1.5,0,TAU);
+          g.fillStyle=`rgba(${140+rr2()*60|0},220,150,${.7*on})`; g.fill();
+        }
+      }
+    }
+    if(o.sign){
+      const sx=o.sign[0], sy=o.sign[1];
+      g.strokeStyle='rgba(72,62,48,0.92)'; g.lineWidth=2;
+      g.beginPath(); g.moveTo(sx,sy+34); g.lineTo(sx,sy-14); g.lineTo(sx+15,sy-14); g.stroke();
+      g.beginPath(); g.moveTo(sx+15,sy-14); g.lineTo(sx+15,sy-6); g.stroke();
+      g.beginPath(); g.arc(sx+15,sy+6,12,0,TAU);
+      g.fillStyle=on>.02?'rgba(62,50,34,0.94)':'rgba(24,28,42,0.92)'; g.fill();
+      g.strokeStyle=on>.02?gold(.72*on):'rgba(60,68,90,0.8)'; g.lineWidth=1.2;
+      g.beginPath(); g.arc(sx+15,sy+6,12,0,TAU); g.stroke();
+      if(on>.02){
+        g.beginPath(); g.arc(sx+15,sy+6,4,0,TAU); g.fillStyle=gold(.85*on); g.fill();
+        for(let i=0;i<8;i++){
+          const A=i*Math.PI/4;
+          g.beginPath(); g.moveTo(sx+15+Math.cos(A)*6,sy+6+Math.sin(A)*6);
+          g.lineTo(sx+15+Math.cos(A)*10,sy+6+Math.sin(A)*10); g.stroke();
+        }
+        bloom(sx+15,sy+6,30,RGB_GOLD,.26*on);
+      }
+    }
+    g.restore();
+  }
+  function vLantern(x,y,on,a,t){
+    if(a<=.02) return;
+    g.save(); g.globalAlpha=a;
+    g.strokeStyle='rgba(60,52,40,0.9)'; g.lineWidth=2;
+    g.beginPath(); g.moveTo(x,y); g.lineTo(x,y-26); g.stroke();
+    g.fillStyle=on>.02?`rgba(255,232,172,${.95*on})`:'rgba(30,36,58,0.9)';
+    g.beginPath(); g.moveTo(x-4,y-26); g.lineTo(x+4,y-26); g.lineTo(x+3,y-36); g.lineTo(x-3,y-36); g.closePath(); g.fill();
+    if(on>.02){
+      const fl=.88+.12*Math.sin((t||0)*3+x);
+      const pool=g.createRadialGradient(x,y+2,1,x,y+2,30);
+      pool.addColorStop(0,`rgba(255,196,112,${.26*on*fl})`);
+      pool.addColorStop(.6,`rgba(240,168,88,${.09*on*fl})`);
+      pool.addColorStop(1,'rgba(230,158,80,0)');
+      g.fillStyle=pool; g.beginPath(); g.ellipse(x,y+2,30,11,0,0,TAU); g.fill();
+      g.strokeStyle=`rgba(255,206,132,${.14*on*fl})`; g.lineWidth=5;
+      g.beginPath(); g.moveTo(x,y-26); g.lineTo(x,y); g.stroke();
+      bloom(x,y-31,26,WARM,.30*on*fl);
+      bloom(x,y-31,12,'255,238,196',.34*on*fl);
+    }
+    g.restore();
+  }
+  function vFlowers(seed,x,y,w,h,n,a){
+    if(a<=.02) return;
+    const r=rnd(seed), cols=['244,150,190','116,142,250','196,158,240','250,222,150','252,240,214'];
+    for(let i=0;i<n;i++){
+      const px=x+r()*w, py=y+r()*h, s=.9+r()*1.5, c=cols[r()*cols.length|0];
+      g.beginPath(); g.arc(px,py,s,0,TAU); g.fillStyle=`rgba(${c},${(.55+r()*.45)*a})`; g.fill();
+    }
+  }
+  /* the reference's signature blue flowering bushes -- dark mound + blue spikes */
+  function vBush(x,y,w,h,seed,a){
+    const r=rnd(seed);
+    g.beginPath(); g.ellipse(x,y,w,h,0,0,TAU); g.fillStyle='rgba(6,13,18,0.78)'; g.fill();
+    if(a<=.02) return;
+    for(let i=0;i<24;i++){
+      const A=r()*TAU, d=Math.sqrt(r());
+      const px=x+Math.cos(A)*d*w*.92, py=y+Math.sin(A)*d*h*.92, blue=r()<.74;
+      g.beginPath(); g.arc(px,py,.9+r()*1.4,0,TAU);
+      g.fillStyle=blue
+        ? `rgba(${96+r()*44|0},${128+r()*54|0},248,${(.5+r()*.5)*a})`
+        : `rgba(244,150,190,${(.5+r()*.5)*a})`;
+      g.fill();
+      if(blue&&r()<.28) bloom(px,py,7,'112,150,255',.18*a);
+    }
+  }
+  /* FOUNTAIN -- tiered basin, glowing water, the crescent emblem above it.
+     No purchase gate here (unlike Lumora's own separate Workshop Fountain) --
+     Moonfall's fountain is a pure restoration landmark, per direct
+     instruction not to add a second ownership system. */
+  function vFountain(o){
+    const cx=o.cx, cy=o.cy, on=o.on||0, t=o.t||0, a=o.a==null?1:o.a;
+    if(a<=.02) return;
+    g.save(); g.globalAlpha=a;
+    g.beginPath(); g.ellipse(cx,cy+8,68,23,0,0,TAU);
+    g.fillStyle=on>.02?'rgba(74,64,50,0.92)':'rgba(34,37,50,0.9)'; g.fill();
+    g.beginPath(); g.ellipse(cx,cy+3,56,18,0,0,TAU);
+    g.fillStyle=on>.02?'rgba(38,100,154,0.92)':'rgba(24,30,46,0.92)'; g.fill();
+    g.strokeStyle=on>.02?'rgba(126,110,84,0.85)':'rgba(52,58,76,0.85)';
+    g.lineWidth=2.2; g.beginPath(); g.ellipse(cx,cy+5,62,20.5,0,0,TAU); g.stroke();
+    g.strokeStyle=on>.02?'rgba(104,90,68,0.55)':'rgba(44,50,68,0.7)'; g.lineWidth=1;
+    for(let i=0;i<16;i++){
+      const A=i/16*TAU;
+      g.beginPath(); g.moveTo(cx+Math.cos(A)*56,cy+5+Math.sin(A)*18);
+      g.lineTo(cx+Math.cos(A)*67,cy+5+Math.sin(A)*22); g.stroke();
+    }
+    for(let i=0;i<3;i++){
+      const rw=36-i*11, ry=cy-12-i*16;
+      g.fillStyle='#333c52'; rr(cx-5.5,ry,11,18,3); g.fill();
+      g.fillStyle='#455072'; rr(cx-7,ry-2,14,4,2); g.fill();
+      g.beginPath(); g.ellipse(cx,ry,rw,rw*.34,0,0,TAU);
+      g.fillStyle=i%2?'#39425a':'#414b66'; g.fill();
+      g.strokeStyle='rgba(150,178,226,0.22)'; g.lineWidth=1;
+      g.beginPath(); g.ellipse(cx,ry-1.5,rw,rw*.34,0,0,TAU); g.stroke();
+      g.strokeStyle='rgba(12,18,34,0.45)'; g.lineWidth=.9;
+      for(let k=0;k<10;k++){
+        const A=k/10*TAU;
+        g.beginPath(); g.moveTo(cx+Math.cos(A)*rw*.55,ry+rw*.12);
+        g.lineTo(cx+Math.cos(A)*rw*.92,ry+rw*.30); g.stroke();
+      }
+    }
+    if(on>.02){
+      bloom(cx,cy-26,72,'150,214,255',.24*on);
+      bloom(cx,cy+3,86,WARM,.09*on);
+      g.strokeStyle=`rgba(206,240,255,${.58*on})`; g.lineWidth=.9;
+      for(let i=0;i<8;i++){
+        const A=i/8*TAU+t*.5, d=Math.cos(A)*20;
+        g.beginPath(); g.moveTo(cx,cy-50); g.quadraticCurveTo(cx+d*.7,cy-32,cx+d,cy-4); g.stroke();
+      }
+      const r=rnd(88);
+      for(let i=0;i<14;i++){
+        g.beginPath(); g.arc(cx+(r()-.5)*96,cy+(r()-.5)*16,.9,0,TAU);
+        g.fillStyle=`rgba(226,246,255,${(.3+r()*.5)*on})`; g.fill();
+      }
+      bloom(cx,cy-78,28,RGB_GOLD,.34*on);
+      sliver(cx+3,cy-78,10,`rgba(255,232,168,${.95*on})`);
+    }
+    g.restore();
+  }
+  /* PATH NETWORK -- ground plane, drawn before every structure. */
+  function vPaths(on){
+    g.save();
+    g.fillStyle=on>.02?`rgba(94,78,56,${.50+.24*on})`:'rgba(32,35,48,0.72)';
+    g.beginPath(); g.moveTo(238,802); g.quadraticCurveTo(248,742,256,690);
+    g.lineTo(292,690); g.quadraticCurveTo(292,742,278,802); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(176,816); g.quadraticCurveTo(140,798,96,784);
+    g.lineTo(100,806); g.quadraticCurveTo(146,820,180,838); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(348,820); g.quadraticCurveTo(412,806,474,790);
+    g.lineTo(478,812); g.quadraticCurveTo(414,828,352,842); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(240,852); g.quadraticCurveTo(250,900,264,960);
+    g.lineTo(346,960); g.quadraticCurveTo(314,898,302,852); g.closePath(); g.fill();
+    if(on>.02){
+      const r=rnd(311);
+      for(let i=0;i<74;i++){
+        const u=r(), px=lerp(244,300,u)+(r()-.5)*30, py=lerp(852,958,u)+(r()-.5)*14;
+        const sw=5.5+r()*4.5, sh=2.4+r()*1.6, rot=(r()-.5)*.5;
+        g.beginPath(); g.ellipse(px,py,sw,sh,rot,0,TAU);
+        g.fillStyle=`rgba(206,170,116,${(.09+r()*.15)*on})`; g.fill();
+        g.strokeStyle=`rgba(24,20,14,${.16*on})`; g.lineWidth=.8; g.stroke();
+      }
+      for(let i=0;i<34;i++){
+        const u=r(), side=i%2;
+        const px=side?lerp(352,470,u):lerp(104,180,u), py=side?lerp(830,800,u)+(r()-.5)*16:lerp(798,834,u)+(r()-.5)*16;
+        g.beginPath(); g.ellipse(px,py,5+r()*4,2.2+r()*1.3,(r()-.5)*.5,0,TAU);
+        g.fillStyle=`rgba(206,170,116,${(.08+r()*.13)*on})`; g.fill();
+      }
+      const lead=g.createLinearGradient(0,960,0,840);
+      lead.addColorStop(0,`rgba(226,180,112,${.05*on})`); lead.addColorStop(1,`rgba(240,196,124,${.11*on})`);
+      g.fillStyle=lead;
+      g.beginPath(); g.moveTo(240,852); g.quadraticCurveTo(250,900,264,960);
+      g.lineTo(346,960); g.quadraticCurveTo(314,898,302,852); g.closePath(); g.fill();
+    }
+    g.restore();
+  }
+  /* VILLAGE CONNECTIVE TISSUE -- kerb stones, door spurs, low fences, garden beds, benches. */
+  function vConnect(on,a){
+    if(a<=.02) return;
+    g.save(); g.globalAlpha=a;
+    const warm=k=>on>.02?`rgba(120,98,68,${k*(.5+.5*on)})`:`rgba(48,54,72,${k*.8})`;
+    const spur=(x1,y1,x2,y2,wdt)=>{
+      g.strokeStyle=on>.02?`rgba(96,80,58,${.44+.28*on})`:'rgba(34,37,50,0.7)';
+      g.lineWidth=wdt; g.lineCap='round';
+      g.beginPath(); g.moveTo(x1,y1); g.quadraticCurveTo((x1+x2)/2+6,(y1+y2)/2,x2,y2); g.stroke();
+    };
+    spur(150,800,116,782,13);
+    spur(196,848,148,884,15);
+    spur(330,846,392,878,15);
+    spur(320,800,372,772,12);
+    spur(272,700,292,676,11);
+    spur(262,690,296,660,11);
+    spur(212,726,176,706,10);
+    g.strokeStyle=warm(.55); g.lineWidth=1.6;
+    const kerb=pts=>{ g.beginPath(); g.moveTo(pts[0],pts[1]); for(let i=2;i<pts.length;i+=4) g.quadraticCurveTo(pts[i],pts[i+1],pts[i+2],pts[i+3]); g.stroke(); };
+    kerb([236,802,282,742,254,690]); kerb([294,802,294,742,304,690]);
+    kerb([176,818,140,800,96,786]); kerb([180,840,146,822,100,808]);
+    kerb([348,822,412,808,474,792]); kerb([352,844,414,830,478,814]);
+    const r=rnd(913);
+    for(let i=0;i<46;i++){
+      const side=i%2, u=r();
+      const px=side?lerp(180,476,u)+(r()-.5)*8:lerp(96,300,u)+(r()-.5)*8;
+      const py=side?lerp(834,802,u)+(r()-.5)*10:lerp(796,852,u)+(r()-.5)*10;
+      g.beginPath(); g.ellipse(px,py,3.4,1.7,0,0,TAU); g.fillStyle=warm(.30); g.fill();
+    }
+    const fence=(x1,y1,x2,y2,n)=>{
+      g.strokeStyle=on>.02?`rgba(112,88,58,${.62+.22*on})`:'rgba(50,56,74,0.75)';
+      g.lineWidth=1.6;
+      g.beginPath(); g.moveTo(x1,y1-7); g.lineTo(x2,y2-7); g.stroke();
+      g.beginPath(); g.moveTo(x1,y1-3); g.lineTo(x2,y2-3); g.stroke();
+      for(let i=0;i<=n;i++){
+        const u=i/n, px=lerp(x1,x2,u), py=lerp(y1,y2,u);
+        g.beginPath(); g.moveTo(px,py+1); g.lineTo(px,py-9); g.stroke();
+      }
+    };
+    fence(196,780,274,776,4);
+    fence(300,866,350,858,5);
+    fence(120,800,168,812,4);
+    fence(392,802,442,794,4);
+    fence(232,706,296,700,3);
+    [[168,792,26,8,601],[318,786,24,8,602],[216,866,30,9,603],
+     [352,868,26,8,604],[150,736,20,7,605],[292,724,22,7,606]]
+      .forEach(b=>{
+        g.beginPath(); g.ellipse(b[0],b[1],b[2],b[3],0,0,TAU);
+        g.fillStyle=on>.02?`rgba(44,38,26,${.72*(.4+.6*on)})`:'rgba(20,24,34,0.7)'; g.fill();
+        vFlowers(b[4],b[0]-b[2],b[1]-b[3],b[2]*2,b[3]*2,14,on);
+      });
+    [[184,780,15,7,611],[336,774,14,7,612],[130,826,16,7,613],
+     [404,820,15,7,614],[258,742,13,6,615]]
+      .forEach(b=>vBush(b[0],b[1],b[2],b[3],b[4],on));
+    fence(96,906,168,900,6); fence(392,900,462,906,6);
+    [[128,912,26,8,621],[426,910,26,8,622]].forEach(bd=>{
+      g.beginPath(); g.ellipse(bd[0],bd[1],bd[2],bd[3],0,0,TAU);
+      g.fillStyle=on>.02?`rgba(44,38,26,${.7*(.4+.6*on)})`:'rgba(20,24,34,0.7)'; g.fill();
+      vFlowers(bd[4],bd[0]-bd[2],bd[1]-bd[3],bd[2]*2,bd[3]*2,16,on);
+    });
+    [[216,798],[330,792]].forEach(b=>{
+      g.fillStyle=warm(.85); rr(b[0]-13,b[1],26,3.5,1.5); g.fill();
+      g.fillRect(b[0]-11,b[1]+3.5,2.2,4.5); g.fillRect(b[0]+9,b[1]+3.5,2.2,4.5);
+    });
+    g.restore();
+  }
+  /* CIRCULAR PLAZA -- cobbled disc, kerb, garden ring, benches. */
+  function vPlaza(on,a){
+    if(a<=.02) return;
+    g.save(); g.globalAlpha=a;
+    g.beginPath(); g.ellipse(262,828,110,39,0,0,TAU);
+    g.fillStyle=on>.02?`rgba(100,82,58,${.62+.2*on})`:'rgba(38,41,54,0.72)'; g.fill();
+    g.strokeStyle=on>.02?`rgba(152,128,90,${.20+.5*on})`:'rgba(60,66,84,0.5)'; g.lineWidth=2.4;
+    g.beginPath(); g.ellipse(262,828,110,39,0,0,TAU); g.stroke();
+    g.lineWidth=1.2;
+    g.beginPath(); g.ellipse(262,826,74,26,0,0,TAU); g.stroke();
+    if(on>.02){
+      bloom(262,828,118,WARM,.10*on);
+      const r=rnd(404);
+      for(let i=0;i<66;i++){
+        const A=r()*TAU, d=Math.sqrt(r());
+        g.beginPath(); g.ellipse(262+Math.cos(A)*d*102,828+Math.sin(A)*d*36,5.4,2.5,0,0,TAU);
+        g.fillStyle=`rgba(228,192,134,${(.10+r()*.16)*on})`; g.fill();
+      }
+      [[186,852],[342,848],[262,862]].forEach(b=>{
+        g.fillStyle=`rgba(124,98,64,${.82*on})`; rr(b[0]-15,b[1],30,4,1.5); g.fill();
+        g.fillRect(b[0]-13,b[1]+4,2.5,5); g.fillRect(b[0]+11,b[1]+4,2.5,5);
+      });
+      [[196,812],[330,810],[262,792]].forEach((b,i)=>{
+        g.beginPath(); g.ellipse(b[0],b[1],18,7,0,0,TAU);
+        g.fillStyle=`rgba(52,44,32,${.8*on})`; g.fill();
+        vFlowers(510+i,b[0]-16,b[1]-6,32,10,16,on);
+      });
+    }
+    g.restore();
+  }
+  /* STONE ARCH BRIDGE + the steps that climb to the plaza. */
+  function vBridge(on,a,t){
+    if(a<=.02) return;
+    g.save(); g.globalAlpha=a;
+    g.fillStyle='#3b3f50'; rr(166,872,142,18,3); g.fill();
+    g.beginPath(); g.moveTo(190,890); g.arc(237,890,32,Math.PI,0,true); g.lineTo(284,890);
+    g.lineTo(284,920); g.lineTo(190,920); g.closePath(); g.fillStyle='#343849'; g.fill();
+    g.save(); g.beginPath(); g.arc(237,890,32,Math.PI,0); g.fillStyle='rgba(6,11,26,0.52)'; g.fill(); g.restore();
+    g.strokeStyle=on>.02?'rgba(150,128,96,0.65)':'rgba(58,64,82,0.6)'; g.lineWidth=1.1;
+    for(let i=0;i<=11;i++){
+      const A=Math.PI+i*Math.PI/11;
+      g.beginPath(); g.moveTo(237+Math.cos(A)*32,890+Math.sin(A)*32);
+      g.lineTo(237+Math.cos(A)*42,890+Math.sin(A)*42); g.stroke();
+    }
+    g.beginPath(); g.arc(237,890,42,Math.PI,0); g.stroke();
+    g.strokeStyle=on>.02?'rgba(140,120,90,0.42)':'rgba(54,60,78,0.55)'; g.lineWidth=1;
+    for(let i=1;i<4;i++){
+      const ly=890+i*8;
+      g.beginPath(); g.moveTo(190,ly); g.lineTo(284,ly); g.stroke();
+      for(let k=0;k<5;k++){
+        const bxx=194+k*22+(i%2?11:0);
+        if(Math.abs(bxx-237)>34){ g.beginPath(); g.moveTo(bxx,ly); g.lineTo(bxx,ly+8); g.stroke(); }
+      }
+    }
+    g.fillStyle=on>.02?`rgba(112,96,72,${.55+.2*on})`:'rgba(44,50,66,0.85)';
+    rr(164,854,148,5,2); g.fill();
+    g.strokeStyle=on>.02?'rgba(158,138,104,0.85)':'rgba(64,70,88,0.7)'; g.lineWidth=2;
+    g.beginPath(); g.moveTo(168,858); g.lineTo(306,858); g.stroke();
+    for(let i=0;i<5;i++){ const x=172+i*33; g.beginPath(); g.moveTo(x,872); g.lineTo(x,858); g.stroke(); }
+    g.fillStyle=on>.02?'rgba(96,82,60,0.9)':'rgba(38,44,60,0.85)';
+    rr(162,848,9,26,2); g.fill(); rr(305,848,9,26,2); g.fill();
+    for(let i=0;i<5;i++){
+      g.fillStyle=on>.02?`rgba(98,84,62,${.44+.2*on})`:'rgba(30,33,46,0.8)';
+      rr(302+i*3,874-i*8,42,6,2); g.fill();
+    }
+    [[152,906],[322,902],[176,926],[300,922]].forEach((b,i)=>
+      vBush(b[0],b[1],15+i*2,7,720+i,on));
+    vFlowers(733,150,878,40,18,12,on); vFlowers(734,296,874,42,18,12,on);
+    if(on>.02){
+      bloom(237,866,72,WARM,.14*on);
+      vLantern(310,872,on,1,t||0); vLantern(164,874,on,1,(t||0)+1.7);
+      const und=g.createLinearGradient(0,900,0,928);
+      und.addColorStop(0,`rgba(255,196,112,${.10*on})`); und.addColorStop(1,'rgba(255,196,112,0)');
+      g.fillStyle=und; g.fillRect(190,900,94,28);
+    }
+    g.restore();
+  }
+  /* STREAM -- a narrow winding watercourse, not a polygon. */
+  function vStream(t,on){
+    const k=.3+.7*on, r=rnd(707);
+    const spine=[[236,882,28],[230,916,33],[242,932,30],[228,948,34],[238,964,31],[226,980,28]];
+    const at=u=>{
+      const f=u*(spine.length-1), i=Math.min(spine.length-2,Math.floor(f)), q=f-i;
+      const A=spine[i], B=spine[i+1];
+      return [A[0]+(B[0]-A[0])*q, A[1]+(B[1]-A[1])*q, A[2]+(B[2]-A[2])*q];
+    };
+    const wob=(u,ph)=>Math.sin(ph+u*11)*3.2+Math.sin(ph*1.7+u*23)*1.6;
+    const chan=()=>{
+      g.beginPath();
+      for(let i=0;i<=30;i++){ const u=i/30, p=at(u); g.lineTo(p[0]-p[2]-wob(u,.7),p[1]); }
+      for(let i=30;i>=0;i--){ const u=i/30, p=at(u); g.lineTo(p[0]+p[2]+wob(u,2.9),p[1]); }
+      g.closePath();
+    };
+    g.save();
+    chan(); g.fillStyle='rgba(12,38,84,0.96)'; g.fill();
+    g.save(); chan(); g.clip();
+    const wg2=g.createLinearGradient(0,898,0,986);
+    wg2.addColorStop(0,'rgba(16,52,104,0.95)'); wg2.addColorStop(.45,'rgba(30,92,168,0.80)');
+    wg2.addColorStop(1,'rgba(10,34,76,0.92)');
+    g.fillStyle=wg2; g.fillRect(180,894,130,96);
+    for(let i=0;i<30;i++){
+      const u=i/29, p=at(u), amp=2+(i%4);
+      g.strokeStyle=`rgba(150,214,255,${(.06+.08*Math.sin(t*1.2+i))*k})`; g.lineWidth=1;
+      g.beginPath(); g.moveTo(p[0]-p[2]*.9,p[1]);
+      g.quadraticCurveTo(p[0],p[1]+Math.sin(t+i)*amp,p[0]+p[2]*.9,p[1]); g.stroke();
+    }
+    for(let i=0;i<16;i++){
+      const u=r(), p=at(u), x=p[0]+(r()-.5)*p[2]*1.5, sz=3+r()*6;
+      const fl=.4+.6*(.5+.5*Math.sin(t*1.7+i));
+      g.beginPath(); g.ellipse(x,p[1]+(r()-.5)*6,sz,sz*.3,0,0,TAU);
+      g.fillStyle=`rgba(168,224,255,${(.10+.26*fl)*k})`; g.fill();
+    }
+    const refl=g.createLinearGradient(0,898,0,944);
+    refl.addColorStop(0,`rgba(120,158,214,${.18*k})`); refl.addColorStop(1,'rgba(120,158,214,0)');
+    g.fillStyle=refl; g.fillRect(196,898,82,46);
+    if(on>.02){
+      const wl=g.createRadialGradient(236,912,2,236,912,52);
+      wl.addColorStop(0,`rgba(255,206,140,${.18*on})`); wl.addColorStop(1,'rgba(255,196,112,0)');
+      g.fillStyle=wl; g.fillRect(184,896,108,52);
+      [[232,930],[242,958]].forEach((q,i)=>{
+        const lg=g.createLinearGradient(0,q[1]-10,0,q[1]+14);
+        lg.addColorStop(0,`rgba(255,204,138,${.12*on})`); lg.addColorStop(1,'rgba(255,204,138,0)');
+        g.fillStyle=lg; g.fillRect(q[0]-9,q[1]-10,18,24);
+      });
+    }
+    for(let i=0;i<9;i++){
+      const u=.1+r()*.85, p=at(u), x=p[0]+(r()-.5)*p[2]*1.4, sz=3+r()*5;
+      g.beginPath(); g.ellipse(x,p[1],sz,sz*.62,r()*1.2,0,TAU);
+      g.fillStyle='rgba(14,24,44,0.92)'; g.fill();
+      g.beginPath(); g.ellipse(x-sz*.3,p[1]-sz*.28,sz*.5,sz*.24,0,0,TAU);
+      g.fillStyle=`rgba(126,170,224,${.16*k})`; g.fill();
+    }
+    g.restore();
+    for(let i=0;i<22;i++){
+      const u=r(), p=at(u), side=i%2?1:-1;
+      const x=p[0]+side*(p[2]+2+r()*12), yy=p[1]+(r()-.5)*12, sz=4+r()*9;
+      g.beginPath(); g.ellipse(x,yy,sz,sz*(.5+r()*.3),(r()-.5)*.8,0,TAU);
+      g.fillStyle=i%3?'rgba(9,17,30,0.94)':'rgba(13,26,34,0.92)'; g.fill();
+      g.beginPath(); g.ellipse(x-sz*.25,yy-sz*.3,sz*.55,sz*.22,0,0,TAU);
+      g.fillStyle=`rgba(96,132,180,${.10*k})`; g.fill();
+    }
+    g.strokeStyle=`rgba(88,124,172,${.34*k})`; g.lineWidth=1.4;
+    g.beginPath();
+    for(let i=0;i<=30;i++){ const u=i/30, p=at(u); g.lineTo(p[0]-p[2]-wob(u,.7),p[1]); }
+    g.stroke();
+    g.beginPath();
+    for(let i=0;i<=30;i++){ const u=i/30, p=at(u); g.lineTo(p[0]+p[2]+wob(u,2.9),p[1]); }
+    g.stroke();
+    [[188,926,17],[286,922,16],[176,958,19],[298,954,18],[200,984,16],[278,980,17]]
+      .forEach((b,i)=>vBush(b[0],b[1],b[2],8,760+i,on));
+    vFlowers(771,168,930,44,22,12,on); vFlowers(772,272,926,46,22,12,on);
+    vFlowers(773,158,968,48,22,11,on); vFlowers(774,284,962,46,22,11,on);
+    if(on>.02) bloom(234,942,96,'110,180,255',.13*on);
+    g.restore();
+  }
+  function vFireflies(t,n,a){
+    const r=rnd(1212);
+    for(let i=0;i<n;i++){
+      const bx=20+r()*500, by=470+r()*470, ph=r()*TAU, sp=.5+r()*.8;
+      const x=bx+Math.sin(t*sp+ph)*16, y=by+Math.cos(t*sp*.7+ph)*12;
+      const k=(.35+.65*(.5+.5*Math.sin(t*1.9+ph)))*a;
+      bloom(x,y,9,RGB_GOLD,.5*k);
+      g.beginPath(); g.arc(x,y,1.5,0,TAU); g.fillStyle=gold(.9*k); g.fill();
+    }
+  }
+  /* CLOUDS -- painterly layered night banks, two small far-apart masses only. */
+  function vClouds(a){
+    const curve=x=>{ const u=(x/W)*2-1; return -Math.cos(u*1.42)*46+30; };
+    const layers=[
+      [[23,118,300,52,15,.13,.09,12],[41,434,288,46,13,.11,.08,11]]
+    ];
+    g.save();
+    layers.forEach((layer,li)=>{
+      const depth=.62+li*.24;
+      layer.forEach(b=>{
+        const r=rnd(b[0]), cx=b[1], hw=b[3], th=b[4];
+        const cy=b[2]+curve(cx);
+        const n=b[7], puffs=[];
+        for(let i=0;i<n;i++){
+          const u=i/(n-1), arc=Math.sin(u*Math.PI);
+          puffs.push([
+            cx-hw+u*hw*2+(r()-.5)*hw*.14,
+            cy-arc*th*(.5+r()*.95)+(r()-.5)*th*.55,
+            th*(.85+arc*.8+r()*.7)
+          ]);
+        }
+        puffs.forEach(p=>{
+          const gr=g.createRadialGradient(p[0],p[1],p[2]*.05,p[0],p[1],p[2]);
+          gr.addColorStop(0,`rgba(48,70,148,${b[5]*depth*a})`);
+          gr.addColorStop(.5,`rgba(38,56,124,${b[5]*.62*depth*a})`);
+          gr.addColorStop(1,'rgba(28,42,96,0)');
+          g.fillStyle=gr; g.beginPath(); g.arc(p[0],p[1],p[2],0,TAU); g.fill();
+        });
+        puffs.forEach(p=>{
+          const gr=g.createRadialGradient(p[0],p[1]-p[2]*.60,p[2]*.04,p[0],p[1]-p[2]*.34,p[2]*.80);
+          gr.addColorStop(0,`rgba(150,182,244,${b[6]*a})`);
+          gr.addColorStop(.6,`rgba(112,146,216,${b[6]*.35*a})`);
+          gr.addColorStop(1,'rgba(112,146,216,0)');
+          g.fillStyle=gr; g.beginPath(); g.arc(p[0],p[1]-p[2]*.30,p[2]*.78,0,TAU); g.fill();
+        });
+        for(let i=0;i<3;i++){
+          const sx=cx+(r()-.5)*hw*1.8, sy=cy+(r()-.5)*th*1.6, sw=hw*(.30+r()*.35);
+          const gr=g.createLinearGradient(sx-sw,sy,sx+sw,sy);
+          gr.addColorStop(0,'rgba(46,64,124,0)');
+          gr.addColorStop(.5,`rgba(46,64,124,${.09*depth*a})`);
+          gr.addColorStop(1,'rgba(46,64,124,0)');
+          g.fillStyle=gr;
+          g.beginPath(); g.ellipse(sx,sy,sw,th*.28,(r()-.5)*.10,0,TAU); g.fill();
+        }
+      });
+    });
+    const hz=g.createLinearGradient(0,420,0,512);
+    hz.addColorStop(0,'rgba(56,84,158,0)');
+    hz.addColorStop(1,`rgba(70,102,180,${.24*a})`);
+    g.fillStyle=hz; g.fillRect(0,420,W,92);
+    g.restore();
+  }
+  /* the whole scene, one entry point. o: {pct, t} -- owned is always true for
+     Moonfall (no purchase gate; see vFountain's own comment). */
+  function villageScene(o){
+    o=o||{};
+    const p=c01(o.pct==null?1:o.pct), t=o.t||0;
+    const own=1;
+    const L={
+      west: ramp(p,LMK.west), path: ramp(p,LMK.paths), br: ramp(p,LMK.bridge),
+      pl: ramp(p,LMK.plaza), east: ramp(p,LMK.east), gl: ramp(p,LMK.glass),
+      ck: ramp(p,LMK.clock), dm: ramp(p,LMK.dome-.10,.10)
+    };
+    const bl=.22+.78*p;
+    const ivy=.25+.75*p;
+    const sky=g.createLinearGradient(0,0,0,560);
+    sky.addColorStop(0,'#04081c'); sky.addColorStop(.20,'#080e33');
+    sky.addColorStop(.42,'#12144a'); sky.addColorStop(.58,'#1b1758');
+    sky.addColorStop(.74,'#171c5e'); sky.addColorStop(1,'#0f2f66');
+    g.fillStyle=sky; g.fillRect(0,0,W,560);
+    vStars(3,254,470,1);
+    vStars(9,26,430,1.35);
+    vClouds(1);
+    bloom(270,182,46,'206,224,255',.11);
+    crescent(270,182,25,'#eef4ff','rgba(13,17,60,1)');
+    vRidge(300,198,'rgba(72,92,152,1)',7,0,{haze:.34,dip:.30,shade:.05,fq:.82});
+    vRidge(330,176,'rgba(52,72,132,1)',12,0,{haze:.26,dip:.26,shade:.07,fq:.95});
+    vRidge(362,146,'rgba(35,53,108,1)',21,0,{haze:.18,dip:.22,shade:.09,fq:1.1});
+    vRidge(392,120,'rgba(24,38,84,1)',33,0,{haze:.12,dip:.18,shade:.11,fq:1.28});
+    vRidge(416,98,'rgba(15,25,62,1)',44,0,{haze:.07,dip:.14,shade:.12,fq:1.5});
+    bloom(270,502,136,'72,124,208',.075);
+    const ah=g.createLinearGradient(0,452,0,540);
+    ah.addColorStop(0,'rgba(30,52,112,0)'); ah.addColorStop(.5,'rgba(32,56,118,0.30)');
+    ah.addColorStop(1,'rgba(24,42,96,0)');
+    g.fillStyle=ah; g.fillRect(0,452,W,88);
+    vTrees(492,132,'rgba(26,50,84,0.88)',63,32,{rim:.10,jitter:20});
+    vTrees(494,154,'#122a2c',61,26,{rim:.12});
+    const gnd=g.createLinearGradient(0,512,0,960);
+    gnd.addColorStop(0,'#0d1630'); gnd.addColorStop(.46,'#0a1226'); gnd.addColorStop(1,'#070d1c');
+    g.fillStyle=gnd; g.fillRect(0,512,W,448);
+    const hz=g.createLinearGradient(0,506,0,600);
+    hz.addColorStop(0,'rgba(12,22,46,0.90)'); hz.addColorStop(1,'rgba(12,22,46,0)');
+    g.fillStyle=hz; g.fillRect(0,506,W,94);
+    vTrees(514,134,'#0f2622',121,24,{rim:.13});
+    vTrees(538,120,'#0c211c',91,21,{rim:.14,warm:.7});
+    vTrees(562,104,'#091b16',155,18,{rim:.15,warm:1});
+    vTrees(584,96,'#081814',171,17,{rim:.13,jitter:14});
+    vTrees(606,88,'#071512',187,15,{rim:.12,jitter:16});
+    vTrees(628,78,'#061210',199,14,{rim:.10,jitter:16});
+    const fh=g.createLinearGradient(0,596,0,700);
+    fh.addColorStop(0,'rgba(14,26,58,0)'); fh.addColorStop(.55,'rgba(14,28,62,0.26)');
+    fh.addColorStop(1,'rgba(10,20,48,0)');
+    g.fillStyle=fh; g.fillRect(0,596,W,104);
+    [[14,604,74],[-8,672,82],[28,742,68],[4,812,60],
+     [528,600,76],[548,668,84],[508,744,68],[536,814,60]]
+      .forEach((c,i)=>vConifer(c[0],c[1],c[2],'#05110d',300+i));
+    vTreeGlow(818,30,.45+.55*p);
+    [[262,706,300,108,'rgba(8,16,22,0.62)'],[78,800,180,84,'rgba(7,14,20,0.62)'],[462,804,180,84,'rgba(7,14,20,0.62)']]
+      .forEach(b=>{ g.beginPath(); g.ellipse(b[0],b[1],b[2],b[3],0,0,TAU); g.fillStyle=b[4]; g.fill(); });
+    vPaths(L.path);
+    vPlaza(L.pl,1);
+    vConnect(L.path,ramp(p,LMK.paths-.02,.12));
+    vDome({x:210,y:552,w:116,h:132,on:L.dm});
+    vClockTower({x:150,y:542,w:42,h:178,on:L.ck,moon:L.ck,ivy:ivy});
+    vCottage({x:360,y:642,w:84,h:78,on:L.east,seed:11,v:2,chimney:1,door:1,ivy:ivy,bloom:bl});
+    vGreenhouse({x:420,y:700,w:110,h:82,on:L.gl,sign:[514,754]});
+    vCottage({x:244,y:670,w:116,h:106,on:L.pl,seed:17,v:0,chimney:1,door:1,ivy:ivy,bloom:bl});
+    vCottage({x:46,y:650,w:144,h:128,on:L.west,seed:23,v:1,chimney:1,door:1,porch:1,awning:'96,150,120',ivy:ivy,bloom:bl});
+    vCottage({x:330,y:772,w:152,h:134,on:L.east,seed:29,v:2,chimney:1,door:1,rose:1,porch:1,ivy:ivy,bloom:bl});
+    vCottage({x:32,y:752,w:158,h:148,on:L.west,seed:31,v:1,chimney:1,door:1,porch:1,awning:'104,146,214',ivy:ivy,bloom:bl});
+    vFountain({cx:262,cy:818,on:L.pl*own,t,a:own});
+    [[26,762,24,11,41],[8,894,30,13,42],[508,830,27,12,43],[526,902,31,13,44],
+     [176,904,27,11,45],[398,726,23,10,46],[376,936,21,9,47],[140,926,19,8,48]]
+      .forEach(b=>vBush(b[0],b[1],b[2],b[3],b[4],bl));
+    vFlowers(71,168,856,190,34,80,bl*L.pl);
+    vFlowers(73,386,812,150,80,70,bl*L.east);
+    vFlowers(75,60,780,130,70,60,bl*L.west);
+    [[190,856],[340,850],[148,806],[372,838],[212,780],[316,776],[410,792],[126,744],[238,712],
+      [166,884],[388,876],[284,676],[204,712],[142,900],[318,930]]
+      .forEach((c,i)=>vLantern(c[0],c[1],L.path,ramp(p,LMK.paths-.04,.12),t+i));
+    vStream(t,L.br);
+    vBridge(L.br,1,t);
+    [[10,1030,176,74],[530,1024,178,80],[400,1042,140,50]].forEach((b,i)=>{
+      g.beginPath(); g.ellipse(b[0],b[1],b[2],b[3],0,0,TAU); g.fillStyle='rgba(3,7,11,0.86)'; g.fill();
+      vIvy(b[0]-b[2]*.8,b[1]-b[3]*.9,b[2]*1.6,b[3]*1.1,200+i,.5);
+    });
+    vFlowers(74,0,936,540,24,44,bl*.8);
+    const fg=g.createLinearGradient(0,856,0,960);
+    fg.addColorStop(0,'rgba(4,8,20,0)'); fg.addColorStop(1,'rgba(4,8,20,0.34)');
+    g.fillStyle=fg; g.fillRect(0,856,W,104);
+    vFireflies(t,Math.round(6+22*p),.5+.5*p);
+  }
+
+  return function(ctx,pct,t){
+    g=ctx;
+    villageScene({pct,t});
+  };
+})();
 function drawVillage(){
   // E21/E22: the ONE branch point for Moonfall -- everything below this
   // line is Lumora's own render path, completely unmodified, and only ever
   // executes when currentVillage isn't 'moonfall'.
-  if(villageProgression.currentVillage==='moonfall'){ drawMoonfallVillage(); return; }
+  if(villageProgression.currentVillage==='moonfall'){
+    const v=currentVillageProgress();
+    const pct=v.completionThreshold!=null?clamp(v.restorationProgress/v.completionThreshold,0,1):1;
+    drawMoonfallVillage(ctx,pct,S.t);
+    return;
+  }
   const tier=heartTier(best); // the settled (discrete) tier — used for the mist tint, which is subtle enough not to need crossfading
   const pal=SEASON_PALETTES[tier];
   if(bgFadeT>=0){ // mid-crossfade: dissolve from the previous look into the current one, never an instant swap
