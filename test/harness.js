@@ -7799,175 +7799,174 @@ return __tick(5).then(function(){
 `);
 
 // =====================================================================
-// E18: Village 1 Persistent Restoration. Real deliveries are driven through
-// the exact same S.carried -> village-zone -> S.sparks -> s.t>=1 pipeline
-// the pre-existing delivery tests above already use (push to S.carried,
-// force S.jar.y into the village zone, step frames until sparks/carried
-// drain) -- not a re-implementation of delivery, reuse of the established
-// technique. Milestone-idempotency/completion-at-450 calls
-// grantVillageProgress() directly for the last few checks only, since
-// proving "the ONE canonical function is idempotent/clamped" doesn't
-// require re-proving "a real delivery reaches that function", already
-// covered by the earlier checks in this same scenario.
-scenario('lumora2-e18-delivery-progression', null, `
-__check('1: fresh player starts Village 1 at restorationProgress 0, not completed', currentVillageProgress().restorationProgress === 0 && currentVillageProgress().completed === false);
+// PERMANENT-VILLAGE-RESTORATION pass: the progression metric pivots from
+// cumulative lifetime delivered fireflies to bestNightDelivered (best
+// SINGLE-NIGHT delivered count, persistent, monotonic). Real deliveries are
+// driven through the exact same S.carried -> village-zone -> S.sparks ->
+// s.t>=1 pipeline the pre-existing delivery tests already use.
+scenario('lumora-village-lumora-progression', null, `
+__check('1: fresh player starts Lumora at bestNightDelivered 0, not completed', currentVillageProgress().bestNightDelivered === 0 && currentVillageProgress().completed === false);
 
-// ---- 2: tutorial-night delivery does not count ----
+// ---- 2: tutorial-night delivery counts toward NEITHER the temporary nor the permanent counter ----
 upgrades.tutorialDone = false;
 reset();
 S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
 for (var i = 0; i < 120 && (S.sparks.length > 0 || S.carried.length > 0); i++) __stepFrame(16);
-__check('2: a delivery during the tutorial (tutorialDone still false) grants 0 Village Progress', currentVillageProgress().restorationProgress === 0, 'progress=' + currentVillageProgress().restorationProgress);
-__check('2b: the tutorial delivery still earns its normal score, unaffected', S.score === 1);
+__check('2: a delivery during the tutorial grants 0 temporary night-delivered count', S.nightDelivered === 0, 'nightDelivered=' + S.nightDelivered);
+__check('2b: a delivery during the tutorial grants 0 permanent bestNightDelivered', currentVillageProgress().bestNightDelivered === 0);
+__check('2c: the tutorial delivery still earns its normal score, unaffected', S.score === 1);
 
-// ---- 3: a real (post-tutorial) delivery adds exactly +1 ----
+// ---- 3: a real (post-tutorial) delivery increments the TEMPORARY counter, which -- since it's a new personal best -- live-updates the PERMANENT one too ----
 upgrades.tutorialDone = true;
 reset();
-var vBefore = currentVillageProgress().restorationProgress;
-var rawBefore = coins + coinFraction; // combined so a sub-1-coin fractional carry (from the earlier tutorial delivery in test 2) can't read as "no reward"
+var rawBefore = coins + coinFraction;
 S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
 for (var i2 = 0; i2 < 120 && (S.sparks.length > 0 || S.carried.length > 0); i2++) __stepFrame(16);
-__check('3: a real delivery adds exactly +1 Village Progress', currentVillageProgress().restorationProgress === vBefore + 1, 'progress=' + currentVillageProgress().restorationProgress);
-__check('3b: the existing score/coin reward is completely unaffected by this addition', S.score === 1 && (coins + coinFraction) > rawBefore);
+__check('3: a real delivery adds exactly +1 to S.nightDelivered (temporary)', S.nightDelivered === 1);
+__check('3b: since tonight is a new personal best, bestNightDelivered (permanent) live-updates to match', currentVillageProgress().bestNightDelivered === 1);
+__check('3c: the existing score/coin reward is completely unaffected by this addition', S.score === 1 && (coins + coinFraction) > rawBefore);
 
-// ---- 4: multiple deliveries add correctly ----
+// ---- 4: multiple deliveries in the same night accumulate the temporary counter, and the permanent best tracks the running total live ----
 reset();
-var vBefore2 = currentVillageProgress().restorationProgress;
 for (var k = 0; k < 5; k++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
 for (var i3 = 0; i3 < 300 && (S.sparks.length > 0 || S.carried.length > 0); i3++) __stepFrame(16);
-__check('4: 5 real deliveries add exactly +5 Village Progress', currentVillageProgress().restorationProgress === vBefore2 + 5, 'progress=' + currentVillageProgress().restorationProgress);
+__check('4: 5 real deliveries in one night add up to exactly 5 in S.nightDelivered', S.nightDelivered === 5, 'nightDelivered=' + S.nightDelivered);
+__check('4b: bestNightDelivered matches, since this is still this session\\'s only/best night so far', currentVillageProgress().bestNightDelivered === 5);
 
-// ---- 5: a missed firefly adds 0 ----
+// ---- 5: a missed firefly adds 0 to either counter ----
 reset(); screen = 'play';
-var vBefore3 = currentVillageProgress().restorationProgress;
 S.misses = 4;
 spawnFly('y');
 var mf = S.flies[S.flies.length - 1];
 mf.patience = 0.01; mf.rest = 0; mf.pause = 0;
 for (var i4 = 0; i4 < 60 && !S.over; i4++) __stepFrame(16);
-__check('5: a missed firefly (round-ending 5th miss) grants 0 Village Progress', S.over === true && currentVillageProgress().restorationProgress === vBefore3, 'progress=' + currentVillageProgress().restorationProgress);
+__check('5: a missed firefly (round-ending 5th miss) grants 0 to S.nightDelivered', S.over === true && S.nightDelivered === 0);
 
-// ---- 6: Restart Night (reset()) does not reset persistent progress ----
-var vBeforeRestart = currentVillageProgress().restorationProgress;
+// ---- CASE 4 (spec §17): starting another match resets the TEMPORARY
+// counter to 0 but the PERMANENT best (already 5 from test 4) survives.
+// This is the exact behavior the old cumulative system never needed to
+// prove, because it lived entirely outside S; now that S.nightDelivered
+// genuinely lives inside S and genuinely resets, this is a real check. ----
 reset();
-__check('6: reset() (Restart Night) does not reset Village Progress', currentVillageProgress().restorationProgress === vBeforeRestart);
+__check('CASE 4: Restart Night resets the temporary current-night counter to 0', S.nightDelivered === 0);
+__check('CASE 4: Restart Night does NOT reset the permanent best-night-delivered value', currentVillageProgress().bestNightDelivered === 5);
 
-// ---- 8/9: each milestone triggers exactly once ----
-villageProgression.villages[0].restorationProgress = 14;
+// ---- 8/9: each milestone triggers exactly once, permanently, the instant THIS night's count passes it ----
+villageProgression.villages[0].bestNightDelivered = 49;
+S.nightDelivered = 49;
 rebuildVillageMilestones(villageProgression.villages[0]);
 var bannerCalls = 0, realCapFx = capMilestoneFx;
 capMilestoneFx = function(msg){ bannerCalls++; realCapFx(msg); };
-grantVillageProgress(); // 14 -> 15, crosses M1
-__check('8: M1 triggers at exactly 15', villageProgression.villages[0].milestones[0].state === 'restored' && bannerCalls === 1, 'progress=' + villageProgression.villages[0].restorationProgress);
-grantVillageProgress(); // 15 -> 16, crosses nothing else
+grantVillageProgress(); // nightDelivered 49 -> 50, a new best, crosses M1 (threshold 50)
+__check('8: M1 triggers at exactly 50 (new threshold)', villageProgression.villages[0].milestones[0].state === 'restored' && bannerCalls === 1, 'best=' + villageProgression.villages[0].bestNightDelivered);
+grantVillageProgress(); // 50 -> 51, still a new best, but crosses no NEW milestone
 __check('9: a milestone does not re-trigger on a later delivery', bannerCalls === 1);
 capMilestoneFx = realCapFx;
 
-// ---- 10/11: M8 completes Village 1 at 450, progress can never exceed 450 ----
-villageProgression.villages[0].restorationProgress = 449;
+// ---- 10/11: M8 completes Lumora at 500 (new threshold), progress can never exceed 500 ----
+villageProgression.villages[0].bestNightDelivered = 499;
+S.nightDelivered = 499;
 rebuildVillageMilestones(villageProgression.villages[0]);
-grantVillageProgress(); // 449 -> 450
-__check('10: M8 completes Village 1 at exactly 450', villageProgression.villages[0].restorationProgress === 450 && villageProgression.villages[0].completed === true && villageProgression.villages[0].milestones[7].state === 'restored');
-grantVillageProgress(); // already completed -- must be a safe no-op
-__check('11: progress can never exceed 450 (a completed village is a no-op, not an overflow)', villageProgression.villages[0].restorationProgress === 450);
+grantVillageProgress(); // 499 -> 500
+__check('10: M8 completes Lumora at exactly 500', villageProgression.villages[0].bestNightDelivered === 500 && villageProgression.villages[0].completed === true && villageProgression.villages[0].milestones[7].state === 'restored');
+grantVillageProgress(); // already completed -- must be a safe no-op (early return before nightDelivered's own increment is even checked against best)
+__check('11: bestNightDelivered can never exceed 500 (a completed village is a no-op, not an overflow)', villageProgression.villages[0].bestNightDelivered === 500);
+
+// ---- CASE 6 (spec §17): a later LOW-scoring night must not un-complete
+// the village or re-lock Moonfall. Village is already complete (test 10
+// above); simulate "player later scores only 30" as a fresh night. ----
+reset();
+for (var iCase6 = 0; iCase6 < 30; iCase6++) grantVillageProgress(); // 30 low-value deliveries this "night"
+__check('CASE 6: a later night scoring only 30 does not un-complete Lumora', villageProgression.villages[0].completed === true && villageProgression.villages[0].bestNightDelivered === 500);
+__check('CASE 6: a later low night does not re-lock Moonfall', isVillageUnlocked('moonfall') === true);
+
+// ---- spec's own worked example (§3), on a village that is NOT yet
+// completed -- this is the one check that actually exercises the
+// "S.nightDelivered<=v.bestNightDelivered -> return" guard in
+// grantVillageProgress(): the two CASE 6 checks just above never reach that
+// guard at all (v.completed's own earlier check already returns first), so
+// this is the genuinely load-bearing proof that a worse night can't lower
+// (or even touch) an already-set best, only a better one can raise it. ----
+villageProgression.villages[0].bestNightDelivered = 140; villageProgression.villages[0].completed = false; // "Night 2: 140 delivered"
+rebuildVillageMilestones(villageProgression.villages[0]);
+reset(); // "Night 3" begins
+for (var iN3 = 0; iN3 < 95; iN3++) grantVillageProgress(); // "95 delivered"
+__check('worked example: a worse night (95) after a better one (140) leaves bestNightDelivered at 140 -- never lowered, never bumped to the worse value', villageProgression.villages[0].bestNightDelivered === 140);
+reset(); // "Night 4" begins
+for (var iN4 = 0; iN4 < 220; iN4++) grantVillageProgress(); // "220 delivered", a genuine new record
+__check('worked example: a genuinely better night (220) DOES raise bestNightDelivered', villageProgression.villages[0].bestNightDelivered === 220);
 `);
 
 // =====================================================================
-// E18 §5-§7: Decor/Fountain remain plain coin purchases (no automatic
-// grant, no new lock added, no price change, no second ownership system),
-// and the existing purchase path itself is completely untouched.
-scenario('lumora2-e18-shop-unaffected', null, `
-__check('12/13: Decor/Fountain still have no restoration lock -- E18 deliberately did not add one (locked-until-milestone was optional per spec; see report)', !SHOP_ITEMS.deco.locked && !SHOP_ITEMS.fountain.locked);
-upgrades.deco = true; upgrades.fountain = true;
-villageProgression.villages[0].restorationProgress = 130;
+// PERMANENT-VILLAGE-RESTORATION pass §1/§2/§8/§9/§10/§19: the core visual
+// bug report this phase exists to fix -- a permanently-restored village
+// must NOT look already fully lit at the start of every match. Confirms
+// the LIGHTS tick is driven purely by S.score again (temporary, resets
+// every reset()), with the removed lightGroupRestored() OR-bypass gone for
+// good, while the PERMANENT milestone/completion state stays fully intact.
+scenario('lumora-village-lumora-lights-temporary', null, `
+villageProgression.villages[0].bestNightDelivered = 500;
 rebuildVillageMilestones(villageProgression.villages[0]);
-grantVillageProgress(); // crosses no NEW milestone here, just exercises the path with items already owned
-__check('12: an already-owned Decor item stays owned across Village milestone crossings', upgrades.deco === true);
-__check('13: an already-owned Fountain item stays owned across Village milestone crossings', upgrades.fountain === true);
-__check('14: Decor/Fountain purchase prices are completely unchanged by E18', SHOP_ITEMS.deco.price === 1000 && SHOP_ITEMS.fountain.price === 2500);
-upgrades.deco = false; coins = 5000;
-var ok = tryPurchase('deco');
-__check('16/18: a normal Decor purchase still succeeds through the unchanged tryPurchase() path, deducting the unchanged price', ok === true && upgrades.deco === true && coins === 4000);
+reset(); screen = 'play';
+// A few real frames with S.score still at its fresh-round 0 -- deliberately
+// exercising the actual update() tick (not just checking the value right
+// after reset(), which would trivially read 0 whether or not the tick
+// itself contains the bypass) so this genuinely catches a reintroduced
+// lightGroupRestored()-style OR-bypass, not just reset()'s own init value.
+for (var i0 = 0; i0 < 10; i0++) __stepFrame(16);
+__check('a fully-completed village still starts a fresh night with every LIGHTS group dark', LIGHTS.every(function(L, i){ return S.lightAnim[i] === 0; }));
+S.score = 999; // comfortably above every LIGHTS.thr
+for (var i = 0; i < 80; i++) __stepFrame(16); // >1/1.5s of easing time
+__check('LIGHTS still light up from THIS round\\'s own score, exactly as a first-time player would experience it', LIGHTS.every(function(L, i){ return S.lightAnim[i] > 0.9; }));
+__check('permanent restoration itself is untouched by any of this -- still fully complete', villageProgression.villages[0].completed === true && villageProgression.villages[0].bestNightDelivered === 500);
 `);
 
 // =====================================================================
-// E18 §9/§10: reload preserves an in-progress save (via the non-YT
+// reload preserves an in-progress bestNightDelivered save (via the non-YT
 // gk2_village key, seeded before this scenario's own script runs -- see
-// the runner's seed hook above), and never regresses/duplicates it.
-scenario('lumora2-e18-reload-preserves', null, `
-__check('7: reload preserves a previously-saved Village Progress value (47) exactly', currentVillageProgress().restorationProgress === 47, 'progress=' + currentVillageProgress().restorationProgress);
-__check('7b: milestones are correctly rebuilt from the loaded value, not read from the (empty) saved array', villageProgression.villages[0].milestones[0].state === 'restored' && villageProgression.villages[0].milestones[1].state === 'restored' && villageProgression.villages[0].milestones[2].state === 'locked');
-reset(); // Restart Night after a reload must not disturb the reloaded value either
-__check('7c: Restart Night after a reload still does not reset it', currentVillageProgress().restorationProgress === 47);
+// the runner's seed hook below), and never regresses/duplicates it.
+scenario('lumora-village-lumora-reload-preserves', null, `
+__check('7: reload preserves a previously-saved bestNightDelivered value (220) exactly', currentVillageProgress().bestNightDelivered === 220, 'best=' + currentVillageProgress().bestNightDelivered);
+__check('7b: milestones are correctly rebuilt from the loaded value (crossing 50/100/150/200, not yet 250)', villageProgression.villages[0].milestones[0].state === 'restored' && villageProgression.villages[0].milestones[3].state === 'restored' && villageProgression.villages[0].milestones[4].state === 'locked');
+reset(); // Restart Night after a reload must not disturb the reloaded value, and must reset the TEMPORARY counter
+__check('7c: Restart Night after a reload still does not reset the permanent best', currentVillageProgress().bestNightDelivered === 220);
+__check('7d: Restart Night after a reload resets the temporary current-night counter to 0', S.nightDelivered === 0);
 `);
 
 // =====================================================================
-// E18 §8: the one migration case with a principled answer -- a player who
-// already reached the OLD score-based restorationPct(best)===100% (best=30
-// here, seeded before this scenario's own script runs) with NO
-// villageProgression save at all yet is granted Village 1 already complete.
-scenario('lumora2-e18-migration-old-100', null, `
-__check('migration: an existing player already at the old restorationPct(best)=100% is granted Village 1 complete at 450', restorationPct(best) === 100 && currentVillageProgress().restorationProgress === 450 && currentVillageProgress().completed === true);
+// migration: a player who already reached the OLD score-based
+// restorationPct(best)===100% (best=30 here, seeded before this scenario's
+// own script runs) with NO villageProgression save at all yet is granted
+// Lumora already complete under the CURRENT (500-threshold) system.
+scenario('lumora-village-lumora-migration-old-100', null, `
+__check('migration: an existing player already at the old restorationPct(best)=100% is granted Lumora complete at the current threshold (500)', restorationPct(best) === 100 && currentVillageProgress().bestNightDelivered === 500 && currentVillageProgress().completed === true);
 __check('migration: existing unrelated progress (best itself) is left completely untouched by this migration', best === 30);
 `);
 
 // =====================================================================
-// E19: Village 1 Completion + Village Journey Foundation. Real completion
-// is driven through the same S.carried -> village-zone -> S.sparks
-// pipeline lumora2-e18-delivery-progression already established -- this
-// scenario only adds checks for genuinely NEW E19 behavior (completion
-// itself was already exercised by E18's own test 10/11; those are not
-// re-proven here).
-scenario('lumora2-e19-village-completion', null, `
-// ---- 1: incomplete below 450, Moonfall/Aurora locked ----
-villageProgression.villages[0].restorationProgress = 449;
-rebuildVillageMilestones(villageProgression.villages[0]);
-__check('1: Village 1 is incomplete below 450', villageProgression.villages[0].completed === false);
-__check('1b: Moonfall is locked while Village 1 is incomplete', isVillageUnlocked('moonfall') === false);
-__check('1c: Aurora is locked while Village 1 is incomplete', isVillageUnlocked('aurora') === false);
-
-// ---- 2/3/6/7: one real delivery crosses 450 ----
-upgrades.tutorialDone = true;
-reset();
-S.carried.push({ type: 'y', ph: 0, sp: 1 });
-S.jar.y = 999; S.jar.ty = 999;
-for (var i = 0; i < 200 && (S.sparks.length > 0 || S.carried.length > 0); i++) __stepFrame(16);
-__check('2: Village 1 completes at exactly 450 via a real delivery', villageProgression.villages[0].restorationProgress === 450 && villageProgression.villages[0].completed === true);
-__check('3: the Statue purchase unlocks through the new OR-condition even though the OLD restorationPct(best) has NOT reached 100', restorationPct(best) < 100 && SHOP_ITEMS.statue.locked() === false);
-__check('6: Moonfall becomes unlocked the instant Village 1 completes', isVillageUnlocked('moonfall') === true);
-__check('7: Aurora remains locked (Moonfall itself is not complete)', isVillageUnlocked('aurora') === false);
-__check('6b: currentVillage stays lumora -- E19 never auto-advances the player into a non-existent Village 2 scene', villageProgression.currentVillage === 'lumora');
-__check('Night Complete row: S.villageCompletedThisNight is set with the correct next village name', !!S.villageCompletedThisNight && S.villageCompletedThisNight.nextVillageName === 'Moonfall');
-
-// ---- 4/10: cannot progress above 450; duplicate completion does not re-fire ----
-var bannerCalls = 0, realFx = capMilestoneFx;
-capMilestoneFx = function(){ bannerCalls++; };
-grantVillageProgress();
-capMilestoneFx = realFx;
-__check('4: progress can never exceed 450', villageProgression.villages[0].restorationProgress === 450);
-__check('10: an already-completed village is a safe no-op -- no duplicate completion banner/state change', bannerCalls === 0);
-
-// ---- 9: Restart Night does not remove completion ----
-reset();
-__check('9: Restart Night does not remove Village 1 completion or Moonfall\\'s unlock', villageProgression.villages[0].completed === true && isVillageUnlocked('moonfall') === true);
-
-// ---- 11/12/13: existing systems remain functional/unchanged ----
-__check('11: Decor/Fountain remain plain, unlocked coin purchases -- E19 did not touch this', !SHOP_ITEMS.deco.locked && !SHOP_ITEMS.fountain.locked && SHOP_ITEMS.deco.price === 1000);
-__check('12: firefly coin values are unchanged', TYPES.y.coins === 0.65 && TYPES.m.coins === 8);
-__check('12b: jar/trail prices are unchanged', JARS.find(function(j){ return j.key === 'aurora'; }).price === 30000 && TRAIL_COLORS.find(function(t){ return t.key === 'celestial'; }).price === 15000);
-__check('13: quests/contracts/weekly progression are still live and untouched', Array.isArray(quests) && Array.isArray(contractsCompleted) && typeof weeklyStats === 'object');
+// migration: a save written BEFORE this pivot only has the OLD field name
+// (restorationProgress, a cumulative lifetime count) -- read defensively as
+// a one-time "at least this much" floor for bestNightDelivered, rather than
+// silently dropping an existing dev/test save's progress to 0. Seeded
+// value: restorationProgress: 260 (an old cumulative value that happens to
+// sit between two of the NEW thresholds too, just to prove the read/rebuild
+// both use it correctly either way).
+scenario('lumora-village-lumora-migration-old-field-name', null, `
+__check('a save with only the OLD restorationProgress field name is read as an initial bestNightDelivered floor', currentVillageProgress().bestNightDelivered === 260);
+__check('milestones rebuild correctly off that migrated value (crosses 50/100/150/200/250, not yet 300)', villageProgression.villages[0].milestones[4].state === 'restored' && villageProgression.villages[0].milestones[5].state === 'locked');
 `);
 
 // =====================================================================
-// E19 §9: reload preserves completion/unlock exactly, including an old
-// (pre-E19, 1-entry villages[]) save gaining Moonfall/Aurora as locked
-// placeholders for free -- see the runner's seed hook above.
-scenario('lumora2-e19-reload-preserves-completion', null, `
-__check('5/8: reload preserves Village 1 completion exactly', currentVillageProgress().restorationProgress === 450 && currentVillageProgress().completed === true);
-__check('6: Moonfall is unlocked after reloading an already-complete Village 1', isVillageUnlocked('moonfall') === true);
+// reload preserves a COMPLETED Lumora exactly, including an old (pre-E19,
+// 1-entry villages[]) save gaining Moonfall/Aurora as locked placeholders
+// for free via the same by-id merge -- no new migration code needed even
+// after the field rename, since the merge itself is generic.
+scenario('lumora-village-lumora-reload-preserves-completion', null, `
+__check('5/8: reload preserves a completed Lumora exactly', currentVillageProgress().bestNightDelivered === 500 && currentVillageProgress().completed === true);
+__check('6: Moonfall is unlocked after reloading an already-complete Lumora', isVillageUnlocked('moonfall') === true);
 __check('7: Aurora is still locked after reload', isVillageUnlocked('aurora') === false);
 __check('old-save compatibility: Moonfall/Aurora exist as locked placeholders even though the loaded save only ever had one village entry', villageProgression.villages.length === 3 && villageProgression.villages[1].id === 'moonfall' && villageProgression.villages[2].id === 'aurora');
 reset();
@@ -7975,147 +7974,134 @@ __check('9: Restart Night after a reload still does not disturb completion/unloc
 `);
 
 // =====================================================================
-// E21/E22: Moonfall (Village 2) -- real, playable, restorable, using the
-// D7 "Completed Lumora" design reference's own structure repurposed as
-// Moonfall's architectural vocabulary. Reuses the EXACT E18/E19
-// villageProgression architecture (grantVillageProgress/isVillageUnlocked/
-// rebuildVillageMilestones), so most of this scenario is really proving
-// that architecture is genuinely village-agnostic, not Lumora-only in disguise.
-scenario('lumora2-e21-moonfall-foundation', null, `
+// Moonfall (Village 2) -- its own independent bestNightDelivered/milestone
+// ladder (100/200/300/425/550/700/850/1000, completion 1000), reusing the
+// exact same villageProgression architecture as Lumora. Also covers the
+// Village Selection switch-back behavior and the render-pct temporary-
+// lighting fix (drawVillage()'s Moonfall branch now uses S.nightDelivered,
+// not bestNightDelivered).
+scenario('lumora-village-moonfall-foundation', null, `
 // ---- 1/2/3: Moonfall starts inert and locked before Lumora completes ----
-__check('1: Moonfall starts at restorationProgress 0, not completed', villageProgression.villages[1].id === 'moonfall' && villageProgression.villages[1].restorationProgress === 0 && villageProgression.villages[1].completed === false);
+__check('1: Moonfall starts at bestNightDelivered 0, not completed', villageProgression.villages[1].id === 'moonfall' && villageProgression.villages[1].bestNightDelivered === 0 && villageProgression.villages[1].completed === false);
 __check('2: Moonfall is locked before Lumora completes', isVillageUnlocked('moonfall') === false);
 __check('3: entering a locked village is refused, currentVillage stays lumora', enterVillage('moonfall') === false && villageProgression.currentVillage === 'lumora');
 
-// ---- complete Lumora via a real delivery, same pipeline E19's own test uses ----
+// ---- complete Lumora via a real delivery (500, the current threshold) ----
 upgrades.tutorialDone = true;
 reset();
-villageProgression.villages[0].restorationProgress = 449;
+villageProgression.villages[0].bestNightDelivered = 499;
+S.nightDelivered = 499;
 rebuildVillageMilestones(villageProgression.villages[0]);
 S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
 for (var i0 = 0; i0 < 200 && (S.sparks.length > 0 || S.carried.length > 0); i0++) __stepFrame(16);
-__check('setup: Lumora completes at 450', villageProgression.villages[0].completed === true);
+__check('setup: Lumora completes at 500', villageProgression.villages[0].completed === true);
 
 // ---- 4/5: Moonfall unlocks, and can now actually be entered ----
 __check('4: Moonfall becomes available after Lumora completion', isVillageUnlocked('moonfall') === true);
 __check('5: entering Moonfall now succeeds and persists currentVillage', enterVillage('moonfall') === true && villageProgression.currentVillage === 'moonfall');
 
-// ---- 5b: the E21 v2 rewrite ports the real design-canvas villageScene()
-// renderer, which reads restorationProgress fresh on every single call
-// (drawMoonfallVillage(ctx,pct,t) takes pct as a plain argument, computed
-// new each frame in drawVillage() -- there is no S.moonfallAnim or other
-// per-frame eased/remembered state any more). That structurally closes off
-// the exact cross-village pollution bug the FIRST E21 pass hit live in the
-// browser (switching currentVillage doesn't call reset(), so an eased
-// value computed while playing Lumora could survive into Moonfall) --
-// there is simply nothing left to carry that pollution. Confirmed
-// directly: the pct Moonfall would render at right now is genuinely 0,
-// not anything inherited from Lumora's own already-450 progress (which
-// happens to share the same threshold numbers).
-for (var ib = 0; ib < 5; ib++) __stepFrame(16);
-var mfPct = villageProgression.villages[1].completionThreshold != null
-  ? villageProgression.villages[1].restorationProgress / villageProgression.villages[1].completionThreshold : 1;
-__check('5b: Moonfall\\'s render pct is genuinely 0 right after being unlocked via Lumora\\'s own completion, not inherited from it', mfPct === 0);
-
-// ---- 6: a real delivery while IN Moonfall grants Moonfall its own +1, and never touches Lumora's already-completed progress ----
+// ---- 5b: the render pct is driven by S.nightDelivered (temporary), which
+// reset() just zeroed for the new village -- genuinely 0, not inherited
+// from Lumora's own already-500 best. ----
 reset();
-var mfBefore = currentVillageProgress().restorationProgress;
+for (var ib = 0; ib < 5; ib++) __stepFrame(16);
+__check('5b: Moonfall\\'s render pct is genuinely 0 right after being unlocked -- driven by S.nightDelivered, not by any permanent value', S.nightDelivered === 0);
+
+// ---- 6: a real delivery while IN Moonfall grants Moonfall its own progress, and never touches Lumora's already-completed one ----
+reset();
 S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
 for (var i1 = 0; i1 < 120 && (S.sparks.length > 0 || S.carried.length > 0); i1++) __stepFrame(16);
-__check('6: a real delivery in Moonfall adds exactly +1 to Moonfall, not to Lumora', currentVillageProgress().id === 'moonfall' && currentVillageProgress().restorationProgress === mfBefore + 1 && villageProgression.villages[0].restorationProgress === 450);
+__check('6: a real delivery in Moonfall adds exactly +1 to Moonfall\\'s bestNightDelivered, not to Lumora\\'s', currentVillageProgress().id === 'moonfall' && currentVillageProgress().bestNightDelivered === 1 && villageProgression.villages[0].bestNightDelivered === 500);
 
-// ---- 7: milestones use Moonfall's OWN defs, not Lumora's landmark names ----
-villageProgression.villages[1].restorationProgress = 14;
+// ---- 7: milestones use Moonfall's OWN defs/thresholds/names, not Lumora's ----
+villageProgression.villages[1].bestNightDelivered = 99;
+S.nightDelivered = 99;
 rebuildVillageMilestones(villageProgression.villages[1]);
 var mBannerMsgs = [], realCapFx1 = capMilestoneFx;
 capMilestoneFx = function(msg){ mBannerMsgs.push(msg); realCapFx1(msg); };
-grantVillageProgress(); // 14 -> 15, crosses Moonfall's own M1
+grantVillageProgress(); // 99 -> 100, crosses Moonfall's own M1 (Clock Tower)
 capMilestoneFx = realCapFx1;
-__check('7: Moonfall M1 triggers at 15 with Moonfall\\'s own landmark name, not Lumora\\'s', villageProgression.villages[1].milestones[0].state === 'restored' && mBannerMsgs.length === 1 && mBannerMsgs[0].indexOf('West Cottage Pair') >= 0);
+__check('7: Moonfall M1 triggers at 100 with Moonfall\\'s own milestone name (Clock Tower), not Lumora\\'s', villageProgression.villages[1].milestones[0].state === 'restored' && mBannerMsgs.length === 1 && mBannerMsgs[0].indexOf('Clock Tower') >= 0);
 
-// ---- 8: reaching 450 completes Moonfall, unlocks Aurora, never auto-enters/auto-completes it, grants no extra currency ----
+// ---- 8: reaching 1000 completes Moonfall, unlocks Aurora, never auto-enters/auto-completes it, grants no extra currency ----
 var coinsBeforeComplete = coins + coinFraction;
-villageProgression.villages[1].restorationProgress = 449;
+villageProgression.villages[1].bestNightDelivered = 999;
+S.nightDelivered = 999;
 rebuildVillageMilestones(villageProgression.villages[1]);
-grantVillageProgress(); // 449 -> 450
-__check('8: Moonfall completes at exactly 450', villageProgression.villages[1].completed === true && villageProgression.villages[1].milestones[7].state === 'restored');
+grantVillageProgress(); // 999 -> 1000
+__check('8: Moonfall completes at exactly 1000', villageProgression.villages[1].completed === true && villageProgression.villages[1].milestones[7].state === 'restored');
 __check('8b: Aurora becomes unlocked, but is never auto-entered or auto-completed', isVillageUnlocked('aurora') === true && villageProgression.villages[2].completed === false && villageProgression.currentVillage === 'moonfall');
 __check('8c: completing Moonfall grants no coins/currency of its own', coins + coinFraction === coinsBeforeComplete);
 
-// ---- 9: progress can never exceed 450; completion never double-fires ----
+// ---- 9: progress can never exceed 1000; completion never double-fires ----
 var bannerCalls2 = 0, realCapFx2 = capMilestoneFx;
 capMilestoneFx = function(){ bannerCalls2++; };
 grantVillageProgress();
 capMilestoneFx = realCapFx2;
-__check('9: Moonfall progress can never exceed 450, and an already-completed village is a safe no-op', villageProgression.villages[1].restorationProgress === 450 && bannerCalls2 === 0);
+__check('9: Moonfall bestNightDelivered can never exceed 1000, and an already-completed village is a safe no-op', villageProgression.villages[1].bestNightDelivered === 1000 && bannerCalls2 === 0);
 
-// ---- 10: Restart Night does not remove Moonfall's completion or currentVillage ----
+// ---- 10: Restart Night does not remove Moonfall's completion, currentVillage, or its permanent best -- but DOES reset the temporary counter ----
 reset();
 __check('10: Restart Night does not remove Moonfall completion or the current village', villageProgression.villages[1].completed === true && villageProgression.currentVillage === 'moonfall');
+__check('10b: Restart Night resets the temporary current-night counter for the new match', S.nightDelivered === 0);
 
 // ---- 11: Aurora remains a pure, inert placeholder -- no gameplay/artwork/thresholds invented for it ----
 __check('11: Aurora has no completion threshold or milestones', villageProgression.villages[2].completionThreshold === null && villageProgression.villages[2].milestones.length === 0);
 
-// ---- 12: the real render pipeline (drawVillage -> drawMoonfallVillage) runs without throwing at 0%, mid, and 100% restoration ----
-villageProgression.villages[1].restorationProgress = 0; rebuildVillageMilestones(villageProgression.villages[1]);
-reset();
+// ---- 12: the real render pipeline (drawVillage -> drawMoonfallVillage) runs without throwing at 0%, mid, and 100% CURRENT-NIGHT delivery (not bestNightDelivered) ----
+S.nightDelivered = 0;
 for (var i2 = 0; i2 < 5; i2++) __stepFrame(16);
-villageProgression.villages[1].restorationProgress = 200; rebuildVillageMilestones(villageProgression.villages[1]);
+S.nightDelivered = 500;
 for (var i3 = 0; i3 < 5; i3++) __stepFrame(16);
-villageProgression.villages[1].restorationProgress = 450; rebuildVillageMilestones(villageProgression.villages[1]);
+S.nightDelivered = 1000;
 for (var i4 = 0; i4 < 5; i4++) __stepFrame(16);
-__check('12: the Moonfall render path runs at 0%, mid, and 100% restoration without throwing', true);
+__check('12: the Moonfall render path runs at 0%, mid, and 100% CURRENT-NIGHT delivery without throwing', true);
 
 // ---- 13: existing Lumora/economy/shop systems remain completely unaffected ----
 __check('13: firefly coin values are unchanged', TYPES.y.coins === 0.65 && TYPES.m.coins === 8);
 __check('13b: jar/trail prices are unchanged', JARS.find(function(j){ return j.key === 'aurora'; }).price === 30000);
 __check('13c: Decor/Fountain remain plain, unlocked coin purchases', !SHOP_ITEMS.deco.locked && !SHOP_ITEMS.fountain.locked && SHOP_ITEMS.deco.price === 1000);
 __check('13d: Lumora itself remains completed and its Statue OR-unlock is untouched', villageProgression.villages[0].completed === true && SHOP_ITEMS.statue.locked() === false);
+__check('13e: Moonfall\\'s own firefly-opportunity bump touches spawn cadence only, never coin values (re-confirms 13/13b)', villageSpawnMult() === MOONFALL_SPAWN_RATE_BONUS && MOONFALL_SPAWN_RATE_BONUS > 1);
 
-// ---- IMPORTANT IMPLEMENTATION CHANGE pass: switching BACK to Lumora after
-// Moonfall, exactly TEST D from the spec -- the previous pass's Selection
-// screen had no path for this at all (tapping Lumora's row only ever
-// opened its old hub, never selected it). ----
+// ---- switching BACK to Lumora after Moonfall (spec §13/TEST D) ----
 __check('20: currentVillage is genuinely Moonfall before switching back', villageProgression.currentVillage === 'moonfall');
 __check('21: Aurora never appears as a selectable card on the Village Selection screen', journeyRowRects().every(function(r){ return r.key !== 'aurora'; }) && journeyRowRects().length === 2);
 enterVillage('lumora');
-__check('22: selecting Lumora again succeeds -- currentVillage switches back (TEST D)', villageProgression.currentVillage === 'lumora' && currentVillageProgress().id === 'lumora');
-__check('23: switching back to Lumora does not touch Moonfall\\'s own completed progress', villageProgression.villages[1].completed === true && villageProgression.villages[1].restorationProgress === 450);
+__check('22: selecting Lumora again succeeds -- currentVillage switches back', villageProgression.currentVillage === 'lumora' && currentVillageProgress().id === 'lumora');
+__check('23: switching back to Lumora does not touch Moonfall\\'s own completed progress', villageProgression.villages[1].completed === true && villageProgression.villages[1].bestNightDelivered === 1000);
 __check('24: switching the selected village touches nothing else -- coins/best/score are untouched by the switch itself', typeof coins === 'number' && typeof best === 'number');
-// a real delivery now advances LUMORA again (already-completed, so this
-// is also implicitly checking the "already completed = safe no-op" path
-// still holds for Lumora specifically, not just Moonfall).
-var lumoraProgressBeforeSwitch = villageProgression.villages[0].restorationProgress;
+var lumoraBestBeforeSwitch = villageProgression.villages[0].bestNightDelivered;
 reset();
 S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
 for (var isw = 0; isw < 120 && (S.sparks.length > 0 || S.carried.length > 0); isw++) __stepFrame(16);
-__check('25: a real delivery after switching back to Lumora is correctly attributed to Lumora (already completed, so a safe no-op, not silently misrouted to Moonfall)', villageProgression.villages[0].restorationProgress === lumoraProgressBeforeSwitch && villageProgression.villages[1].restorationProgress === 450);
+__check('25: a real delivery after switching back to Lumora is correctly attributed to Lumora (already completed, so a safe no-op, not silently misrouted to Moonfall)', villageProgression.villages[0].bestNightDelivered === lumoraBestBeforeSwitch && villageProgression.villages[1].bestNightDelivered === 1000);
 `);
 
 // =====================================================================
-// E21/E22: reload preserves Moonfall's own mid-restoration progress AND
-// currentVillage (the one field E18/E19 saved but never actually restored
-// -- see the load-path comment in index.html). Seeded with a full modern
-// 3-entry save: Lumora completed, Moonfall mid-progress, currentVillage
-// already switched to 'moonfall' -- see the runner's seed hook below.
-scenario('lumora2-e21-moonfall-reload-preserves', null, `
-__check('14: reload preserves Moonfall\\'s mid-restoration progress exactly', villageProgression.villages[1].restorationProgress === 120 && villageProgression.villages[1].completed === false);
+// reload preserves Moonfall's own mid-progress bestNightDelivered AND
+// currentVillage. Seeded with a full modern 3-entry save: Lumora completed,
+// Moonfall mid-progress, currentVillage already switched to 'moonfall'.
+scenario('lumora-village-moonfall-reload-preserves', null, `
+__check('14: reload preserves Moonfall\\'s mid-progress bestNightDelivered exactly', villageProgression.villages[1].bestNightDelivered === 730 && villageProgression.villages[1].completed === false);
+__check('14b: milestones rebuild correctly (crosses through 700, not yet 850)', villageProgression.villages[1].milestones[5].state === 'restored' && villageProgression.villages[1].milestones[6].state === 'locked');
 __check('15: reload preserves currentVillage as moonfall, not silently reverting to lumora', villageProgression.currentVillage === 'moonfall' && currentVillageProgress().id === 'moonfall');
-__check('16: Lumora\\'s own completed state survives the reload untouched', villageProgression.villages[0].completed === true && villageProgression.villages[0].restorationProgress === 450);
+__check('16: Lumora\\'s own completed state survives the reload untouched', villageProgression.villages[0].completed === true && villageProgression.villages[0].bestNightDelivered === 500);
 __check('17: Aurora is still locked after reload', isVillageUnlocked('aurora') === false);
 reset();
-__check('18: Restart Night after a reload does not disturb Moonfall progress or currentVillage', currentVillageProgress().id === 'moonfall' && currentVillageProgress().restorationProgress === 120 && villageProgression.currentVillage === 'moonfall');
+__check('18: Restart Night after a reload does not disturb Moonfall\\'s permanent best or currentVillage', currentVillageProgress().id === 'moonfall' && currentVillageProgress().bestNightDelivered === 730 && villageProgression.currentVillage === 'moonfall');
+__check('18b: Restart Night after a reload still resets the temporary current-night counter', S.nightDelivered === 0);
 `);
 
 // =====================================================================
-// E21/E22: defensive validation -- a save naming a currentVillage that
-// isn't actually reachable (corrupted, or a locked village) must never be
+// defensive validation -- a save naming a currentVillage that isn't
+// actually reachable (corrupted, or a locked village) must never be
 // trusted blindly; it should fall back to the safe 'lumora' default rather
 // than dropping the player into content they haven't unlocked.
-scenario('lumora2-e21-moonfall-currentvillage-validation', null, `
+scenario('lumora-village-currentvillage-validation', null, `
 __check('19: a save naming an unreachable currentVillage (here, a locked Aurora) is ignored, defaulting safely to lumora', villageProgression.currentVillage === 'lumora');
 `);
 
@@ -8135,26 +8121,32 @@ async function main() {
     // one-time load-time logic (reload-survival, the old-100%-restoration
     // migration) without a second vm context mid-driver.
     const seed = sc.name === 'standalone' ? `try{ localStorage.setItem('gk2_best','7'); }catch(e){}\n`
-      : sc.name === 'lumora2-e18-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:47,completionThreshold:450,milestones:[],completed:false}]})); }catch(e){}\n`
-      : sc.name === 'lumora2-e18-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
-      // E19: a save written BEFORE E19 existed -- a 1-entry villages[] array
-      // (no moonfall/aurora at all), Village 1 already completed. Proves the
-      // "old 1-entry save gains Moonfall/Aurora as locked placeholders for
-      // free, via the same by-id merge, no new migration code" claim for
-      // real, not just for a fresh player.
-      : sc.name === 'lumora2-e19-reload-preserves-completion' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:450,completionThreshold:450,milestones:[],completed:true}]})); }catch(e){}\n`
-      // E21/E22: a full modern 3-entry save -- Lumora completed, Moonfall
-      // mid-restoration, currentVillage already switched to 'moonfall' --
+      : sc.name === 'lumora-village-lumora-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:220,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
+      : sc.name === 'lumora-village-lumora-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
+      // PERMANENT-VILLAGE-RESTORATION pass: a save written with the OLD field
+      // name (restorationProgress, pre-pivot) -- proves the one-time
+      // defensive dual-field-name read treats it as an initial
+      // bestNightDelivered floor rather than dropping an existing dev/test
+      // save's progress to 0.
+      : sc.name === 'lumora-village-lumora-migration-old-field-name' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:260,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
+      // a save written BEFORE the Village Journey existed -- a 1-entry
+      // villages[] array (no moonfall/aurora at all), Lumora already
+      // completed. Proves the "old 1-entry save gains Moonfall/Aurora as
+      // locked placeholders for free, via the same by-id merge, no new
+      // migration code" claim for real, not just for a fresh player --
+      // still true after the bestNightDelivered field rename.
+      : sc.name === 'lumora-village-lumora-reload-preserves-completion' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true}]})); }catch(e){}\n`
+      // a full modern 3-entry save -- Lumora completed, Moonfall
+      // mid-progress, currentVillage already switched to 'moonfall' --
       // proving BOTH that Moonfall's own progress survives reload AND that
-      // currentVillage itself (saved since E18 but never actually restored
-      // until this phase) comes back correctly instead of silently
+      // currentVillage itself comes back correctly instead of silently
       // reverting to 'lumora'.
-      : sc.name === 'lumora2-e21-moonfall-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',restorationProgress:450,completionThreshold:450,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',restorationProgress:120,completionThreshold:450,milestones:[],completed:false},{id:'aurora',name:'Aurora',restorationProgress:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
-      // E21/E22: a corrupted/tampered save claiming currentVillage:'aurora'
-      // while Aurora is still genuinely locked (Moonfall itself isn't
-      // complete) -- proves the load path validates against real
-      // unlocked-ness rather than trusting the saved string blindly.
-      : sc.name === 'lumora2-e21-moonfall-currentvillage-validation' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'aurora',villages:[{id:'lumora',name:'Lumora',restorationProgress:0,completionThreshold:450,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',restorationProgress:0,completionThreshold:450,milestones:[],completed:false},{id:'aurora',name:'Aurora',restorationProgress:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      : sc.name === 'lumora-village-moonfall-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:730,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // a corrupted/tampered save claiming currentVillage:'aurora' while
+      // Aurora is still genuinely locked (Moonfall itself isn't complete) --
+      // proves the load path validates against real unlocked-ness rather
+      // than trusting the saved string blindly.
+      : sc.name === 'lumora-village-currentvillage-validation' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'aurora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value
