@@ -2737,20 +2737,30 @@ upgrades.equippedJar = 'simple';
 
 // ===== Lumora UI port: Village/Journal screens, Restart Night, RunSummary ===
 
-// Village screen: reachable from title, not mid-round; draws without
-// throwing across a spread of restoration percentages (0%, partial, maxed)
+// Village Selection screen: reachable from title, not mid-round. Lumora's
+// own detailed hub (screen='village') is now one tap further in (the
+// Selection screen's "View Details ->" link on Lumora's card, per the
+// IMPORTANT IMPLEMENTATION CHANGE pass), not the title button's direct
+// destination any more -- still draws without throwing across a spread of
+// restoration percentages (0%, partial, maxed).
 reset(); screen = 'play'; paused = false; S.over = false;
 __fire(cv, 'pointerdown', __fakeEvent(titleNavRects().find(function(b){ return b.key === 'village'; }).x, titleNavRects().find(function(b){ return b.key === 'village'; }).y));
-__check('tapping the title-screen village-button spot mid-round does not open the Village screen', screen === 'play');
+__check('tapping the title-screen village-button spot mid-round does not open Village Selection', screen === 'play');
 screen = 'title';
 var villageNavBtn = titleNavRects().find(function(b){ return b.key === 'village'; });
 __fire(cv, 'pointerdown', __fakeEvent(villageNavBtn.x, villageNavBtn.y));
-__check('the village button on the title screen opens the Village screen', screen === 'village');
+__check('the village button on the title screen opens Village Selection', screen === 'journey');
+var lumoraRow = journeyRowRects().find(function(r){ return r.key === 'lumora'; });
+var viewDetails = journeyViewDetailsRect(lumoraRow);
+__fire(cv, 'pointerdown', __fakeEvent(viewDetails.x + viewDetails.w / 2, viewDetails.y + viewDetails.h / 2));
+__check('Lumora\\'s "View Details" link on the Selection screen opens the Village screen', screen === 'village');
 var villageDrawThrew = false;
 try { [0, 12, 25].forEach(function(b){ best = b; draw(); }); } catch (e) { villageDrawThrew = true; }
 __check('the Village screen draws without throwing across a spread of restoration levels (0%/partial/maxed)', !villageDrawThrew);
 __fire(cv, 'pointerdown', __fakeEvent(VILLAGE_CLOSE_BTN.x, VILLAGE_CLOSE_BTN.y));
-__check('the Village close button returns to the title screen', screen === 'title');
+__check('the Village close button returns to Village Selection (where "View Details" opened it from)', screen === 'journey');
+__fire(cv, 'pointerdown', __fakeEvent(JOURNEY_CLOSE_BTN.x, JOURNEY_CLOSE_BTN.y));
+__check('the Village Selection close button returns to the title screen', screen === 'title');
 
 // ===== Village + Decoration System Correction pass ==========================
 
@@ -8063,6 +8073,26 @@ __check('13: firefly coin values are unchanged', TYPES.y.coins === 0.65 && TYPES
 __check('13b: jar/trail prices are unchanged', JARS.find(function(j){ return j.key === 'aurora'; }).price === 30000);
 __check('13c: Decor/Fountain remain plain, unlocked coin purchases', !SHOP_ITEMS.deco.locked && !SHOP_ITEMS.fountain.locked && SHOP_ITEMS.deco.price === 1000);
 __check('13d: Lumora itself remains completed and its Statue OR-unlock is untouched', villageProgression.villages[0].completed === true && SHOP_ITEMS.statue.locked() === false);
+
+// ---- IMPORTANT IMPLEMENTATION CHANGE pass: switching BACK to Lumora after
+// Moonfall, exactly TEST D from the spec -- the previous pass's Selection
+// screen had no path for this at all (tapping Lumora's row only ever
+// opened its old hub, never selected it). ----
+__check('20: currentVillage is genuinely Moonfall before switching back', villageProgression.currentVillage === 'moonfall');
+__check('21: Aurora never appears as a selectable card on the Village Selection screen', journeyRowRects().every(function(r){ return r.key !== 'aurora'; }) && journeyRowRects().length === 2);
+enterVillage('lumora');
+__check('22: selecting Lumora again succeeds -- currentVillage switches back (TEST D)', villageProgression.currentVillage === 'lumora' && currentVillageProgress().id === 'lumora');
+__check('23: switching back to Lumora does not touch Moonfall\\'s own completed progress', villageProgression.villages[1].completed === true && villageProgression.villages[1].restorationProgress === 450);
+__check('24: switching the selected village touches nothing else -- coins/best/score are untouched by the switch itself', typeof coins === 'number' && typeof best === 'number');
+// a real delivery now advances LUMORA again (already-completed, so this
+// is also implicitly checking the "already completed = safe no-op" path
+// still holds for Lumora specifically, not just Moonfall).
+var lumoraProgressBeforeSwitch = villageProgression.villages[0].restorationProgress;
+reset();
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var isw = 0; isw < 120 && (S.sparks.length > 0 || S.carried.length > 0); isw++) __stepFrame(16);
+__check('25: a real delivery after switching back to Lumora is correctly attributed to Lumora (already completed, so a safe no-op, not silently misrouted to Moonfall)', villageProgression.villages[0].restorationProgress === lumoraProgressBeforeSwitch && villageProgression.villages[1].restorationProgress === 450);
 `);
 
 // =====================================================================
