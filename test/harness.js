@@ -7964,6 +7964,123 @@ reset();
 __check('9: Restart Night after a reload still does not disturb completion/unlock state', currentVillageProgress().completed === true && isVillageUnlocked('moonfall') === true);
 `);
 
+// =====================================================================
+// E21/E22: Moonfall (Village 2) -- real, playable, restorable, using the
+// D7 "Completed Lumora" design reference's own structure repurposed as
+// Moonfall's architectural vocabulary. Reuses the EXACT E18/E19
+// villageProgression architecture (grantVillageProgress/isVillageUnlocked/
+// rebuildVillageMilestones), so most of this scenario is really proving
+// that architecture is genuinely village-agnostic, not Lumora-only in disguise.
+scenario('lumora2-e21-moonfall-foundation', null, `
+// ---- 1/2/3: Moonfall starts inert and locked before Lumora completes ----
+__check('1: Moonfall starts at restorationProgress 0, not completed', villageProgression.villages[1].id === 'moonfall' && villageProgression.villages[1].restorationProgress === 0 && villageProgression.villages[1].completed === false);
+__check('2: Moonfall is locked before Lumora completes', isVillageUnlocked('moonfall') === false);
+__check('3: entering a locked village is refused, currentVillage stays lumora', enterVillage('moonfall') === false && villageProgression.currentVillage === 'lumora');
+
+// ---- complete Lumora via a real delivery, same pipeline E19's own test uses ----
+upgrades.tutorialDone = true;
+reset();
+villageProgression.villages[0].restorationProgress = 449;
+rebuildVillageMilestones(villageProgression.villages[0]);
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i0 = 0; i0 < 200 && (S.sparks.length > 0 || S.carried.length > 0); i0++) __stepFrame(16);
+__check('setup: Lumora completes at 450', villageProgression.villages[0].completed === true);
+
+// ---- 4/5: Moonfall unlocks, and can now actually be entered ----
+__check('4: Moonfall becomes available after Lumora completion', isVillageUnlocked('moonfall') === true);
+__check('5: entering Moonfall now succeeds and persists currentVillage', enterVillage('moonfall') === true && villageProgression.currentVillage === 'moonfall');
+
+// ---- 5b: a REAL bug caught live in the browser -- switching currentVillage
+// does NOT call reset(), so S.moonfallAnim must never have been polluted by
+// ticking against LUMORA's own (already-450) restorationProgress while
+// Lumora was still the current village (Moonfall's own thresholds happen to
+// be the identical numbers). Deliberately checked BEFORE the next reset()
+// below, which would otherwise mask this by re-zeroing S.moonfallAnim.
+for (var ib = 0; ib < 5; ib++) __stepFrame(16);
+__check('5b: Moonfall\\'s landmark reveal is not pre-lit by having just been unlocked via Lumora\\'s own completion', MOONFALL_MILESTONES.every(function(_, idx){ return !S.moonfallAnim[idx]; }));
+
+// ---- 6: a real delivery while IN Moonfall grants Moonfall its own +1, and never touches Lumora's already-completed progress ----
+reset();
+var mfBefore = currentVillageProgress().restorationProgress;
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i1 = 0; i1 < 120 && (S.sparks.length > 0 || S.carried.length > 0); i1++) __stepFrame(16);
+__check('6: a real delivery in Moonfall adds exactly +1 to Moonfall, not to Lumora', currentVillageProgress().id === 'moonfall' && currentVillageProgress().restorationProgress === mfBefore + 1 && villageProgression.villages[0].restorationProgress === 450);
+
+// ---- 7: milestones use Moonfall's OWN defs, not Lumora's landmark names ----
+villageProgression.villages[1].restorationProgress = 14;
+rebuildVillageMilestones(villageProgression.villages[1]);
+var mBannerMsgs = [], realCapFx1 = capMilestoneFx;
+capMilestoneFx = function(msg){ mBannerMsgs.push(msg); realCapFx1(msg); };
+grantVillageProgress(); // 14 -> 15, crosses Moonfall's own M1
+capMilestoneFx = realCapFx1;
+__check('7: Moonfall M1 triggers at 15 with Moonfall\\'s own landmark name, not Lumora\\'s', villageProgression.villages[1].milestones[0].state === 'restored' && mBannerMsgs.length === 1 && mBannerMsgs[0].indexOf('West Cottage Pair') >= 0);
+
+// ---- 8: reaching 450 completes Moonfall, unlocks Aurora, never auto-enters/auto-completes it, grants no extra currency ----
+var coinsBeforeComplete = coins + coinFraction;
+villageProgression.villages[1].restorationProgress = 449;
+rebuildVillageMilestones(villageProgression.villages[1]);
+grantVillageProgress(); // 449 -> 450
+__check('8: Moonfall completes at exactly 450', villageProgression.villages[1].completed === true && villageProgression.villages[1].milestones[7].state === 'restored');
+__check('8b: Aurora becomes unlocked, but is never auto-entered or auto-completed', isVillageUnlocked('aurora') === true && villageProgression.villages[2].completed === false && villageProgression.currentVillage === 'moonfall');
+__check('8c: completing Moonfall grants no coins/currency of its own', coins + coinFraction === coinsBeforeComplete);
+
+// ---- 9: progress can never exceed 450; completion never double-fires ----
+var bannerCalls2 = 0, realCapFx2 = capMilestoneFx;
+capMilestoneFx = function(){ bannerCalls2++; };
+grantVillageProgress();
+capMilestoneFx = realCapFx2;
+__check('9: Moonfall progress can never exceed 450, and an already-completed village is a safe no-op', villageProgression.villages[1].restorationProgress === 450 && bannerCalls2 === 0);
+
+// ---- 10: Restart Night does not remove Moonfall's completion or currentVillage ----
+reset();
+__check('10: Restart Night does not remove Moonfall completion or the current village', villageProgression.villages[1].completed === true && villageProgression.currentVillage === 'moonfall');
+
+// ---- 11: Aurora remains a pure, inert placeholder -- no gameplay/artwork/thresholds invented for it ----
+__check('11: Aurora has no completion threshold or milestones', villageProgression.villages[2].completionThreshold === null && villageProgression.villages[2].milestones.length === 0);
+
+// ---- 12: the real render pipeline (drawVillage -> drawMoonfallVillage) runs without throwing at 0%, mid, and 100% restoration ----
+villageProgression.villages[1].restorationProgress = 0; rebuildVillageMilestones(villageProgression.villages[1]);
+reset();
+for (var i2 = 0; i2 < 5; i2++) __stepFrame(16);
+villageProgression.villages[1].restorationProgress = 200; rebuildVillageMilestones(villageProgression.villages[1]);
+for (var i3 = 0; i3 < 5; i3++) __stepFrame(16);
+villageProgression.villages[1].restorationProgress = 450; rebuildVillageMilestones(villageProgression.villages[1]);
+for (var i4 = 0; i4 < 5; i4++) __stepFrame(16);
+__check('12: the Moonfall render path runs at 0%, mid, and 100% restoration without throwing', true);
+
+// ---- 13: existing Lumora/economy/shop systems remain completely unaffected ----
+__check('13: firefly coin values are unchanged', TYPES.y.coins === 0.65 && TYPES.m.coins === 8);
+__check('13b: jar/trail prices are unchanged', JARS.find(function(j){ return j.key === 'aurora'; }).price === 30000);
+__check('13c: Decor/Fountain remain plain, unlocked coin purchases', !SHOP_ITEMS.deco.locked && !SHOP_ITEMS.fountain.locked && SHOP_ITEMS.deco.price === 1000);
+__check('13d: Lumora itself remains completed and its Statue OR-unlock is untouched', villageProgression.villages[0].completed === true && SHOP_ITEMS.statue.locked() === false);
+`);
+
+// =====================================================================
+// E21/E22: reload preserves Moonfall's own mid-restoration progress AND
+// currentVillage (the one field E18/E19 saved but never actually restored
+// -- see the load-path comment in index.html). Seeded with a full modern
+// 3-entry save: Lumora completed, Moonfall mid-progress, currentVillage
+// already switched to 'moonfall' -- see the runner's seed hook below.
+scenario('lumora2-e21-moonfall-reload-preserves', null, `
+__check('14: reload preserves Moonfall\\'s mid-restoration progress exactly', villageProgression.villages[1].restorationProgress === 120 && villageProgression.villages[1].completed === false);
+__check('15: reload preserves currentVillage as moonfall, not silently reverting to lumora', villageProgression.currentVillage === 'moonfall' && currentVillageProgress().id === 'moonfall');
+__check('16: Lumora\\'s own completed state survives the reload untouched', villageProgression.villages[0].completed === true && villageProgression.villages[0].restorationProgress === 450);
+__check('17: Aurora is still locked after reload', isVillageUnlocked('aurora') === false);
+reset();
+__check('18: Restart Night after a reload does not disturb Moonfall progress or currentVillage', currentVillageProgress().id === 'moonfall' && currentVillageProgress().restorationProgress === 120 && villageProgression.currentVillage === 'moonfall');
+`);
+
+// =====================================================================
+// E21/E22: defensive validation -- a save naming a currentVillage that
+// isn't actually reachable (corrupted, or a locked village) must never be
+// trusted blindly; it should fall back to the safe 'lumora' default rather
+// than dropping the player into content they haven't unlocked.
+scenario('lumora2-e21-moonfall-currentvillage-validation', null, `
+__check('19: a save naming an unreachable currentVillage (here, a locked Aurora) is ignored, defaulting safely to lumora', villageProgression.currentVillage === 'lumora');
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -7988,6 +8105,18 @@ async function main() {
       // free, via the same by-id merge, no new migration code" claim for
       // real, not just for a fresh player.
       : sc.name === 'lumora2-e19-reload-preserves-completion' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:450,completionThreshold:450,milestones:[],completed:true}]})); }catch(e){}\n`
+      // E21/E22: a full modern 3-entry save -- Lumora completed, Moonfall
+      // mid-restoration, currentVillage already switched to 'moonfall' --
+      // proving BOTH that Moonfall's own progress survives reload AND that
+      // currentVillage itself (saved since E18 but never actually restored
+      // until this phase) comes back correctly instead of silently
+      // reverting to 'lumora'.
+      : sc.name === 'lumora2-e21-moonfall-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',restorationProgress:450,completionThreshold:450,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',restorationProgress:120,completionThreshold:450,milestones:[],completed:false},{id:'aurora',name:'Aurora',restorationProgress:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E21/E22: a corrupted/tampered save claiming currentVillage:'aurora'
+      // while Aurora is still genuinely locked (Moonfall itself isn't
+      // complete) -- proves the load path validates against real
+      // unlocked-ness rather than trusting the saved string blindly.
+      : sc.name === 'lumora2-e21-moonfall-currentvillage-validation' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'aurora',villages:[{id:'lumora',name:'Lumora',restorationProgress:0,completionThreshold:450,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',restorationProgress:0,completionThreshold:450,milestones:[],completed:false},{id:'aurora',name:'Aurora',restorationProgress:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value
