@@ -2421,6 +2421,33 @@ __check('a huge real-time gap (5 min) still only advances sessionT by one clampe
 __check('the same giant gap delivers at most ONE firefly from the carried jar on the resumed frame, not the whole batch at once', carriedBefore - S.carried.length === 1, 'before=' + carriedBefore + ' after=' + S.carried.length);
 __check('the same giant gap spawns at most ONE moth, not a backlog of missed spawns', S.moths.length === 1, 'moths=' + S.moths.length);
 
+// E21 #1: dt's lower bound -- loop() previously clamped only the UPPER
+// bound (Math.min(0.033,...)), leaving a clock regression (now<lastT, e.g.
+// an out-of-order rAF tick or a system clock adjustment) free to produce a
+// deeply negative dt. That negative dt would flow straight into every
+// unclamped "+=dt*rate" accumulator in update() -- S.smoke[i].r among them
+// -- and a later ctx.arc(p.x,p.y,p.r,...) call with a negative radius
+// throws a real, live-reproduced IndexSizeError (hit for real during this
+// session's own browser QA testing, not a hypothetical). Math.max(0,...)
+// added around the whole clamp is the fix; this proves it holds even
+// under a genuine backwards clock jump, not just a forward one.
+(function(){
+  reset(); screen = 'play'; paused = false;
+  S.smoke.push({ x: 401, y: H - 215, vy: -10, vx: 0, life: 4, maxL: 4.5, r: 4 }); // a known-good particle, radius only ever grows via +=dt*2.2
+  var sessionTBeforeRegress = sessionT;
+  var threwOnRegress = false;
+  try { __stepFrame(-5000); } catch (e) { threwOnRegress = true; } // simulate now going 5s BACKWARDS -- the exact shape that produced the live crash
+  __check('E21 #1: a backwards clock jump (now<lastT) does not throw', !threwOnRegress);
+  __check('E21 #1: sessionT never moves backwards from a clock regression -- dt floored to 0, not negative', sessionT >= sessionTBeforeRegress, 'before=' + sessionTBeforeRegress + ' after=' + sessionT);
+  __check('E21 #1: an existing smoke particle\\'s radius is untouched (not driven negative) by the regressed frame', S.smoke.length > 0 && S.smoke[0].r === 4, 'r=' + (S.smoke[0] && S.smoke[0].r));
+  // a normal forward frame afterward still behaves normally -- the fix
+  // didn't just swallow all motion, only the negative case
+  var rBeforeForward = S.smoke[0].r;
+  __stepFrame(16);
+  __check('E21 #1: a normal forward frame right after still advances dt-driven state normally (not permanently stuck at 0)', S.smoke[0].r > rBeforeForward, 'before=' + rBeforeForward + ' after=' + S.smoke[0].r);
+  reset();
+})();
+
 // =====================================================================
 // Depth Pass Part 1: diff() retune (compressed opening plateau) + safe
 // presentation items (restoration %, Village Requests flavor, weather
@@ -2869,6 +2896,18 @@ grantVillageProgress(); // 299 -> 300, crosses Building 6 (The Fountain)
 __check('TEST F setup: a real delivery flow reaches best=300, restoring Buildings 1-6', villageProgression.villages[0].bestNightDelivered === 300 && getRestoredMilestones('lumora').length === 6);
 reset(); // a brand-new night -- S.nightDelivered zeroes, best must not
 __check('TEST F: Restart Night for a new attempt does not touch the persisted best', villageProgression.villages[0].bestNightDelivered === 300 && S.nightDelivered === 0);
+// E21 #4 (new-night visual state): reset() immediately zeroes the ANIMATION
+// (S.landmarkAnim), not the PERMANENT restoration state -- so a fresh night
+// never pops in instantly fully lit (matches the pre-existing cat/windmill
+// "awaken fade" convention), while the underlying milestones stay restored
+// throughout and visibly ease back in over the next few frames, never
+// requiring the player to "re-earn" them this round.
+__check('TEST F/E21 #4: immediately after reset(), the landmark ANIMATION dips to 0 (no instant full-brightness pop)...', LUMORA_LANDMARK_GROUPS.every(function(_, gi){ return !S.landmarkAnim[gi]; }));
+__check('TEST F/E21 #4: ...while the PERMANENT milestone state is untouched -- Buildings 1-6 are still restored, not temporarily unrestored', getRestoredMilestones('lumora').length === 6);
+screen = 'village'; paused = false; // matches primeLumoraLandmarks()'s own gating, see its comment above
+for (var fnv = 0; fnv < 90; fnv++) __stepFrame(16); // ~1.44s -- past the ~0.667s ease-in
+__check('TEST F/E21 #4: after a few frames, the SAME already-restored landmarks (1-6) ease back in on their own, with no new delivery needed this round', [0, 1, 2, 3, 4, 5].every(function(gi){ return S.landmarkAnim[gi] > 0.9; }));
+__check('TEST F/E21 #4: the still-locked landmarks (7-8) never receive any glow, restored or otherwise, during this same ease-in window', [6, 7].every(function(gi){ return !S.landmarkAnim[gi]; }));
 for (var fN = 0; fN < 40; fN++) { grantVillageProgress(); } // a worse, 40-delivery night -- grantVillageProgress() itself increments S.nightDelivered, same as a real delivery call site
 __check('TEST F: a lower-scoring 40-delivery night leaves best at 300, not 40 and not regressed', villageProgression.villages[0].bestNightDelivered === 300 && S.nightDelivered === 40);
 __check('TEST F: Buildings 1-6 stay restored, 7-8 stay locked -- no relocking from the worse night', getRestoredMilestones('lumora').length === 6 && villageProgression.villages[0].milestones[6].state === 'locked' && villageProgression.villages[0].milestones[7].state === 'locked');
@@ -2889,6 +2928,38 @@ __check('TEST H (Moonfall best=425): the Details screen agrees exactly -- 4 REST
 villageProgression.villages[1].bestNightDelivered = 0; // leave Moonfall as this scenario found it for anything running after
 rebuildVillageMilestones(villageProgression.villages[1]);
 
+// E21 #6: Moonfall 1000 = 8/8, same as Lumora's own TEST E at 500 --
+// checked separately from the moonfall-foundation scenario's own 8/8c
+// completion tests (which reach 1000 via the real delivery flow) since
+// this one is via the same direct-assignment path TEST A-H already use,
+// for exact parity of method with the rest of this block.
+villageProgression.villages[1].bestNightDelivered = 1000;
+rebuildVillageMilestones(villageProgression.villages[1]);
+__check('E21 #6 (Moonfall best=1000): 8/8 landmarks restored', getRestoredMilestones('moonfall').length === 8);
+__check('E21 #6 (Moonfall best=1000): getNextMilestone returns null -- no misleading NEXT after completion', getNextMilestone('moonfall') === null);
+villageProgression.villages[1].bestNightDelivered = 0; // restore, same as above
+rebuildVillageMilestones(villageProgression.villages[1]);
+
+// E21 #6: structural cross-village-leakage sanity check -- Lumora's and
+// Moonfall's landmark defs are genuinely separate arrays with disjoint
+// names/thresholds, not the same data reused or aliased by accident. The
+// internal milestone ids ('m1'..'m8') ARE reused verbatim across both
+// villages by design (see VILLAGE1_MILESTONES/MOONFALL_MILESTONES) -- that
+// is safe and intentional because every real lookup (getNextMilestone,
+// villageDetailsRows, rebuildVillageMilestones) is always scoped through
+// VILLAGE_MILESTONE_DEFS[villageId] first, never by searching for an id
+// across villages, so this checks the thing that would actually matter if
+// it broke: the visible names/thresholds a player sees never cross over.
+__check('E21 #6: Lumora and Moonfall landmark defs are genuinely distinct arrays, not the same data reused', VILLAGE_MILESTONE_DEFS.lumora !== VILLAGE_MILESTONE_DEFS.moonfall);
+__check('E21 #6: no landmark NAME appears in both villages\\' defs (no accidental copy-paste leakage)', VILLAGE_MILESTONE_DEFS.lumora.every(function(lm){ return !VILLAGE_MILESTONE_DEFS.moonfall.some(function(mm){ return mm.name === lm.name; }); }));
+// NOTE: threshold VALUES are not asserted disjoint here -- Lumora and
+// Moonfall's ladders legitimately share some numbers by coincidence
+// (both pass through 100/200/300), which is fine; each is always read
+// back out through its own villageId-scoped lookup, never cross-matched
+// by threshold value, so a shared number carries no leakage risk.
+__check('E21 #6: Moonfall\\'s own threshold ladder is exactly 100/200/300/425/550/700/850/1000, independent of Lumora\\'s', VILLAGE_MILESTONE_DEFS.moonfall.map(function(m){ return m.threshold; }).join(',') === '100,200,300,425,550,700,850,1000');
+__check('E21 #6: Lumora\\'s own threshold ladder is exactly 50/100/150/200/250/300/400/500, unaffected by Moonfall existing', VILLAGE_MILESTONE_DEFS.lumora.map(function(m){ return m.threshold; }).join(',') === '50,100,150,200,250,300,400,500');
+
 // Moonfall's Details screen is viewable even while LOCKED (Lumora is at
 // best=300 from TEST F above, well short of its own 500 completion), and
 // clearly shows its locked state -- never a silently-empty or throwing screen.
@@ -2899,6 +2970,30 @@ try { draw(); } catch (e) { moonfallLockedDrawThrew = true; }
 __check('a locked Moonfall\\'s Details screen draws without throwing', !moonfallLockedDrawThrew);
 __check('a locked Moonfall\\'s Details screen clearly shows LOCKED state (not silently blank)', isVillageUnlocked('moonfall') === false);
 screen = 'title';
+
+// E21 #7: Aurora is NOT part of this release -- verified even in the most
+// generous case (Lumora AND Moonfall both fully complete), since that is
+// exactly the condition under which the old generic unlock-chain rule
+// would otherwise have unlocked it.
+(function(){
+  var savedLumora = JSON.parse(JSON.stringify(villageProgression.villages[0]));
+  var savedMoonfall = JSON.parse(JSON.stringify(villageProgression.villages[1]));
+  villageProgression.villages[0].bestNightDelivered = 500;
+  rebuildVillageMilestones(villageProgression.villages[0]);
+  villageProgression.villages[1].bestNightDelivered = 1000;
+  rebuildVillageMilestones(villageProgression.villages[1]);
+  __check('E21 #7 setup: both Lumora and Moonfall are genuinely fully complete for this check', villageProgression.villages[0].completed === true && villageProgression.villages[1].completed === true);
+  __check('E21 #7: Aurora stays LOCKED even with both prior villages 100% complete', isVillageUnlocked('aurora') === false);
+  __check('E21 #7: Aurora never appears as a selectable/visible card on the Village Selection screen, even now', journeyRowRects().every(function(r){ return r.key !== 'aurora'; }) && journeyRowRects().length === 2);
+  __check('E21 #7: entering Aurora is refused -- currentVillage cannot become aurora through the normal enterVillage() path', enterVillage('aurora') === false && villageProgression.currentVillage !== 'aurora');
+  villageDetailsFor = 'aurora'; villageDetailsScroll = 0; screen = 'villageDetails';
+  var auroraDetailsThrew = false;
+  try { draw(); } catch (e) { auroraDetailsThrew = true; }
+  __check('E21 #7: even if something forced villageDetailsFor to aurora, the Details screen refuses to render it and bounces back to Journey instead of exposing empty/placeholder content', !auroraDetailsThrew && screen === 'journey');
+  screen = 'title';
+  villageProgression.villages[0] = savedLumora;
+  villageProgression.villages[1] = savedMoonfall;
+})();
 
 // cleanup: restore villageProgression to its untouched starting state (both
 // villages at bestNightDelivered 0, nothing completed) -- exactly how this
@@ -8178,7 +8273,13 @@ S.nightDelivered = 999;
 rebuildVillageMilestones(villageProgression.villages[1]);
 grantVillageProgress(); // 999 -> 1000
 __check('8: Moonfall completes at exactly 1000', villageProgression.villages[1].completed === true && villageProgression.villages[1].milestones[7].state === 'restored');
-__check('8b: Aurora becomes unlocked, but is never auto-entered or auto-completed', isVillageUnlocked('aurora') === true && villageProgression.villages[2].completed === false && villageProgression.currentVillage === 'moonfall');
+// E21: Aurora is NOT part of the current playable release -- it must stay
+// hidden/unplayable even after Moonfall completes, since it has no real
+// content (completionThreshold stays null). This intentionally reverses
+// the pre-E21 expectation that Aurora unlocks generically like any other
+// village in the chain; isVillageUnlocked() now also requires real content
+// to exist before reporting anything unlocked.
+__check('8b (E21): Aurora stays LOCKED even after Moonfall completes -- it has no real content yet and must not be exposed', isVillageUnlocked('aurora') === false && villageProgression.villages[2].completed === false && villageProgression.currentVillage === 'moonfall');
 __check('8c: completing Moonfall grants no coins/currency of its own', coins + coinFraction === coinsBeforeComplete);
 
 // ---- 9: progress can never exceed 1000; completion never double-fires ----

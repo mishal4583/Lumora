@@ -2197,9 +2197,20 @@ function currentVillageProgress(){ return villageProgression.villages.find(v=>v.
 // isAuroraUnlocked() -- one function serves all three today and any future
 // fourth village for free, per direct instruction not to create
 // village-specific progression functions.
+// E21: also gated on the village actually having real content
+// (completionThreshold!=null) -- Aurora is still a pure placeholder
+// (completionThreshold:null, milestones:[]) with no landmark data, no
+// in-game art, and no Details content, so it must never be exposed as
+// reachable in this release no matter what completes before it. This is
+// still a GENERIC rule (any future contentless placeholder gets the same
+// treatment for free), not an isAuroraUnlocked() special case -- the
+// moment Aurora is given a real completionThreshold, this same function
+// starts unlocking it correctly with zero code changes here.
 function isVillageUnlocked(id){
   const idx=villageProgression.villages.findIndex(v=>v.id===id);
-  if(idx<=0)return true; // first village, or an unrecognized id -- permissive default, never a lockout
+  if(idx<0)return false; // unrecognized id -- never claim something undefined is reachable
+  if(villageProgression.villages[idx].completionThreshold==null)return false; // no real content defined yet
+  if(idx===0)return true; // first real village is always unlocked
   return !!villageProgression.villages[idx-1].completed;
 }
 function isVillageCompleted(id){
@@ -12376,9 +12387,13 @@ function drawVillageScreen(){
 // IMPORTANT IMPLEMENTATION CHANGE pass: exactly TWO selectable village
 // cards -- Lumora and Moonfall. Aurora deliberately excluded from this
 // list (it still exists in villageProgression.villages for the generic
-// unlock-chain math elsewhere, e.g. isVillageUnlocked('aurora') once
-// Moonfall completes, but it gets no visible card, no selection, no
-// content, per direct instruction not to build a third village card yet).
+// unlock-chain math elsewhere, but it gets no visible card, no selection,
+// no content, per direct instruction not to build a third village card
+// yet). E21: this exclusion is now backed up by isVillageUnlocked() itself
+// -- Aurora's completionThreshold stays null, so isVillageUnlocked('aurora')
+// stays false even after Moonfall completes; it is NOT scheduled to unlock
+// "once Moonfall completes" the way this comment previously (incorrectly,
+// for this release) implied.
 // Rects are CENTER x/y + full w/h -- the convention inRect() actually
 // implements (px between x-w/2 and x+w/2), same as storyRowRects()/
 // journalTabRects() elsewhere in this file. (themeRowRects()/
@@ -12511,7 +12526,13 @@ function villageDetailsViewport(id){
 }
 function drawVillageDetailsScreen(){
   const v=getVillageProgress(villageDetailsFor);
-  if(!v){ screen='journey'; return; } // defensive -- should never happen, villageDetailsFor is only ever set to a real id
+  // defensive -- should never happen (journeyViewDetailsRect() only ever
+  // sets villageDetailsFor from journeyRowRects(), which excludes Aurora),
+  // but E21 makes this a hard rule rather than an assumption: a village
+  // with no real content (completionThreshold==null, e.g. Aurora today)
+  // must never render a Details screen, even if something ever did point
+  // this at it by mistake.
+  if(!v||v.completionThreshold==null){ screen='journey'; return; }
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
   const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
   scrim.addColorStop(0,'rgba(8,10,26,0.6)'); scrim.addColorStop(1,'rgba(8,10,26,0.85)');
@@ -13179,7 +13200,11 @@ function draw(){
 let lastT=performance.now();
 function loop(now){
   if(cv.width===0||window.innerWidth!==lastVW||window.innerHeight!==lastVH)resize(); // catches viewport changes even without a 'resize' event (e.g. fullscreen exit in some hosts)
-  let dt=Math.min(0.033,(now-lastT)/1000); lastT=now;
+  // E21: lower-bounded too -- a clock regression (now<lastT) previously produced
+  // a negative dt with nothing to catch it, which could drive any unclamped
+  // "+=dt*rate" accumulator (e.g. S.smoke[i].r) negative and crash a later
+  // ctx.arc()/drawImage() call with a negative-radius IndexSizeError.
+  let dt=Math.max(0,Math.min(0.033,(now-lastT)/1000)); lastT=now;
   // Phase 8: Cosmetic Trial countdown -- unconditional, independent of
   // pause/screen (a trial represents "enjoy this for N real minutes," not
   // a gameplay-bound timer), same "advances unconditionally while shown"
