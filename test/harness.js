@@ -2872,6 +2872,46 @@ __check('TEST A (best=27): every milestone reads locked', villageProgression.vil
 __check('TEST A (best=27): the next milestone is Building 1 (First Window, 50)', getNextMilestone('lumora').name === 'First Window' && getNextMilestone('lumora').threshold === 50);
 __check('TEST A (best=27): NO restoration light anywhere -- every landmarkAnim group reads 0, not just the locked ones near the threshold', LUMORA_LANDMARK_GROUPS.every(function(g, i){ return !S.landmarkAnim[i]; }), 'landmarkAnim=' + JSON.stringify(S.landmarkAnim));
 
+// E22 (real player report, screenshotted): at best=46 (0/8 restored, well
+// past every ambient S.score threshold of 5/10/20/30/35), the actual
+// village art showed nearly every window/lantern lit at what read as full
+// brightness -- "every building lit up without unlocking a single one".
+// Root cause: the E20 pass only dimmed the glow BLOOM behind each ambient
+// window, but drew the window/lantern DOT ITSELF at full alpha, same as a
+// restored landmark's own dot -- and ambient's own thresholds are ALL
+// cleared within the first minute of a normal round, so this was the
+// default steady state of most play, not a rare edge case. This checks the
+// actual pixel-level alpha used, not just the landmarkAnim state number
+// (which was already correct and is what TEST A above already covers) --
+// a state-only check would have missed this exact bug.
+(function(){
+  reset(); screen = 'village'; paused = false;
+  S.score = 40; // clears every ambient threshold (5/10/20/30/35)
+  villageProgression.villages[0].bestNightDelivered = 46;
+  rebuildVillageMilestones(villageProgression.villages[0]); // 0/8 restored
+  for (var i = 0; i < 90; i++) __stepFrame(16); // let S.lightAnim ease to 1 for every ambient light
+  var L3 = LIGHTS[3]; // {x:388,y:H-150,r:6,thr:20} -- a plain (non-lantern) window, part of landmark group 2 (index 2, lightIndices [3,4,5,6])
+  var seenAlphas = [];
+  var realFillRect = ctx.fillRect;
+  ctx.fillRect = function(x, y, w, h){ if (Math.abs(x - (L3.x - 5)) < 0.01 && Math.abs(y - (L3.y - 6)) < 0.01) seenAlphas.push(ctx.globalAlpha); return realFillRect.apply(this, arguments); };
+  draw();
+  ctx.fillRect = realFillRect;
+  __check('E22: with 0/8 restored and every ambient light lit, the ambient window DOT itself is drawn dimmed (not full alpha 1) -- this is the actual bug (state was already correct, the pixel wasn\\'t)', seenAlphas.length > 0 && seenAlphas.every(function(a){ return a < 0.5; }), 'seenAlphas=' + JSON.stringify(seenAlphas));
+
+  // Now restore that SAME light's landmark group (index 2, threshold 150) and confirm its dot switches to full brightness
+  villageProgression.villages[0].bestNightDelivered = 150;
+  rebuildVillageMilestones(villageProgression.villages[0]);
+  for (var j = 0; j < 90; j++) __stepFrame(16); // ease S.landmarkAnim[2] to 1
+  seenAlphas = [];
+  ctx.fillRect = function(x, y, w, h){ if (Math.abs(x - (L3.x - 5)) < 0.01 && Math.abs(y - (L3.y - 6)) < 0.01) seenAlphas.push(ctx.globalAlpha); return realFillRect.apply(this, arguments); };
+  draw();
+  ctx.fillRect = realFillRect;
+  __check('E22: once that same landmark group is genuinely restored, its dot is redrawn at FULL brightness (alpha 1) -- the real, visible three-tier distinction from a merely-ambient-lit window', seenAlphas.length > 0 && seenAlphas.some(function(a){ return a === 1; }), 'seenAlphas=' + JSON.stringify(seenAlphas));
+  reset();
+  villageProgression.villages[0].bestNightDelivered = 0;
+  rebuildVillageMilestones(villageProgression.villages[0]);
+})();
+
 // TEST B: best=50 -- Building 1 crosses, and ONLY Building 1. Its own
 // specific light cluster (group 0, LIGHTS[0]) is the one and only group lit.
 primeLumoraLandmarks(50);

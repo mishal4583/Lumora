@@ -8259,18 +8259,26 @@ function drawVillage(){
   // village lights -- AMBIENT ONLY (category A, per E20 direct instruction):
   // these are the pre-existing decorative window/lantern lights, driven
   // purely by S.score (this round's own raw points), same as before E18
-  // ever existed. They must never be mistaken for restoration, so their
-  // glow bloom is deliberately dimmed (AMBIENT_DIM) -- the window/lantern
-  // itself still clearly reads as "lit", it just doesn't bloom like a
-  // restored landmark does (see the dedicated pass right after this one).
-  const AMBIENT_DIM=0.55;
+  // ever existed. E22 fix: a real player report caught this still reading
+  // as "every building restored" at score ~39 -- the earlier E20 pass only
+  // dimmed the glow BLOOM behind each window, but drew the window/lantern
+  // DOT ITSELF at full alpha, same as a restored landmark's own dot. Since
+  // ambient's own thresholds (5/10/20/30/35) are all cleared within the
+  // first minute of most rounds, "every ambient dot at full brightness" is
+  // the NORMAL steady state of most play, not a rare edge case -- exactly
+  // the scattered-lighting illusion this whole system exists to prevent.
+  // AMBIENT_DIM now applies to the dot too (lowered from 0.55 to 0.35 for
+  // a genuinely subtle read), and the restoration pass below explicitly
+  // redraws its own dot at full brightness rather than trusting whatever
+  // this ambient pass already left behind it.
+  const AMBIENT_DIM=0.35;
   LIGHTS.forEach((L,i)=>{
     const a=S.lightAnim[i]; if(a<=0)return;
     const flick=0.85+0.15*Math.sin(S.t*7+i*2.1);
     ctx.globalAlpha=a*flick*AMBIENT_DIM;
     const gr=L.lantern?27:32;
     ctx.drawImage(glowSprite(GLOW_Y,gr),L.x-gr,L.y-gr,gr*2,gr*2);
-    ctx.globalAlpha=a;
+    ctx.globalAlpha=a*AMBIENT_DIM;
     ctx.fillStyle=L.lantern?'#ffd987':'#ffca6e';
     if(L.lantern){ ctx.beginPath(); ctx.arc(L.x,L.y,3.4,0,6.28); ctx.fill(); }
     else ctx.fillRect(L.x-5,L.y-6,10,12);
@@ -8316,7 +8324,17 @@ function drawVillage(){
       ctx.globalAlpha=a*flick;
       const gr=(L.lantern?27:32)*1.3;
       ctx.drawImage(glowSprite(GLOW_Y,gr),L.x-gr,L.y-gr,gr*2,gr*2);
+      // E22: redraw the window/lantern dot itself at FULL brightness here,
+      // rather than trusting whatever the ambient pass above already left
+      // it at (now dimmed to AMBIENT_DIM=0.35) -- a restored landmark must
+      // never look dim just because its own light also happens to sit
+      // below an ambient score threshold too. This is the actual visible
+      // three-tier distinction: dim ambient dot, vs this full-brightness
+      // dot + ring + stronger bloom for a genuinely restored one.
       ctx.globalAlpha=a;
+      ctx.fillStyle=L.lantern?'#ffd987':'#ffca6e';
+      if(L.lantern){ ctx.beginPath(); ctx.arc(L.x,L.y,3.4,0,6.28); ctx.fill(); }
+      else ctx.fillRect(L.x-5,L.y-6,10,12);
       ctx.strokeStyle='rgba(255,236,178,0.9)'; ctx.lineWidth=1.4;
       ctx.beginPath(); ctx.arc(L.x,L.y,(L.lantern?7:9),0,6.28); ctx.stroke();
       ctx.globalAlpha=1;
