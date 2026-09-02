@@ -1561,7 +1561,13 @@ const JAR_COST_MULTIPLIER={simple:1.00, lantern:1.05, moon:1.10, crystal:1.20, e
 // a great deal. Verified (E1's own simulation, reproduced against the real
 // formula in this pass) to leave no jar cheaper to fully upgrade than it
 // was before this pass, with Aurora remaining the single largest sink.
-const JAR_ENDGAME_MULTIPLIER={simple:1.3, lantern:1.8, moon:2.6, crystal:4.2, elder:6.5, aurora:11};
+// E25 Workshop Economy Rebalance V2: raised for the 4 cheaper jars only
+// (simple/lantern/moon/crystal). Elder and Aurora were already correctly
+// long-term (73/135 strong nights to fully max, pre-existing) and are left
+// exactly as they were -- the reported "workshop maxes too fast" problem
+// was concentrated entirely in the early/starter jars, not the endgame
+// ones. See this phase's own report for the full before/after audit.
+const JAR_ENDGAME_MULTIPLIER={simple:2.1, lantern:2.6, moon:3.4, crystal:4.4, elder:6.5, aurora:11};
 // E2 Shop Economy 2.0: Coin Value's own scalar constants, declared here
 // (well above TIER_LINES' own declaration further down, and above the
 // non-YT load-merge block right below) specifically so migrateEconomyV2()
@@ -1660,11 +1666,18 @@ function bandedTierCost(startPrice,tierIndex,totalTiers,endgameMult){
 // E2 Shop Economy 2.0: now the banded/interpolated curve (bandedTierCost())
 // instead of compoundTierCost() -- same base price (25) and the same
 // JAR_COST_MULTIPLIER scaling as before (tier-0 price is therefore
-// byte-for-byte unchanged), but the total tier count (jarObj.maxCapacity-
-// jarObj.capacity, now much larger per E1's raised ceilings below) and the
-// new JAR_ENDGAME_MULTIPLIER now shape the curve instead of the old
-// tapering-compound ratio.
-function jarCapUpgradeCost(jarObj){ return bandedTierCost(Math.round(25*JAR_COST_MULTIPLIER[jarObj.key]),jarCapTierOwned(jarObj.key),jarObj.maxCapacity-jarObj.capacity,JAR_ENDGAME_MULTIPLIER[jarObj.key]); }
+// byte-for-byte unchanged prior to E25), but the total tier count
+// (jarObj.maxCapacity-jarObj.capacity, now much larger per E1's raised
+// ceilings below) and the new JAR_ENDGAME_MULTIPLIER now shape the curve
+// instead of the old tapering-compound ratio.
+// E25 Workshop Economy Rebalance V2: base price 25->55 (~x2.2, calibrated
+// against real observed strong-night income of ~687 coins vs. the x1
+// original assumption baked into REFERENCE_START_PRICE/BAND_TARGETS) --
+// raises the floor of the whole curve, not just the endgame ceiling, so a
+// single strong night can no longer fund deep simultaneous progress on
+// capacity AND every other line at once. Tier 0 stays a small fraction of
+// one night's income -- first purchase is still immediate.
+function jarCapUpgradeCost(jarObj){ return bandedTierCost(Math.round(55*JAR_COST_MULTIPLIER[jarObj.key]),jarCapTierOwned(jarObj.key),jarObj.maxCapacity-jarObj.capacity,JAR_ENDGAME_MULTIPLIER[jarObj.key]); }
 function tryUpgradeJarCap(jarKey){
   const jar=JARS.find(j=>j.key===jarKey);
   if(!jar||!upgrades.ownedJars[jarKey])return false; // must own the jar first, same as any other jar action
@@ -1766,7 +1779,13 @@ const OLD_LIGHT_VALUE_MAX={simple:0.80, lantern:0.95, moon:1.05, crystal:1.25, e
 // smallest NEW lightTier whose bonus is >= it. Never read by any live
 // gameplay/purchase code.
 const OLD_COIN_VALUE_STEPS=[0.10,0.10,0.10];
-const PER_JAR_STAT_PRICE_BASE={reach:16, magnetReach:18, duration:12, lightValue:20};
+// E25 Workshop Economy Rebalance V2: each base x2.2 (16->35, 18->40, 12->26,
+// 20->44), same rationale/ratio as jarCapUpgradeCost's 25->55 change above --
+// raises the floor of every stat line consistently so a strong night can't
+// simultaneously fund deep progress on capacity AND reach AND magnetReach
+// AND duration AND lightValue at once. Tier 0 of every line still costs a
+// small fraction of one night's income.
+const PER_JAR_STAT_PRICE_BASE={reach:35, magnetReach:40, duration:26, lightValue:44};
 // PER_JAR_STAT_PRICE_STEP (the old flat per-tier price step) is gone as of
 // the Upgrade Cost Escalation pass -- jarStatUpgradeCost() below now
 // compounds off tierCostRatio()/compoundTierCost() instead, same tapering

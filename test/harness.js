@@ -755,8 +755,8 @@ __check('resuming lets bloom sub-progress finish easing to fully bloomed, not st
 (function(){
   coins = 100; coinFraction = 0.42; upgrades.jarCapTiers.simple = 0;
   var fractionBefore = coinFraction;
-  var ok = tryUpgradeJarCap('simple'); // costs 25 at tier 0 (Phase 1 economy pass: rescaled from 40)
-  __check('a real purchase (jar capacity) succeeds using only the whole coins balance', ok === true && coins === 75, 'coins=' + coins);
+  var ok = tryUpgradeJarCap('simple'); // costs 55 at tier 0 (E25 economy rebalance: rescaled from 25)
+  __check('a real purchase (jar capacity) succeeds using only the whole coins balance', ok === true && coins === 45, 'coins=' + coins);
   __check('coinFraction is completely untouched by a purchase -- it is never spendable, only "coins" is', coinFraction === fractionBefore, 'coinFraction=' + coinFraction);
 })();
 
@@ -951,25 +951,27 @@ upgrades.lightTier = 0; coins = 0;
 // compound curve, and Simple's own ladder is now 8 tiers (base 5 -> max
 // 13, up from 3 tiers -> max 8) -- reject if unaffordable, succeed once
 // affordable, escalating price per upgrade, reject once the jar's own
-// (now much higher) ceiling is reached. Exact prices below (25/38/52/67/
-// 91/115/157/199) are the real bandedTierCost() output for Simple's own
-// 8-tier line, not hand-derived.
+// (now much higher) ceiling is reached.
+// E25 Workshop Economy Rebalance V2: capacity base price 25->55 (~x2.2,
+// calibrated against real strong-night income). Exact prices below
+// (55/83/129/175/258/341/497/652) are the real bandedTierCost() output
+// for Simple's own 8-tier line under the new base price, not hand-derived.
 coins = 10; upgrades.jarCapTiers.simple = 0;
 __check('a jar capacity upgrade is rejected when coins are insufficient', tryUpgradeJarCap('simple') === false && coins === 10 && upgrades.jarCapTiers.simple === 0);
-coins = 25;
-__check('a jar capacity upgrade succeeds once affordable, deducting exactly the first upgrade\\'s price (25, unchanged tier-0 price)', tryUpgradeJarCap('simple') === true && coins === 0 && upgrades.jarCapTiers.simple === 1);
-__check('the next upgrade costs more (38) -- rejected with nothing left after the first purchase', tryUpgradeJarCap('simple') === false && coins === 0, 'coins=' + coins);
-coins = 38;
-__check('the second upgrade succeeds once actually affordable, deducting exactly its own price (38)', tryUpgradeJarCap('simple') === true && coins === 0 && upgrades.jarCapTiers.simple === 2, 'coins=' + coins);
-coins = 1000;
+coins = 55;
+__check('a jar capacity upgrade succeeds once affordable, deducting exactly the first upgrade\\'s price (55, E25 tier-0 price)', tryUpgradeJarCap('simple') === true && coins === 0 && upgrades.jarCapTiers.simple === 1);
+__check('the next upgrade costs more (83) -- rejected with nothing left after the first purchase', tryUpgradeJarCap('simple') === false && coins === 0, 'coins=' + coins);
+coins = 83;
+__check('the second upgrade succeeds once actually affordable, deducting exactly its own price (83)', tryUpgradeJarCap('simple') === true && coins === 0 && upgrades.jarCapTiers.simple === 2, 'coins=' + coins);
+coins = 2500;
 var __simpleJar = JARS.find(function(j){ return j.key === 'simple'; });
 __check('Simple Glass Jar (base 5, max 13) is NOT maxed after only 2 of its 8 possible upgrades', jarCapMaxed(__simpleJar) === false);
-// drive the remaining 6 upgrades (tiers 2-7: prices 52/67/91/115/157/199) to reach max
-var __simpleCapCosts = [52, 67, 91, 115, 157, 199];
+// drive the remaining 6 upgrades (tiers 2-7: prices 129/175/258/341/497/652) to reach max
+var __simpleCapCosts = [129, 175, 258, 341, 497, 652];
 var __simpleCapOk = true;
 for (var __sci = 0; __sci < __simpleCapCosts.length; __sci++) { if (tryUpgradeJarCap('simple') !== true) __simpleCapOk = false; }
-var __simpleCapSpent = 1000 - coins;
-__check('the remaining 6 upgrades all succeed, spending exactly the sum of their own real bandedTierCost() prices (52+67+91+115+157+199=681), and reach Simple Glass Jar\\'s own new max (13)', __simpleCapOk === true && __simpleCapSpent === 681 && jarCurrentCapacity(__simpleJar) === 13 && jarCapMaxed(__simpleJar) === true, 'spent=' + __simpleCapSpent + ' coins=' + coins);
+var __simpleCapSpent = 2500 - coins;
+__check('the remaining 6 upgrades all succeed, spending exactly the sum of their own real bandedTierCost() prices (129+175+258+341+497+652=2052), and reach Simple Glass Jar\\'s own new max (13)', __simpleCapOk === true && __simpleCapSpent === 2052 && jarCurrentCapacity(__simpleJar) === 13 && jarCapMaxed(__simpleJar) === true, 'spent=' + __simpleCapSpent + ' coins=' + coins);
 __check('a jar already at its own max ceiling rejects a further upgrade, even with coins to spare', tryUpgradeJarCap('simple') === false);
 upgrades.jarCapTiers.simple = 0; coins = 0; // reset for the tests below, which each manage their own coins/tier state
 
@@ -1748,11 +1750,15 @@ __check('Coin Value\\'s full 60-tier price table matches bandedTierCost()\\'s re
 // Value now each have far more levels (32/24/27/20 for Simple, up from 3
 // each), priced via bandedTierCost(). Same "first 3 + final tier"
 // discipline as Coin Value just above, exercised against Simple Glass Jar.
+// E25 Workshop Economy Rebalance V2: PER_JAR_STAT_PRICE_BASE x2.2
+// (16/18/12/20 -> 35/40/26/44) and Simple's own JAR_ENDGAME_MULTIPLIER
+// raised (1.3 -> 2.1). Tier COUNTS are unchanged (untouched
+// PER_JAR_STAT_STEP) -- only the prices below moved.
 [
-  { statKey: 'reach', early: [16, 17, 19], lastIdx: 31, lastPrice: 239 },
-  { statKey: 'magnetReach', early: [18, 20, 23], lastIdx: 23, lastPrice: 269 },
-  { statKey: 'duration', early: [12, 13, 14], lastIdx: 26, lastPrice: 179 },
-  { statKey: 'lightValue', early: [20, 23, 27], lastIdx: 19, lastPrice: 299 }
+  { statKey: 'reach', early: [35, 38, 41], lastIdx: 31, lastPrice: 845 },
+  { statKey: 'magnetReach', early: [40, 45, 50], lastIdx: 23, lastPrice: 966 },
+  { statKey: 'duration', early: [26, 29, 31], lastIdx: 26, lastPrice: 628 },
+  { statKey: 'lightValue', early: [44, 51, 59], lastIdx: 19, lastPrice: 1063 }
 ].forEach(function(cfg){
   var statKey = cfg.statKey, tiersField = statKey + 'Tiers';
   upgrades[tiersField].simple = 0;
@@ -1773,11 +1779,12 @@ __check('Coin Value\\'s full 60-tier price table matches bandedTierCost()\\'s re
 // E2 Shop Economy 2.0: jarCapUpgradeCost's own curve is now bandedTierCost()
 // (was the tapering-compound curve) -- exercised exhaustively for Simple
 // Glass Jar's now-8 possible upgrades (was 3) -- exact prices, escalating,
-// rejects one coin short, succeeds at exactly the price. Prices below are
-// bandedTierCost()'s own real output for Simple's 8-tier Capacity line,
-// not hand-derived.
+// rejects one coin short, succeeds at exactly the price.
+// E25 Workshop Economy Rebalance V2: capacity base 25->55, Simple's own
+// JAR_ENDGAME_MULTIPLIER 1.3->2.1. Prices below are bandedTierCost()'s own
+// real output for Simple's 8-tier Capacity line under the new inputs.
 upgrades.jarCapTiers.simple = 0;
-[25, 38, 52, 67, 91, 115, 157, 199].forEach(function(price, i){
+[55, 83, 129, 175, 258, 341, 497, 652].forEach(function(price, i){
   coins = price - 1;
   __check('jar capacity upgrade ' + i + ' is rejected one coin short (price ' + price + ')', tryUpgradeJarCap('simple') === false && upgrades.jarCapTiers.simple === i);
   coins = price;
@@ -1794,7 +1801,9 @@ upgrades.jarCapTiers.simple = 0; // reset for the next block below
 ['jarCapTiers', 'reachTiers', 'magnetReachTiers', 'durationTiers', 'lightValueTiers'].forEach(function(f){
   upgrades[f] = { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 };
 });
-[['simple', 25], ['lantern', 26], ['moon', 28], ['crystal', 30], ['elder', 34], ['aurora', 38]].forEach(function(pair){
+// E25 Workshop Economy Rebalance V2: capacity base 25->55 -- tier-0 prices
+// below are the new bandedTierCost() output per jar under the raised base.
+[['simple', 55], ['lantern', 58], ['moon', 61], ['crystal', 66], ['elder', 74], ['aurora', 83]].forEach(function(pair){
   var j = JARS.find(function(jj){ return jj.key === pair[0]; });
   __check('jarCapUpgradeCost tier 0 for ' + pair[0] + ' applies its own JAR_COST_MULTIPLIER (' + pair[1] + ')', jarCapUpgradeCost(j) === pair[1], 'got=' + jarCapUpgradeCost(j));
 });
@@ -1802,8 +1811,10 @@ upgrades.jarCapTiers.simple = 0; // reset for the next block below
 // a genuine 3x under the old tapering-compound curve) -- re-proving
 // JAR_COST_MULTIPLIER still applies (via the tier-0 start price each
 // jar's own curve is anchored to) AFTER the new curve shapes later tiers,
-// per jar. Values are bandedTierCost()'s own real output.
-[['simple', 38], ['lantern', 39], ['moon', 35], ['crystal', 38], ['elder', 38], ['aurora', 42]].forEach(function(pair){
+// per jar. E25: values are bandedTierCost()'s own real output under the
+// new base price (55) and Simple/Lantern/Moon/Crystal's raised
+// JAR_ENDGAME_MULTIPLIER (Elder/Aurora unchanged).
+[['simple', 83], ['lantern', 87], ['moon', 76], ['crystal', 83], ['elder', 83], ['aurora', 91]].forEach(function(pair){
   var j = JARS.find(function(jj){ return jj.key === pair[0]; });
   upgrades.jarCapTiers[pair[0]] = 1;
   __check('jarCapUpgradeCost tier 1 for ' + pair[0] + ' still applies its own multiplier after escalating (' + pair[1] + ')', jarCapUpgradeCost(j) === pair[1], 'got=' + jarCapUpgradeCost(j));
@@ -1814,14 +1825,16 @@ upgrades.jarCapTiers.simple = 0; // reset for the next block below
 // just Capacity -- and against all four per-jar stat lines on Aurora
 // specifically, proving the multiplier is not accidentally wired to only
 // one stat key.
-[['simple', 16], ['lantern', 17], ['moon', 18], ['crystal', 19], ['elder', 22], ['aurora', 24]].forEach(function(pair){
+// E25: PER_JAR_STAT_PRICE_BASE.reach 16->35 -- tier-0 prices below are the
+// new bandedTierCost() output per jar under the raised base.
+[['simple', 35], ['lantern', 37], ['moon', 39], ['crystal', 42], ['elder', 47], ['aurora', 53]].forEach(function(pair){
   var j = JARS.find(function(jj){ return jj.key === pair[0]; });
   __check('jarStatUpgradeCost(reach) tier 0 for ' + pair[0] + ' applies its own JAR_COST_MULTIPLIER (' + pair[1] + ')', jarStatUpgradeCost('reach', j) === pair[1], 'got=' + jarStatUpgradeCost('reach', j));
 });
 var __auroraJarCost = JARS.find(function(j){ return j.key === 'aurora'; });
-__check('jarStatUpgradeCost(magnetReach) tier 0 for Aurora applies its 1.50x multiplier (27)', jarStatUpgradeCost('magnetReach', __auroraJarCost) === 27, 'got=' + jarStatUpgradeCost('magnetReach', __auroraJarCost));
-__check('jarStatUpgradeCost(duration) tier 0 for Aurora applies its 1.50x multiplier (18)', jarStatUpgradeCost('duration', __auroraJarCost) === 18, 'got=' + jarStatUpgradeCost('duration', __auroraJarCost));
-__check('jarStatUpgradeCost(lightValue) tier 0 for Aurora applies its 1.50x multiplier (30)', jarStatUpgradeCost('lightValue', __auroraJarCost) === 30, 'got=' + jarStatUpgradeCost('lightValue', __auroraJarCost));
+__check('jarStatUpgradeCost(magnetReach) tier 0 for Aurora applies its 1.50x multiplier (60)', jarStatUpgradeCost('magnetReach', __auroraJarCost) === 60, 'got=' + jarStatUpgradeCost('magnetReach', __auroraJarCost));
+__check('jarStatUpgradeCost(duration) tier 0 for Aurora applies its 1.50x multiplier (39)', jarStatUpgradeCost('duration', __auroraJarCost) === 39, 'got=' + jarStatUpgradeCost('duration', __auroraJarCost));
+__check('jarStatUpgradeCost(lightValue) tier 0 for Aurora applies its 1.50x multiplier (66)', jarStatUpgradeCost('lightValue', __auroraJarCost) === 66, 'got=' + jarStatUpgradeCost('lightValue', __auroraJarCost));
 
 // The multiplier must NEVER touch jar purchase price, the shared Coin Value
 // line, or Decor/quest rewards -- an explicit negative check against the
@@ -1852,15 +1865,18 @@ __check('compoundTierCost(base, 2) is exactly base*9 -- two genuine triples comp
 // end-to-end: Aurora's full 26-tier Capacity price table (E2: up from 13
 // tiers), computed independently and verified once as a whole -- catches a
 // rounding/ordering mistake that isolated tier-0/tier-1 spot-checks above
-// could miss. Expected array is bandedTierCost()'s own real output.
+// could miss. E25 Workshop Economy Rebalance V2: capacity base 25->55
+// (Aurora's own JAR_ENDGAME_MULTIPLIER of 11 is unchanged this pass --
+// Aurora was already correctly long-term before E25). Expected array is
+// bandedTierCost()'s own real output under the new base price.
 (function(){
   var auroraJar = JARS.find(function(j){ return j.key === 'aurora'; });
-  var expected = [38, 42, 46, 49, 53, 57, 103, 149, 195, 241, 287, 333, 429, 526, 622, 719, 815, 912, 1110, 1308, 1506, 1704, 1902, 2100, 3453, 4807];
+  var expected = [83, 91, 100, 108, 116, 125, 225, 325, 425, 526, 626, 726, 937, 1148, 1359, 1570, 1781, 1992, 2424, 2857, 3289, 3721, 4153, 4586, 7543, 10500];
   var got = [];
   upgrades.jarCapTiers.aurora = 0;
   for (var t = 0; t < 26; t++) { upgrades.jarCapTiers.aurora = t; got.push(jarCapUpgradeCost(auroraJar)); }
   __check('Aurora\\'s full 26-tier Capacity price table matches bandedTierCost()\\'s real output exactly, tier by tier', JSON.stringify(got) === JSON.stringify(expected), 'got=' + JSON.stringify(got));
-  __check('the total cost to fully max Aurora\\'s Capacity line (~23,506 coins, E2) is at least as steep as before this pass (~21,330 under the old formula) -- Aurora must never become cheaper to fully upgrade', got.reduce(function(a, b){ return a + b; }, 0) === 23506 && got.reduce(function(a, b){ return a + b; }, 0) >= 21330, 'total=' + got.reduce(function(a, b){ return a + b; }, 0));
+  __check('the total cost to fully max Aurora\\'s Capacity line (~51,336 coins, E25) is at least as steep as before this pass (~23,506 under the pre-E25 formula) -- Aurora must never become cheaper to fully upgrade', got.reduce(function(a, b){ return a + b; }, 0) === 51336 && got.reduce(function(a, b){ return a + b; }, 0) >= 23506, 'total=' + got.reduce(function(a, b){ return a + b; }, 0));
   upgrades.jarCapTiers.aurora = 0;
 })();
 
@@ -7177,7 +7193,7 @@ __check('Strong coins/night (full multiplier stack, Crystal jar, Double the Glow
 var simpleJarE2r = JARS.find(function(j){ return j.key === 'simple'; });
 upgrades.jarCapTiers.simple = 0;
 var firstCapCost = jarCapUpgradeCost(simpleJarE2r);
-__check('the very first Capacity upgrade (Simple, tier 0) still costs 25 -- E2 did not touch the fresh-player entry price ("do not simply multiply the first price by 3")', firstCapCost === 25);
+__check('the very first Capacity upgrade (Simple, tier 0) costs 55 (E25 Workshop Economy Rebalance V2: raised from 25 -- real strong-night income is far above the original 60-coin/night calibration)', firstCapCost === 55);
 __check('at an average-player pace (~60 coins/night), the very first upgrade is affordable within the E1 target of 1-2 nights', Math.ceil(firstCapCost / 60) <= 2, 'nights=' + Math.ceil(firstCapCost / 60));
 upgrades.jarCapTiers.simple = 4; // a mid-ladder tier
 var midCapCost = jarCapUpgradeCost(simpleJarE2r);
@@ -7251,7 +7267,7 @@ scenario('lumora2-e3-card-labels', null, `
 // ---- economy integrity: the new LEVEL/MAX LEVEL labels and milestone line are pure UI -- the underlying E2 cost/stat functions this phase must not touch are unchanged ----
 upgrades.tutorialDone = true;
 var simpleJar = JARS.find(function(j){ return j.key === 'simple'; });
-__check('jarCapUpgradeCost is still exactly the E2 formula (tier 0 = 25, unchanged by E3)', jarCapUpgradeCost(simpleJar) === 25);
+__check('jarCapUpgradeCost is still exactly the E25 formula (tier 0 = 55, unchanged by E3)', jarCapUpgradeCost(simpleJar) === 55);
 __check('Coin Value tier-0 price is still exactly 60, unchanged by E3', TIER_LINES.light.prices[0] === 60);
 __check('Coin Value still has exactly 60 levels, unchanged by E3', TIER_LINES.light.prices.length === 60);
 
@@ -7708,7 +7724,7 @@ return __tick(1).then(function(){
   // ---- existing Almost Affordable remains fully unaffected by Daily Deal ----
   upgrades.jarCapTiers.simple = 5;
   var capCost = jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; }));
-  __check('Almost Affordable\\'s own cost function is untouched by anything Daily Deal does', capCost === 115, 'got=' + capCost);
+  __check('Almost Affordable\\'s own cost function is untouched by anything Daily Deal does', capCost === 341, 'got=' + capCost);
   upgrades.jarCapTiers.simple = 0;
 
   Date.now = realDateNow;
@@ -7855,7 +7871,7 @@ S.over = false; // leave the round in a normal state, not mid-completion, before
 // ---- 12/13/14: Daily Deal, Almost Affordable, and existing ads are all untouched by Night Streak ----
 __check('Daily Deal\\'s own price formula is untouched by Night Streak', dailyDealPrice(500) === 400);
 upgrades.jarCapTiers.simple = 5;
-__check('Almost Affordable\\'s own real cost function is untouched by Night Streak', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
+__check('Almost Affordable\\'s own real cost function is untouched by Night Streak', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 341);
 upgrades.jarCapTiers.simple = 0;
 __check('existing rewarded-ad entry points remain present and distinct from anything Night Streak added', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function' && requestDoubleNightCoins !== commitNightStreak);
 
@@ -7973,7 +7989,7 @@ if (screen === 'contract') __acceptAnyContract();
 __check('Night Streak still advances normally on a real completed night alongside the objective bonus', nightStreak === streakBefore + 1 || nightStreak === 1, 'nightStreak=' + nightStreak);
 __check('Daily Deal\\'s own price formula is untouched by the objective completion bonus', dailyDealPrice(500) === 400);
 upgrades.jarCapTiers.simple = 5;
-__check('Almost Affordable\\'s own real cost function is untouched by the objective completion bonus', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
+__check('Almost Affordable\\'s own real cost function is untouched by the objective completion bonus', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 341);
 upgrades.jarCapTiers.simple = 0;
 __check('existing rewarded-ad entry points remain present and distinct from the objective completion bonus', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function');
 });
@@ -8098,7 +8114,7 @@ return __tick(5).then(function(){
   __check('Night Streak fields are untouched by E9', typeof nightStreak === 'number' && typeof commitNightStreak === 'function');
   __check('Daily Deal\\'s own price formula is untouched by E9', dailyDealPrice(500) === 400);
   upgrades.jarCapTiers.simple = 5;
-  __check('Almost Affordable\\'s own real cost function is untouched by E9', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
+  __check('Almost Affordable\\'s own real cost function is untouched by E9', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 341);
   upgrades.jarCapTiers.simple = 0;
   __check('existing rewarded-ad entry points remain present and distinct from E9\\'s selection logic', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function');
 });
@@ -8168,7 +8184,7 @@ __check('12: OBJECTIVE_POOL requirements/rewards are untouched by E10', OBJECTIV
 __check('13: Night Streak\\'s own logic is untouched by E10', typeof nightStreak === 'number' && typeof commitNightStreak === 'function');
 __check('14: Daily Deal\\'s own price formula is untouched by E10', dailyDealPrice(500) === 400);
 upgrades.jarCapTiers.simple = 5;
-__check('15: Almost Affordable\\'s own real cost function is untouched by E10', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 115);
+__check('15: Almost Affordable\\'s own real cost function is untouched by E10', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 341);
 upgrades.jarCapTiers.simple = 0;
 __check('16: existing rewarded-ad entry points remain present and distinct from Glow Chain\\'s own reward path', typeof requestDoubleNightCoins === 'function' && typeof requestExtraLife === 'function' && typeof requestWorkshopCoins === 'function' && requestDoubleNightCoins !== advanceChain);
 });
@@ -8371,7 +8387,7 @@ __check('37-setup: upgrades.dailyDeal carries a real day+item record ready to pe
 __check('38: almostAffordableCost() has no branch for a jar-purchase target -- returns Infinity, exactly as before E16 (jar purchases were never an Almost Affordable target)', almostAffordableCost({ kind: 'jarPurchase', jarKey: 'lantern' }) === Infinity);
 upgrades.jarCapTiers.simple = 5;
 var __e16CapCost = jarCapUpgradeCost(jarByKey('simple'));
-__check('39: Almost Affordable\\'s real, supported target (jarCap) computes its exact shortfall correctly and is untouched by E16', __e16CapCost === 115 && almostAffordableCost({ kind: 'jarCap', jarKey: 'simple' }) === __e16CapCost);
+__check('39: Almost Affordable\\'s real, supported target (jarCap) computes its exact shortfall correctly and is untouched by E16/E25', __e16CapCost === 341 && almostAffordableCost({ kind: 'jarCap', jarKey: 'simple' }) === __e16CapCost);
 coins = __e16CapCost - Math.round(__e16CapCost * 0.1);
 __check('40: the eligibility threshold (15%) is unchanged', almostAffordableEligible({ kind: 'jarCap', jarKey: 'simple' }) === true);
 var __e16Shortfall = almostAffordableShortfall({ kind: 'jarCap', jarKey: 'simple' });
@@ -8383,12 +8399,12 @@ __check('42: purchasing right after receiving the shortfall deducts the correct 
 upgrades.jarCapTiers.simple = 0;
 
 // ---- 43-47: upgrade cost preservation, one real spot-check per jar (full ladders already exhaustively covered by pre-existing E2 tests, not duplicated here) ----
-__check('43: Firefly (lantern) capacity tier-1 upgrade cost is untouched by E16 (26)', jarCapUpgradeCost(jarByKey('lantern')) === 26);
+__check('43: Firefly (lantern) capacity tier-1 upgrade cost is untouched by E16 (58, E25 base)', jarCapUpgradeCost(jarByKey('lantern')) === 58);
 upgrades.jarCapTiers.moon = 0;
-__check('44: Moon capacity tier-1 upgrade cost is untouched by E16 (28)', jarCapUpgradeCost(jarByKey('moon')) === 28);
-__check('45: Crystal capacity tier-1 upgrade cost is untouched by E16 (30)', jarCapUpgradeCost(jarByKey('crystal')) === 30);
-__check('46: Elder capacity tier-1 upgrade cost is untouched by E16 (34)', jarCapUpgradeCost(jarByKey('elder')) === 34);
-__check('47: Aurora capacity tier-1 upgrade cost is untouched by E16 (38)', jarCapUpgradeCost(jarByKey('aurora')) === 38);
+__check('44: Moon capacity tier-1 upgrade cost is untouched by E16 (61, E25 base)', jarCapUpgradeCost(jarByKey('moon')) === 61);
+__check('45: Crystal capacity tier-1 upgrade cost is untouched by E16 (66, E25 base)', jarCapUpgradeCost(jarByKey('crystal')) === 66);
+__check('46: Elder capacity tier-1 upgrade cost is untouched by E16 (74, E25 base)', jarCapUpgradeCost(jarByKey('elder')) === 74);
+__check('47: Aurora capacity tier-1 upgrade cost is untouched by E16 (83, E25 base)', jarCapUpgradeCost(jarByKey('aurora')) === 83);
 __check('Coin Value (the shared line) is completely untouched by E16', TIER_LINES.light.prices.length === 60 && TIER_LINES.light.prices[0] === 60);
 
 // ---- income preservation: no E16 code path touches any existing coin source ----
@@ -8441,6 +8457,81 @@ return __tick(5).then(function(){
   // owning a jar never re-charges: tapping an owned jar again just equips, no deduction
   var coinsBeforeReEquip = coins;
   __check('re-tapping an ALREADY-OWNED jar (lantern) under the new prices only equips, never re-charges', tryBuyOrEquipJar('lantern') === true && coins === coinsBeforeReEquip);
+});
+`);
+
+// =====================================================================
+// E25 Workshop Economy Rebalance V2: capacity base 25->55, per-jar-stat
+// bases 16/18/12/20 -> 35/40/26/44, and JAR_ENDGAME_MULTIPLIER raised for
+// the 4 cheaper jars only (simple/lantern/moon/crystal; elder/aurora
+// unchanged). Audit finding: a single strong night (~687 coins observed
+// live) could fund deep simultaneous progress on capacity AND every other
+// per-jar line at once -- the fix raises the floor and, for cheap jars,
+// the ceiling of the existing bandedTierCost() curve, without touching the
+// formula itself, JARS base stats, jar unlock prices, Coin Value, Decor/
+// Trail prices, coin income, or village progression.
+scenario('lumora2-e25-economy-rebalance', { audioEnabled: true }, `
+// ---- 1: the 3 recalibrated constants have their exact new values ----
+__check('1: capacity base price is 55 (Simple jar, JAR_COST_MULTIPLIER 1.00x)', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 55);
+__check('2: PER_JAR_STAT_PRICE_BASE.reach/magnetReach/duration/lightValue are 35/40/26/44 (Simple jar)', (function(){
+  var j = JARS.find(function(jj){ return jj.key === 'simple'; });
+  return jarStatUpgradeCost('reach', j) === 35 && jarStatUpgradeCost('magnetReach', j) === 40 && jarStatUpgradeCost('duration', j) === 26 && jarStatUpgradeCost('lightValue', j) === 44;
+})());
+__check('3: JAR_ENDGAME_MULTIPLIER raised for the 4 cheap jars, Elder/Aurora left exactly as before E25', JSON.stringify(JAR_ENDGAME_MULTIPLIER) === JSON.stringify({ simple: 2.1, lantern: 2.6, moon: 3.4, crystal: 4.4, elder: 6.5, aurora: 11 }));
+
+// ---- 4/5/6: exact purchase price, exact deduction, insufficient-coins blocks purchase (Simple Capacity tier 0, the new 55 price) ----
+upgrades.jarCapTiers.simple = 0; coins = 54;
+__check('4: insufficient coins (54, one short of 55) blocks the purchase, no deduction, tier unchanged', tryUpgradeJarCap('simple') === false && coins === 54 && upgrades.jarCapTiers.simple === 0);
+coins = 55;
+__check('5: the purchase succeeds at exactly the new price (55), deducting exactly that much', tryUpgradeJarCap('simple') === true && coins === 0 && upgrades.jarCapTiers.simple === 1);
+__check('6: a duplicate purchase attempt with 0 coins left is blocked', tryUpgradeJarCap('simple') === false && upgrades.jarCapTiers.simple === 1);
+upgrades.jarCapTiers.simple = 0; coins = 0;
+
+// ---- 7: Almost Affordable uses the correct new shortfall against the new price (Simple Capacity tier 0 = 55) ----
+rewardedAdsAvailable = function(){ return true; }; // same monkeypatch the pre-existing E16 Almost Affordable tests use -- the default mock ytgame has no .ads at all
+upgrades.jarCapTiers.simple = 0; coins = 47; // 85% of 55, rounded down -- within the 15% threshold
+__check('7: Almost Affordable is eligible against the new 55 price and computes the exact real shortfall (8)', almostAffordableEligible({ kind: 'jarCap', jarKey: 'simple' }) === true && almostAffordableShortfall({ kind: 'jarCap', jarKey: 'simple' }) === 8);
+upgrades.jarCapTiers.simple = 0; coins = 0;
+
+// ---- 8: purchased upgrade persists -- written to the same localStorage keys every other purchase already uses (non-YT path), same discipline as the pre-existing fountain-persistence test above ----
+upgrades.jarCapTiers.simple = 0; coins = 1000;
+tryUpgradeJarCap('simple'); tryUpgradeJarCap('simple'); // 2 real tiers owned, spending real new-price coins (55+83=138)
+if (!YT) {
+  var __e25ReloadedUpgrades = JSON.parse(localStorage.getItem('gk2_upgrades') || '{}');
+  var __e25ReloadedCoins = parseFloat(localStorage.getItem('gk2_coins') || '0');
+  __check('8: the purchased tier count is persisted to the exact same gk2_upgrades key as every other purchase (no parallel storage)', __e25ReloadedUpgrades.jarCapTiers && __e25ReloadedUpgrades.jarCapTiers.simple === 2, 'got=' + JSON.stringify(__e25ReloadedUpgrades.jarCapTiers));
+  __check('8b: coins spent on those real E25-priced purchases (1000-55-83=862) are persisted to gk2_coins', __e25ReloadedCoins === 862, 'got=' + __e25ReloadedCoins);
+}
+upgrades.jarCapTiers.simple = 0;
+
+// ---- 9: a pre-E25 save (old tier counts, old-economy coin balance) loads cleanly and its EXISTING tier counts are untouched -- only the NEXT purchase uses the new price ----
+// jarCapTiers is the one tier field migrateEconomyV2() never reinterprets
+// (its formula/ceiling never changed, see that function's own comment) --
+// the exact metric behind the live-reported "capacity to 9" example this
+// whole phase is about, so it's the cleanest possible proof here.
+coins = 0; // the real (YT-mocked) load merge takes the MAX of in-memory vs. saved coins -- reset so the saved 200 is what actually lands, same discipline lumora2-e16-save-compat's fresh scenario gets for free
+var preE25Save = {
+  best: 25, coins: 200,
+  upgrades: {
+    tutorialDone: true,
+    ownedJars: { simple: true, lantern: true }, equippedJar: 'simple',
+    jarCapTiers: { simple: 3, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }
+  }
+};
+var threwE25Load = false;
+try { __spy.loadResolve(JSON.stringify(preE25Save)); } catch (e) { threwE25Load = true; }
+return __tick(5).then(function(){
+  __check('9: a pre-E25 save loads without error under the new prices', !threwE25Load);
+  __check('10: existing tier counts (already paid for under the OLD prices) are completely untouched by E25 -- jarCapTiers.simple stays exactly 3', upgrades.jarCapTiers.simple === 3);
+  __check('11: coins from before E25 are exactly preserved -- E25 neither deducts nor grants anything on load', coins === 200);
+  __check('12: the NEXT capacity purchase (tier index 3) now costs the new price (175), not the old price (67)', jarCapUpgradeCost(JARS.find(function(j){ return j.key === 'simple'; })) === 175);
+
+  // ---- 14/15: village progression (bestNightDelivered/milestones/thresholds) is completely independent of this economy pass ----
+  __check('14: Lumora\\'s milestone thresholds are exactly unchanged by E25 (50/100/150/200/250/300/400/500)', JSON.stringify(VILLAGE1_MILESTONES.map(function(m){ return m.threshold; })) === JSON.stringify([50, 100, 150, 200, 250, 300, 400, 500]));
+  __check('15: Moonfall\\'s milestone thresholds are exactly unchanged by E25', JSON.stringify(MOONFALL_MILESTONES.map(function(m){ return m.threshold; })) === JSON.stringify([100, 200, 300, 425, 550, 700, 850, 1000]));
+  var villageBefore = JSON.stringify(villageProgression);
+  upgrades.jarCapTiers.simple = 0; tryUpgradeJarCap('simple'); // spend against the new price
+  __check('16: making a real E25-priced purchase does not touch village/bestNightDelivered state at all', JSON.stringify(villageProgression) === villageBefore);
 });
 `);
 
