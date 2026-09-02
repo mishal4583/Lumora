@@ -8678,17 +8678,27 @@ __check('5d: the full Coin Value ladder is monotonically non-decreasing end to e
 scenario('lumora-village-lumora-progression', null, `
 __check('1: fresh player starts Lumora at bestNightDelivered 0, not completed', currentVillageProgress().bestNightDelivered === 0 && currentVillageProgress().completed === false);
 
-// ---- 2: tutorial-night delivery counts toward NEITHER the temporary nor the permanent counter ----
+// ---- 2: E28 fix -- a real successful delivery counts toward village
+// progress even before upgrades.tutorialDone flips true. Before this fix,
+// grantVillageProgress() was gated on upgrades.tutorialDone (the same
+// flag ads/objectives/events/streak correctly gate on) -- but that flag
+// only flips once EVERY tutorial step's trigger condition has fired,
+// including MAGNET (an RNG-timed powerup spawn), so a real player could
+// rack up many genuine deliveries during that window that counted for
+// score/coins/quests but were silently dropped from village progress
+// (live-reported: 87 real deliveries, only 62 credited). Village
+// progress must track every real delivery unconditionally, exactly like
+// S.deliveredN. ----
 upgrades.tutorialDone = false;
 reset();
 S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
 for (var i = 0; i < 120 && (S.sparks.length > 0 || S.carried.length > 0); i++) __stepFrame(16);
-__check('2: a delivery during the tutorial grants 0 temporary night-delivered count', S.nightDelivered === 0, 'nightDelivered=' + S.nightDelivered);
-__check('2b: a delivery during the tutorial grants 0 permanent bestNightDelivered', currentVillageProgress().bestNightDelivered === 0);
-__check('2c: the tutorial delivery still earns its normal score, unaffected', S.score === 1);
+__check('2: a real delivery before the tutorial fully completes still adds +1 to the temporary night-delivered count (E28 fix)', S.nightDelivered === 1, 'nightDelivered=' + S.nightDelivered);
+__check('2b: that same pre-tutorial-completion delivery also updates the permanent bestNightDelivered (E28 fix)', currentVillageProgress().bestNightDelivered === 1);
+__check('2c: the delivery still earns its normal score, unaffected', S.score === 1);
 
-// ---- 3: a real (post-tutorial) delivery increments the TEMPORARY counter, which -- since it's a new personal best -- live-updates the PERMANENT one too ----
+// ---- 3: a real (post-tutorial) delivery increments the TEMPORARY counter, which -- since it still ties/matches the personal best set in test 2 above -- live-updates the PERMANENT one too ----
 upgrades.tutorialDone = true;
 reset();
 var rawBefore = coins + coinFraction;
@@ -9138,6 +9148,78 @@ __check('D: Moonfall\\'s milestone thresholds are exactly unchanged', JSON.strin
 __check('D: Aurora village remains hidden (isVillageUnlocked(\\'aurora\\') still false via its own completionThreshold==null gate, untouched by this jar-economy phase)', isVillageUnlocked('aurora') === false);
 `);
 
+// =====================================================================
+// E28: FIX FIRST-NIGHT VILLAGE DELIVERY COUNT. Root cause (confirmed via
+// direct reproduction against the real delivery pipeline, see this
+// phase's own report): grantVillageProgress() was gated on
+// upgrades.tutorialDone, which only flips true once EVERY tutorial step's
+// trigger condition has fired (including MAGNET, an RNG-timed powerup
+// spawn) -- so a real player's genuine deliveries made before that could
+// count for S.score/S.deliveredN/coins/quests but be silently dropped
+// from village progress (live-reported: 87 delivered, only 62 credited).
+// Fixed by making grantVillageProgress() unconditional, exactly matching
+// S.deliveredN's own unconditional increment one line above it. This
+// scenario is the dedicated regression suite for the three-metric
+// distinction (BEST SCORE / CURRENT NIGHT DELIVERED / BEST NIGHT
+// DELIVERED) the fix depends on, per this phase's own required test list
+// (TEST A-G).
+scenario('e28-village-delivery-count', null, `
+// ---- TEST A: score != count -- a mixed-type delivery set where weighted score and delivered count genuinely differ; village must follow the COUNT ----
+reset(); upgrades.tutorialDone = true;
+S.jar.y = 999; S.jar.ty = 999;
+['g', 'g', 'g', 'y', 'y'].forEach(function(t){ S.carried.push({ type: t, ph: 0, sp: 1 }); });
+for (var iA = 0; iA < 300 && (S.sparks.length > 0 || S.carried.length > 0); iA++) __stepFrame(16);
+__check('TEST A: 3 Shy (3pt) + 2 Curious (1pt) delivered -- weighted score is 11, NOT 5', S.score === 11, 'score=' + S.score);
+__check('TEST A: the actual delivered count is 5, matching S.deliveredN exactly', S.deliveredN === 5, 'deliveredN=' + S.deliveredN);
+__check('TEST A: village progress (S.nightDelivered / bestNightDelivered) follows the COUNT (5), never the weighted score (11)', S.nightDelivered === 5 && currentVillageProgress().bestNightDelivered === 5, 'nightDelivered=' + S.nightDelivered + ' best=' + currentVillageProgress().bestNightDelivered);
+
+// ---- TEST B: score == count (coincidentally, all Curious/1pt) -- village must still read the count FIELD, not assume equality from the number matching ----
+reset();
+for (var iB = 0; iB < 7; iB++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var iB2 = 0; iB2 < 300 && (S.sparks.length > 0 || S.carried.length > 0); iB2++) __stepFrame(16);
+__check('TEST B: 7 Curious fireflies -- score (7) and delivered count (7) coincidentally match', S.score === 7 && S.deliveredN === 7);
+__check('TEST B: village progress reads S.nightDelivered specifically (still 7 here, but via the count field, not score)', S.nightDelivered === 7 && currentVillageProgress().bestNightDelivered === 7);
+
+// ---- TEST C: first night, fresh Lumora save -- deliveries made before upgrades.tutorialDone flips true must still count (the exact E28 bug) ----
+villageProgression = defaultVillageProgression();
+upgrades.tutorialDone = false;
+reset();
+for (var iC = 0; iC < 25; iC++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var iC2 = 0; iC2 < 600 && (S.sparks.length > 0 || S.carried.length > 0); iC2++) __stepFrame(16);
+__check('TEST C setup: 25 real deliveries made while tutorialDone is still false', S.deliveredN === 25 && upgrades.tutorialDone === false, 'deliveredN=' + S.deliveredN);
+completeTutorial(); // the MAGNET step's own trigger condition finally fires -- mid-night, same round: no reset() here, since a real player never gets their round wiped just because the tutorial completes
+for (var iC3 = 0; iC3 < 62; iC3++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var iC4 = 0; iC4 < 1200 && (S.sparks.length > 0 || S.carried.length > 0); iC4++) __stepFrame(16); // 62 deliveries at one release/0.14s (~9 frames each) plus travel time needs well over 600 frames
+__check('TEST C: a fresh Lumora save\\'s first night (25 pre-tutorial-completion + 62 post) credits bestNightDelivered with the FULL actual delivered count (87), not just the post-tutorial portion (62)', currentVillageProgress().bestNightDelivered === 87, 'best=' + currentVillageProgress().bestNightDelivered);
+__check('TEST C: Village Details would show 1/8 restored (87 >= First Window\\'s 50, < Second House\\'s 100)', getRestoredMilestones('lumora').length === 1 && getNextMilestone('lumora').threshold === 100);
+
+// ---- TEST D: a worse night never lowers the best ----
+reset();
+for (var iD = 0; iD < 40; iD++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var iD2 = 0; iD2 < 800 && (S.sparks.length > 0 || S.carried.length > 0); iD2++) __stepFrame(16);
+__check('TEST D: this night delivered only 40, but best remains 87 (never decreases)', S.nightDelivered === 40 && currentVillageProgress().bestNightDelivered === 87, 'nightDelivered=' + S.nightDelivered + ' best=' + currentVillageProgress().bestNightDelivered);
+
+// ---- TEST E: a better night raises the best ----
+reset();
+for (var iE = 0; iE < 100; iE++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var iE2 = 0; iE2 < 1800 && (S.sparks.length > 0 || S.carried.length > 0); iE2++) __stepFrame(16); // 100 deliveries at one release/0.14s (~9 frames each) plus travel time needs well over 900 frames
+__check('TEST E: this night delivered 100, a new personal best, raising bestNightDelivered from 87 to 100', S.nightDelivered === 100 && currentVillageProgress().bestNightDelivered === 100, 'best=' + currentVillageProgress().bestNightDelivered);
+
+// ---- TEST G: Moonfall independence -- Lumora's own progress never bleeds into Moonfall, which stays 0 until actually played ----
+__check('TEST G: Moonfall\\'s own bestNightDelivered is exactly 0 -- completely unaffected by Lumora\\'s 100', villageProgression.villages[1].id === 'moonfall' && villageProgression.villages[1].bestNightDelivered === 0);
+`);
+
+// ---- TEST F: reload persistence -- a genuinely fresh script load (not just an in-memory read) must still show the real delivered count, seeded via localStorage exactly like every other reload-preserves scenario in this file ----
+scenario('e28-village-delivery-count-reload', null, `
+__check('TEST F: bestNightDelivered (87, the real E28-fixed first-night delivered count) survives a real reload -- read straight from the persisted village record, never re-derived from S.score or any current-night variable', currentVillageProgress().bestNightDelivered === 87, 'best=' + currentVillageProgress().bestNightDelivered);
+__check('TEST F b: milestones rebuild correctly off the reloaded 87 (First Window restored, Second House not yet)', villageProgression.villages[0].milestones[0].state === 'restored' && villageProgression.villages[0].milestones[1].state === 'locked');
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -9155,6 +9237,11 @@ async function main() {
     // migration) without a second vm context mid-driver.
     const seed = sc.name === 'standalone' ? `try{ localStorage.setItem('gk2_best','7'); }catch(e){}\n`
       : sc.name === 'lumora-village-lumora-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:220,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E28: reload-preserves the real E28-fixed first-night delivered
+      // count (87) -- the exact live-reported number, proving it's read
+      // straight off the persisted village record on a fresh load, never
+      // re-derived from score or any current-night variable.
+      : sc.name === 'e28-village-delivery-count-reload' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:87,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
       : sc.name === 'lumora-village-lumora-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
       // PERMANENT-VILLAGE-RESTORATION pass: a save written with the OLD field
       // name (restorationProgress, pre-pivot) -- proves the one-time

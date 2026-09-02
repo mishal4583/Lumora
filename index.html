@@ -6854,11 +6854,24 @@ function update(dt){
       const prev=S.score;
       S.score+=TYPES[s.type].pts; S.deliveredN++;
       // E18: Village 1 persistent restoration -- same delivery-success
-      // moment as score/coins/quest progress below, gated on
-      // upgrades.tutorialDone so tutorial-night deliveries never count (per
-      // direct instruction), and living entirely outside S so it survives
-      // reset()/Restart Night/reload exactly like coins/best already do.
-      if(upgrades.tutorialDone)grantVillageProgress();
+      // moment as score/coins/quest progress below, living entirely outside
+      // S so it survives reset()/Restart Night/reload exactly like
+      // coins/best already do.
+      // E28 fix: this used to be gated on upgrades.tutorialDone (the same
+      // "first night stays distraction-free" flag every ads/objectives/
+      // events/streak gate above still correctly uses) -- but
+      // tutorialDone only flips once EVERY tutorial step's own trigger
+      // condition has fired, including MAGNET (needs a magnet powerup to
+      // actually spawn, which is RNG-timed). A real player can rack up
+      // many genuine successful deliveries during that window while just
+      // playing normally, and every one of them was silently excluded
+      // from village progress even though S.score/S.deliveredN/coins/
+      // quest progress all counted it -- a real, reproduced bug (live-
+      // reported: 87 real deliveries, only 62 credited to Village
+      // Details), not a deliberate design choice. Village progress must
+      // track every real successful delivery unconditionally, exactly
+      // like S.deliveredN just above -- no tutorial exception.
+      grantVillageProgress();
       // Phase 1 economy pass: THREE independent layers now, stacked
       // multiplicatively -- TYPES[type].coins (the raw firefly value, same
       // for every player) x the EQUIPPED JAR's own Light Value (per-jar
