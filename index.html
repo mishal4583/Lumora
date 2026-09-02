@@ -1670,14 +1670,62 @@ function bandedTierCost(startPrice,tierIndex,totalTiers,endgameMult){
 // (jarObj.maxCapacity-jarObj.capacity, now much larger per E1's raised
 // ceilings below) and the new JAR_ENDGAME_MULTIPLIER now shape the curve
 // instead of the old tapering-compound ratio.
-// E25 Workshop Economy Rebalance V2: base price 25->55 (~x2.2, calibrated
-// against real observed strong-night income of ~687 coins vs. the x1
-// original assumption baked into REFERENCE_START_PRICE/BAND_TARGETS) --
-// raises the floor of the whole curve, not just the endgame ceiling, so a
-// single strong night can no longer fund deep simultaneous progress on
-// capacity AND every other line at once. Tier 0 stays a small fraction of
-// one night's income -- first purchase is still immediate.
-function jarCapUpgradeCost(jarObj){ return bandedTierCost(Math.round(55*JAR_COST_MULTIPLIER[jarObj.key]),jarCapTierOwned(jarObj.key),jarObj.maxCapacity-jarObj.capacity,JAR_ENDGAME_MULTIPLIER[jarObj.key]); }
+// E26 Hand-Authored Price Table: replaces bandedTierCost()-driven pricing
+// for Capacity/Reach/MagnetReach/LightValue with explicit, hand-tuned
+// per-tier prices -- one array per jar per line, index 0 = level 1's
+// price, index length matches that line's real tier count exactly
+// (jarObj.maxCapacity-jarObj.capacity for capacity, jarStatTierCount() for
+// the three stats below). Magnet Duration is deliberately NOT in this
+// table -- it still uses bandedTierCost() (the E25-rebalanced formula)
+// since no hand-authored Duration prices were given this pass.
+// Aurora's magnetReach here is 25 entries, not the 26 originally given --
+// Aurora's Magnet Reach line has exactly 25 tiers in the real game
+// ((340-255)/3.4 = 25), confirmed with the user; the given 26th price
+// (19,500) was dropped rather than adding a real 26th tier/stat-range
+// change.
+const EXPLICIT_TIER_PRICES={
+  simple:{
+    capacity:[100,100,125,125,125,150,150,150],
+    reach:[75,75,100,100,100,125,125,125,150,150,175,175,200,200,225,250,275,300,325,350,375,400,450,475,500,550,600,650,700,750,850,900],
+    magnetReach:[100,125,125,125,150,150,175,175,200,200,225,250,275,300,325,325,375,400,450,475,500,550,600,650],
+    lightValue:[125,125,125,150,150,175,175,175,200,225,225,250,275,300,325,350,400,425,450,500]
+  },
+  lantern:{
+    capacity:[250,275,300,300,325,350,375,400,450,475],
+    reach:[200,225,225,250,275,275,300,325,350,375,400,450,500,550,550,600,700,750,800,850,950,1050,1100,1200,1300,1400,1500,1650,1750,1900,2100],
+    magnetReach:[275,300,325,350,375,400,425,450,475,500,550,600,650,750,800,850,950,1000,1100,1200,1300,1400,1550,1650,1800],
+    lightValue:[300,300,325,350,375,400,425,475,500,550,600,650,700,750,800,900,1000,1050,1150,1250]
+  },
+  moon:{
+    capacity:[500,550,600,600,650,700,750,800,900,950,1000,1100],
+    reach:[400,425,475,500,550,550,600,650,700,750,800,900,1000,1050,1150,1200,1350,1500,1600,1700,1900,2100,2200,2400,2600,2800,3000,3300,3500,3800,4100,4400],
+    magnetReach:[550,600,650,700,750,800,850,900,950,1050,1150,1200,1350,1450,1550,1700,1850,2000,2200,2400,2600,2800,3100,3300,3600],
+    lightValue:[600,600,650,700,750,800,850,950,1000,1100,1200,1250,1400,1500,1650,1750,1950,2100,2300,2500]
+  },
+  crystal:{
+    capacity:[900,950,1050,1100,1200,1300,1350,1450,1600,1700,1850,2000,2200,2400,2600],
+    reach:[700,800,850,900,950,1000,1100,1150,1250,1350,1500,1600,1750,1900,2100,2200,2400,2700,2900,3100,3400,3700,4000,4300,4700,5000,5500,5750,6250,7000,7500,8000],
+    magnetReach:[1000,1050,1150,1250,1300,1400,1500,1600,1750,1900,2000,2200,2400,2600,2800,3000,3400,3700,4000,4300,4700,5000,5500,6000,6500],
+    lightValue:[1050,1100,1200,1300,1350,1450,1550,1700,1800,1950,2100,2300,2500,2700,2900,3200,3500,3800,4100,4500]
+  },
+  elder:{
+    capacity:[1500,1600,1750,1850,2000,2100,2300,2400,2600,2800,3100,3300,3700,4000,4300,4600,5000,5500,6000,6500,7000],
+    reach:[1200,1300,1400,1500,1600,1700,1800,1950,2100,2300,2500,2600,2900,3200,3400,3700,4100,4400,4800,5250,5750,6250,6750,7250,7750,8500,9000,9750,10500,11500,12500,13500],
+    magnetReach:[1650,1800,1900,2000,2200,2300,2500,2700,2900,3100,3400,3600,4000,4400,4700,5000,5500,6000,6500,7000,7750,8500,9250,9750,10500],
+    lightValue:[1700,1850,2000,2100,2300,2400,2600,2800,3000,3300,3500,3800,4200,4600,4900,5250,5750,6500,7000]
+  },
+  aurora:{
+    capacity:[2500,2700,2900,3100,3300,3600,3800,4100,4400,4800,5000,5500,6000,6750,7000,7750,8500,9250,10000,11000,12000,13000,14000,15000,16000,17500],
+    reach:[2000,2200,2300,2500,2600,2800,3000,3200,3500,3800,4100,4400,4900,5250,5750,6000,6750,7500,8000,8500,9500,10500,11000,12000,13000,14000,15000,16500,17500,19000,20500],
+    magnetReach:[2800,3000,3200,3400,3600,3900,4200,4500,4800,5250,5750,6000,6750,7250,7750,8500,9250,10000,11000,12000,13000,14000,15500,16500,18000],
+    lightValue:[2900,3100,3300,3600,3800,4100,4400,4700,5000,5500,6000,6250,7000,7500,8250,8750,9750,10500,11500,12500,13500]
+  }
+};
+// E25 Workshop Economy Rebalance V2's bandedTierCost()-based formula is
+// kept below as EXPLICIT_TIER_PRICES.simple's fallback path is never hit
+// (every jar has a capacity table above) -- retained only because
+// jarStatUpgradeCost() below still calls bandedTierCost() for Duration.
+function jarCapUpgradeCost(jarObj){ return EXPLICIT_TIER_PRICES[jarObj.key].capacity[jarCapTierOwned(jarObj.key)]; }
 function tryUpgradeJarCap(jarKey){
   const jar=JARS.find(j=>j.key===jarKey);
   if(!jar||!upgrades.ownedJars[jarKey])return false; // must own the jar first, same as any other jar action
@@ -1822,7 +1870,15 @@ function jarCompareValues(statKey,jarObj){
 // E2 Shop Economy 2.0: bandedTierCost() instead of compoundTierCost() --
 // same reasoning/precedent as jarCapUpgradeCost() above (tier-0 price
 // unchanged, only the shape of later tiers changes).
-function jarStatUpgradeCost(statKey,jarObj){ return bandedTierCost(Math.round(PER_JAR_STAT_PRICE_BASE[statKey]*JAR_COST_MULTIPLIER[jarObj.key]),jarStatTierOwned(statKey,jarObj.key),jarStatTierCount(statKey,jarObj),JAR_ENDGAME_MULTIPLIER[jarObj.key]); }
+// E26 Hand-Authored Price Table: reach/magnetReach/lightValue now read
+// from EXPLICIT_TIER_PRICES (see its own comment above jarCapUpgradeCost);
+// duration has no hand-authored table and stays on the bandedTierCost()
+// formula (E25's rebalanced base/endgame-multiplier inputs, unchanged by
+// this pass).
+function jarStatUpgradeCost(statKey,jarObj){
+  if(statKey!=='duration')return EXPLICIT_TIER_PRICES[jarObj.key][statKey][jarStatTierOwned(statKey,jarObj.key)];
+  return bandedTierCost(Math.round(PER_JAR_STAT_PRICE_BASE[statKey]*JAR_COST_MULTIPLIER[jarObj.key]),jarStatTierOwned(statKey,jarObj.key),jarStatTierCount(statKey,jarObj),JAR_ENDGAME_MULTIPLIER[jarObj.key]);
+}
 function tryUpgradeJarStat(statKey,jarKey){
   const jar=JARS.find(j=>j.key===jarKey);
   if(!jar||!upgrades.ownedJars[jarKey])return false; // must own the jar first, same as Capacity
