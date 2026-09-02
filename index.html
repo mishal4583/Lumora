@@ -1532,12 +1532,18 @@ function chainMilestoneReward(baseReward){ return Math.round(baseReward*jarIdent
 // Switching jars does not reset or share this progress.
 function jarCapTierOwned(jarKey){ return (upgrades.jarCapTiers&&upgrades.jarCapTiers[jarKey])||0; }
 // E26 Round 2 (Jar Progression Value Rebalance): capacity is no longer a
-// flat +1-per-tier count -- the new target BASE->MAX spans (e.g. Simple
-// 4->7) are narrower than the number of existing purchase levels (8), so
-// several levels necessarily repeat the same integer capacity (see this
-// phase's own report -- priced as cheap "filler" levels rather than hidden
-// or faked). CAPACITY_LEVELS is the explicit, real per-level integer
-// capacity, index 0 = 0 tiers owned (= jarObj.capacity), last index =
+// flat +1-per-tier count -- the target BASE->MAX spans (e.g. Simple 4->7)
+// are narrower than the number of existing purchase levels (8), so
+// several levels necessarily repeat the same integer capacity.
+// FINAL ECONOMY LOCK (direct instruction): the Capacity PRICE table
+// (EXPLICIT_TIER_PRICES) is locked to its previously-approved flat/
+// escalating values -- a "filler" level (capacity repeats) costs the
+// same as its neighbors, per direct instruction, not a discounted
+// amount. "Capacity is the ONLY stat where multiple levels may display
+// the same whole-number capacity because the gameplay quantity is
+// integer-based" is explicitly acknowledged and accepted in that lock.
+// CAPACITY_LEVELS is the explicit, real per-level integer capacity,
+// index 0 = 0 tiers owned (= jarObj.capacity), last index =
 // CAP_TIER_COUNT[key] tiers owned (= jarObj.maxCapacity exactly).
 const CAP_TIER_COUNT={simple:8, lantern:10, moon:12, crystal:15, elder:21, aurora:26};
 const CAPACITY_LEVELS={
@@ -1691,58 +1697,56 @@ function bandedTierCost(startPrice,tierIndex,totalTiers,endgameMult){
 // (jarObj.maxCapacity-jarObj.capacity, now much larger per E1's raised
 // ceilings below) and the new JAR_ENDGAME_MULTIPLIER now shape the curve
 // instead of the old tapering-compound ratio.
-// E26 Round 2 (Jar Progression Value Rebalance): capacity/reach/
-// magnetReach/lightValue prices completely redesigned around the new
-// (much narrower, for capacity) BASE->MAX stat spans:
-// - Capacity: breakthrough levels (capacity actually increases) keep a
-//   meaningful progressive price; "filler" levels (capacity repeats the
-//   previous level's integer -- unavoidable given the new narrow spans,
-//   see this phase's report) cost a substantially cheaper, but never
-//   trivial/free, amount -- price honestly reflects what's delivered,
-//   never a full-price purchase for zero gameplay benefit.
-// - Reach/Magnet Reach/Light Value: E26 round 1's prices had the WRONG
-//   relative order for this phase's price-priority rule (Range must be
-//   cheapest, Light most expensive) -- completely regenerated so, per
-//   jar, Range total < Capacity total < Magnet total < Light total.
+// FINAL ECONOMY LOCK (direct instruction): Capacity/Range/Magnet Reach
+// below are restored to the exact previously-approved (E26 round 1) price
+// tables and are now LOCKED -- do not regenerate, rebalance, or round
+// them differently, per direct instruction. Light Value below is the
+// FINAL APPROVED replacement table (also direct instruction) -- a
+// completely new set of numbers, not derived from either prior pass.
 // Magnet Duration is deliberately NOT in this table -- it still uses
 // bandedTierCost() (the E25-rebalanced formula), per direct instruction
 // not to build a new Duration purchase system.
+// Aurora's magnetReach here is 25 entries, not the 26 given in the
+// spec text -- Aurora's Magnet Reach line has exactly 25 real tiers
+// ((340-255)/3.4 = 25), already confirmed with the user in an earlier
+// phase; the given 26th price (19,500) is not used, consistent with
+// that earlier confirmed decision.
 const EXPLICIT_TIER_PRICES={
   simple:{
-    capacity:[20,100,25,125,25,25,150,25],
-    reach:[5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,10,10,10,10,10,10,15,15,15,15,15,20,20,20,20,20],
-    magnetReach:[5,5,5,5,5,10,10,15,20,20,25,30,35,40,45,50,55,60,65,70,75,80,90,95],
-    lightValue:[5,5,5,10,15,20,25,35,40,50,60,70,80,90,100,110,125,135,150,165]
+    capacity:[100,100,125,125,125,150,150,150],
+    reach:[75,75,100,100,100,125,125,125,150,150,175,175,200,200,225,250,275,300,325,350,375,400,450,475,500,550,600,650,700,750,850,900],
+    magnetReach:[100,125,125,125,150,150,175,175,200,200,225,250,275,300,325,325,375,400,450,475,500,550,600,650],
+    lightValue:[10,10,10,15,20,30,40,50,60,75,90,105,120,135,150,165,190,200,225,250]
   },
   lantern:{
-    capacity:[45,275,55,55,325,65,70,70,450,85],
-    reach:[5,5,5,5,5,5,5,5,10,10,10,15,15,20,20,20,25,25,30,35,35,40,40,45,50,50,55,60,60,65,70],
-    magnetReach:[5,5,5,10,20,25,30,40,50,60,70,80,90,105,115,130,145,160,175,190,205,220,240,255,275],
-    lightValue:[5,10,20,30,45,65,80,105,125,150,180,205,235,270,300,335,375,410,450,490]
+    capacity:[250,275,300,300,325,350,375,400,450,475],
+    reach:[200,225,225,250,275,275,300,325,350,375,400,450,500,550,550,600,700,750,800,850,950,1050,1100,1200,1300,1400,1500,1650,1750,1900,2100],
+    magnetReach:[275,300,325,350,375,400,425,450,475,500,550,600,650,750,800,850,950,1000,1100,1200,1300,1400,1550,1650,1800],
+    lightValue:[10,15,30,45,70,100,120,160,190,225,270,310,350,405,450,500,560,615,675,735]
   },
   moon:{
-    capacity:[90,550,110,110,115,700,135,145,160,950,180,200],
-    reach:[5,5,5,5,5,10,10,15,20,20,25,30,35,40,40,45,50,60,65,70,75,80,85,95,100,110,115,120,130,135,145,155],
-    magnetReach:[5,10,15,30,40,55,75,90,110,135,155,180,210,235,265,295,330,365,400,435,470,510,550,590,635],
-    lightValue:[5,25,45,75,105,145,190,240,290,350,410,475,545,615,695,775,860,945,1035,1130]
+    capacity:[500,550,600,600,650,700,750,800,900,950,1000,1100],
+    reach:[400,425,475,500,550,550,600,650,700,750,800,900,1000,1050,1150,1200,1350,1500,1600,1700,1900,2100,2200,2400,2600,2800,3000,3300,3500,3800,4100,4400],
+    magnetReach:[550,600,650,700,750,800,850,900,950,1050,1150,1200,1350,1450,1550,1700,1850,2000,2200,2400,2600,2800,3100,3300,3600],
+    lightValue:[10,40,70,110,160,220,285,360,435,525,615,710,820,920,1040,1160,1290,1420,1550,1695]
   },
   crystal:{
-    capacity:[160,950,190,200,215,1300,245,260,290,1700,335,360,395,2400,470],
-    reach:[5,5,10,10,20,25,30,40,50,60,70,80,90,105,115,130,145,160,175,190,205,225,240,260,275,295,315,335,355,380,400,420],
-    magnetReach:[5,25,45,75,115,155,200,250,305,370,430,500,575,650,735,815,905,1000,1095,1195,1300,1405,1515,1630,1745],
-    lightValue:[20,60,125,200,295,400,520,655,800,960,1125,1305,1495,1695,1910,2130,2360,2600,2850,3110]
+    capacity:[900,950,1050,1100,1200,1300,1350,1450,1600,1700,1850,2000,2200,2400,2600],
+    reach:[700,800,850,900,950,1000,1100,1150,1250,1350,1500,1600,1750,1900,2100,2200,2400,2700,2900,3100,3400,3700,4000,4300,4700,5000,5500,5750,6250,7000,7500,8000],
+    magnetReach:[1000,1050,1150,1250,1300,1400,1500,1600,1750,1900,2000,2200,2400,2600,2800,3000,3400,3700,4000,4300,4700,5000,5500,6000,6500],
+    lightValue:[30,90,190,300,440,600,780,980,1200,1440,1690,1960,2240,2540,2865,3195,3540,3900,4275,4665]
   },
   elder:{
-    capacity:[270,290,1750,335,360,380,2300,430,470,505,3100,595,665,720,4300,830,900,990,6000,1170,1260],
-    reach:[5,10,20,35,50,70,95,115,140,170,200,230,265,300,340,380,420,460,505,555,600,650,700,755,810,865,920,980,1040,1100,1165,1230],
-    magnetReach:[20,70,140,225,330,450,585,735,895,1070,1260,1460,1675,1900,2135,2385,2645,2915,3195,3485,3785,4095,4420,4750,5090],
-    lightValue:[65,205,415,675,985,1340,1745,2185,2670,3195,3760,4360,4995,5665,6370,7105,7880,8685,9520]
+    capacity:[1500,1600,1750,1850,2000,2100,2300,2400,2600,2800,3100,3300,3700,4000,4300,4600,5000,5500,6000,6500,7000],
+    reach:[1200,1300,1400,1500,1600,1700,1800,1950,2100,2300,2500,2600,2900,3200,3400,3700,4100,4400,4800,5250,5750,6250,6750,7250,7750,8500,9000,9750,10500,11500,12500,13500],
+    magnetReach:[1650,1800,1900,2000,2200,2300,2500,2700,2900,3100,3400,3600,4000,4400,4700,5000,5500,6000,6500,7000,7750,8500,9250,9750,10500],
+    lightValue:[100,310,620,1010,1480,2010,2620,3280,4005,4790,5640,6540,7490,8500,9555,10660,11820,13030,14280]
   },
   aurora:{
-    capacity:[450,2700,520,560,3300,650,685,740,4400,865,900,5500,1080,1215,7000,1395,1530,9250,1800,1980,2160,13000,2520,2700,16000,3150],
-    reach:[10,35,75,120,180,240,315,395,480,575,680,785,900,1020,1150,1285,1420,1565,1720,1875,2035,2205,2375,2555,2740,2930,3120,3320,3525,3735,3950],
-    magnetReach:[65,215,430,705,1030,1400,1820,2285,2795,3340,3930,4555,5220,5920,6655,7430,8235,9075,9950,10855,11795,12765,13765,14800,15860],
-    lightValue:[155,495,990,1610,2355,3210,4170,5235,6395,7650,8995,10430,11950,13555,15240,17010,18855,20780,22780,24855,27005]
+    capacity:[2500,2700,2900,3100,3300,3600,3800,4100,4400,4800,5000,5500,6000,6750,7000,7750,8500,9250,10000,11000,12000,13000,14000,15000,16000,17500],
+    reach:[2000,2200,2300,2500,2600,2800,3000,3200,3500,3800,4100,4400,4900,5250,5750,6000,6750,7500,8000,8500,9500,10500,11000,12000,13000,14000,15000,16500,17500,19000,20500],
+    magnetReach:[2800,3000,3200,3400,3600,3900,4200,4500,4800,5250,5750,6000,6750,7250,7750,8500,9250,10000,11000,12000,13000,14000,15500,16500,18000],
+    lightValue:[230,740,1485,2415,3530,4815,6255,7850,9590,11475,13490,15645,17925,20330,22860,25515,28280,31170,34170,37280,40510]
   }
 };
 // E25 Workshop Economy Rebalance V2's bandedTierCost()-based formula is
@@ -4036,10 +4040,21 @@ if(!YT){
 // JAR_ENDGAME_MULTIPLIER schedule). The 4 COIN_VALUE_* constants
 // themselves are declared much earlier in the file (alongside
 // JAR_ENDGAME_MULTIPLIER) -- see that declaration's own comment for why.
+// FINAL ECONOMY LOCK (direct instruction): Coin Value's price ladder is
+// now the explicit, hand-approved table below, replacing the
+// bandedTierCost() formula that generated it before (COIN_VALUE_START_
+// PRICE/COIN_VALUE_ENDGAME_MULT are no longer read by this line -- kept
+// declared, still used as the migration-only reconstruction target
+// nowhere else). Levels 59-60 (final two) are locked at level 58's own
+// price (2590 flat) -- the spec text only defined levels 1-58, and the
+// previous formula's own 59/60 (1650/1725) would have made the ladder
+// drop then partially recover right after level 58; confirmed with the
+// user rather than inventing new escalating values.
+const COIN_VALUE_PRICES=[90,95,100,100,105,110,115,120,125,130,130,135,150,165,180,195,205,220,235,250,280,295,310,335,365,390,415,440,470,495,525,550,575,605,630,680,730,785,835,885,935,985,1040,1090,1140,1190,1245,1355,1465,1580,1805,1915,2030,2140,2250,2365,2475,2590,2590,2590];
 const TIER_LINES={
   light: {vendor:'light-value', field:'lightTier', name:'Coin Value', desc:'Your permanent global economy multiplier — applies no matter which jar is equipped.',
     steps: Array.from({length:COIN_VALUE_LEVELS},()=>COIN_VALUE_STEP),
-    prices: Array.from({length:COIN_VALUE_LEVELS},(_,i)=>bandedTierCost(COIN_VALUE_START_PRICE,i,COIN_VALUE_LEVELS,COIN_VALUE_ENDGAME_MULT))
+    prices: COIN_VALUE_PRICES.slice()
   }
 };
 // Lumora UI port: the Jar Collection, ported directly from the prototype's
