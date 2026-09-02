@@ -4899,25 +4899,17 @@ const CONTRACT_CHIP_X=14, CONTRACT_CHIP_Y=208, CONTRACT_CHIP_H=30;
 // GOHOME_BTN) so the hit-test (inRect) and the visible pill are the exact
 // same bounds -- and a visible bordered pill instead of plain gray text.
 const SHOP_BTN_OVER={x:W/2,y:567,w:220,h:44,fontSize:12};
-// E22: Night Complete had no way back to the title screen at all -- Continue
-// (replay) and Visit the Workshop were the only two live targets, so a
-// player who just wants to stop playing had to either start an unwanted
-// extra night or detour through the shop first. Deliberately NOT wedged
-// into the Continue/Shop/tip/ad vertical stack below -- that stack's
-// spacing is a tightly tuned D5 spec budget (DOUBLE_COINS_BTN is already
-// hard-clamped at y:910 specifically because the panel can grow tall
-// enough, with every optional tail row present at once, to leave it no
-// real room to flow) -- so a fourth flowing element there could overlap
-// the ad button on exactly the busiest, most reward-heavy nights. Instead:
-// a small fixed corner button, same size/position/style convention as
-// every "leave this screen" close button elsewhere in this file (see
-// VILLAGE_DETAILS_CLOSE_BTN etc. at the same {x:W-38,y:56,r:20} spot) --
-// which the Over screen never draws anything else at, so it can never
-// collide with the panel regardless of its height. Reuses the exact same
-// goHome() the pause screen's own GOHOME_BTN already calls (safe to call
-// while unpaused too -- resumeGame() no-ops via its own `if(!paused)
-// return` guard, see goHome()'s definition).
-const HOME_BTN_OVER={x:W-38,y:56,r:20};
+// E22 (v2 -- moved from a small top-right corner icon after direct
+// feedback that it was too easy to miss entirely): a real, same-width pill
+// right below Visit the Workshop, same lumButton system, so it reads as
+// an equally clear third action instead of a decoration. Reuses the exact
+// same goHome() the pause screen's own GOHOME_BTN already calls (safe to
+// call while unpaused too -- resumeGame() no-ops via its own `if(!paused)
+// return` guard). .y is kept in sync with SHOP_BTN_OVER.y every frame in
+// drawOver(), same "one object drives both draw and hit-test" discipline,
+// clamped so it can never push past DOUBLE_COINS_BTN's own fixed position
+// on the rare night every optional bonus row is present at once.
+const HOME_BTN_OVER={x:W/2,y:567+56,w:220,h:44,fontSize:12};
 // "Double the Glow" rewarded-ad opportunity, Night Complete screen only.
 // Sits well clear of SHOP_BTN_OVER (bottom ~589) and the Night Complete tip
 // text above it (starts H*0.66+16=649.6, at most a few wrapped lines) --
@@ -5870,13 +5862,12 @@ cv.addEventListener('pointerdown',e=>{
       // roundS!==S staleness guard. Same "modal owns all input while
       // pending" discipline as the Extra Life offer overlay.
       if(S.rewardedDoubleCoinsPending)return;
-      // E22: the fixed corner "go home" button -- checked first among the
-      // carve-outs (a dist() circle check, same convention as every other
-      // corner close button in this file), so it can never be shadowed by
-      // the wide SHOP_BTN_OVER rect or the catch-all below. goHome() itself
-      // already discards nothing permanent -- same abandon-without-reset()
-      // semantics the pause screen's own GOHOME_BTN uses.
-      if(dist(p.x,p.y,HOME_BTN_OVER.x,HOME_BTN_OVER.y)<=hitR(HOME_BTN_OVER)){ goHome(); return; }
+      // E22 (v2): Home is now a real pill below Visit the Workshop, same
+      // inRect hit-test convention as SHOP_BTN_OVER right below this check.
+      // goHome() itself already discards nothing permanent -- same
+      // abandon-without-reset() semantics the pause screen's own
+      // GOHOME_BTN uses.
+      if(inRect(p.x,p.y,HOME_BTN_OVER)){ goHome(); return; }
       // shop button is a specific carve-out; every other click on this screen
       // still replays immediately, exactly as before this session — Part B
       // must not make an existing screen's input any less forgiving
@@ -10106,12 +10097,6 @@ function drawOver(){
   ctx.fillStyle='rgba(8,10,26,'+(a*0.72)+')';
   ctx.fillRect(0,0,W,H);
   ctx.globalAlpha=a;
-  // E22: fixed corner "go home" button -- see HOME_BTN_OVER's own comment
-  // for why this lives here instead of in the Continue/Shop stack below.
-  ctx.fillStyle='rgba(25,33,67,0.6)'; ctx.strokeStyle='rgba(174,184,203,0.3)'; ctx.lineWidth=1.5;
-  ctx.beginPath(); ctx.arc(HOME_BTN_OVER.x,HOME_BTN_OVER.y,HOME_BTN_OVER.r,0,6.28); ctx.fill(); ctx.stroke();
-  ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='16px Georgia,serif';
-  ctx.fillText('🏠',HOME_BTN_OVER.x,HOME_BTN_OVER.y+1);
   ctx.textAlign='center'; ctx.textBaseline='middle';
   lumEyebrow('Night Complete',W/2,H*0.22,'center');
   ctx.textAlign='center'; ctx.textBaseline='alphabetic';
@@ -10280,7 +10265,16 @@ function drawOver(){
   // frame); WITHOUT objectives it still has headroom, so it takes
   // whatever the tail added (only ever the bonus row in practice, since a
   // no-objectives night is tutorial-only and never has a contract/event).
-  DOUBLE_COINS_BTN.y=hasObjectives?910:(830+(panelH-150));
+  // E22: Home flows right below Visit the Workshop, same +56-ish gap.
+  // DOUBLE_COINS_BTN is computed AFTER it (reordered from the original
+  // hasObjectives?910:... single-branch formula) so it can shift down
+  // along with Home on the rare night every optional bonus row is present
+  // at once, instead of Home ever needing to squeeze up into/past it --
+  // still floored at 910 (its original tuned position) for every normal
+  // night, and ceilinged at H-40 so it can never run off the bottom of a
+  // 960-tall frame even in that extreme case.
+  HOME_BTN_OVER.y=SHOP_BTN_OVER.y+56;
+  DOUBLE_COINS_BTN.y=hasObjectives?Math.min(H-40,Math.max(910,HOME_BTN_OVER.y+66)):(830+(panelH-150));
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
@@ -10291,6 +10285,10 @@ function drawOver(){
   // variant), so it actually reads as a tappable button and its hit-test
   // (inRect, in the pointerdown handler) covers exactly what's drawn.
   lumButton(SHOP_BTN_OVER,'Visit the Workshop','outline');
+  // E22 (v2): same pill system, 'quiet' variant (same style GOHOME_BTN
+  // uses on the pause screen) so Home reads as a clear third action
+  // without competing with Continue's primary emphasis.
+  lumButton(HOME_BTN_OVER,'🏠 Home','quiet');
   // D5 (R4): the footer re-budget. Two copy lines are retired outright
   // (the ad's own restated-the-button copy line, and the tip's "✦ TIP ✦"
   // eyebrow -- two centred italic lines under the workshop button already
@@ -10307,7 +10305,7 @@ function drawOver(){
   // are present. A single new row still leaves comfortable room and the
   // tip stays, re-centred on whatever band remains (not just shifted by a
   // fixed offset) -- a measured predicate, not a case list.
-  const tipBandTop=SHOP_BTN_OVER.y+34, tipBandBot=adEye-18, tipBand=tipBandBot-tipBandTop;
+  const tipBandTop=HOME_BTN_OVER.y+30, tipBandBot=adEye-18, tipBand=tipBandBot-tipBandTop;
   if(S.tip&&tipBand>=40){
     const mid=(tipBandTop+tipBandBot)/2;
     ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='italic 13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
