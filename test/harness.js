@@ -912,6 +912,29 @@ screen = 'play'; S.over = true; S.overT = 1;
 __fire(cv, 'pointerdown', __fakeEvent(SHOP_BTN_OVER.x + SHOP_BTN_OVER.w / 2 - 8, SHOP_BTN_OVER.y));
 __check('tapping near the edge of the Visit the Workshop pill (not just its exact center) still opens the shop', screen === 'shop' && shopFrom === 'play', 'screen=' + screen);
 
+// E22: Night Complete had no way back to the title screen at all -- a real
+// player-reported gap ("after game completes there is no option or button
+// to directly go to home"). HOME_BTN_OVER is a fixed corner button, same
+// hit-test convention (dist/hitR) as every other corner close button in
+// this file, checked BEFORE the shop rect / catch-all so it can never be
+// shadowed by either.
+reset(); screen = 'play'; paused = false; S.over = false;
+__fire(cv, 'pointerdown', __fakeEvent(HOME_BTN_OVER.x, HOME_BTN_OVER.y));
+__check('tapping the game-over home-button spot mid-round does nothing (not reachable outside a settled S.over)', screen === 'play');
+screen = 'play'; S.over = true; S.overT = 1; S.score = 42; S.carried = [{ type: 'y', ph: 0, sp: 1 }];
+__fire(cv, 'pointerdown', __fakeEvent(HOME_BTN_OVER.x, HOME_BTN_OVER.y));
+__check('the Home button on a settled Night Complete screen returns to the title screen', screen === 'title');
+__check('going Home from Night Complete does not reset() -- S (this round\\'s already-tallied score/coins) is left exactly as the summary showed it, same "abandon, don\\'t replace" semantics as the pause screen\\'s own Go Home', S.score === 42 && S.carried.length === 1);
+__check('going Home does not leave the game stuck paused (goHome()\\'s resumeGame() call is a safe no-op when not paused)', paused === false && pauseReason === null);
+// same "modal owns all input while a reward request is in flight" guard
+// SHOP_BTN_OVER/the replay catch-all already have to respect -- Home must
+// not be a backdoor around it.
+screen = 'play'; S.over = true; S.overT = 1; S.rewardedDoubleCoinsPending = true;
+__fire(cv, 'pointerdown', __fakeEvent(HOME_BTN_OVER.x, HOME_BTN_OVER.y));
+__check('the Home button is swallowed, like everything else on this screen, while a Double the Glow request is in flight', screen === 'play');
+S.rewardedDoubleCoinsPending = false;
+screen = 'title';
+
 // tier-line purchase (Light Value -- the one line still left in
 // TIER_LINES, Phase 1 economy architecture moved Capacity/Jar Reach/
 // Magnet Reach/Magnet Duration all off it and onto the per-jar model):

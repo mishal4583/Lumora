@@ -4899,6 +4899,25 @@ const CONTRACT_CHIP_X=14, CONTRACT_CHIP_Y=208, CONTRACT_CHIP_H=30;
 // GOHOME_BTN) so the hit-test (inRect) and the visible pill are the exact
 // same bounds -- and a visible bordered pill instead of plain gray text.
 const SHOP_BTN_OVER={x:W/2,y:567,w:220,h:44,fontSize:12};
+// E22: Night Complete had no way back to the title screen at all -- Continue
+// (replay) and Visit the Workshop were the only two live targets, so a
+// player who just wants to stop playing had to either start an unwanted
+// extra night or detour through the shop first. Deliberately NOT wedged
+// into the Continue/Shop/tip/ad vertical stack below -- that stack's
+// spacing is a tightly tuned D5 spec budget (DOUBLE_COINS_BTN is already
+// hard-clamped at y:910 specifically because the panel can grow tall
+// enough, with every optional tail row present at once, to leave it no
+// real room to flow) -- so a fourth flowing element there could overlap
+// the ad button on exactly the busiest, most reward-heavy nights. Instead:
+// a small fixed corner button, same size/position/style convention as
+// every "leave this screen" close button elsewhere in this file (see
+// VILLAGE_DETAILS_CLOSE_BTN etc. at the same {x:W-38,y:56,r:20} spot) --
+// which the Over screen never draws anything else at, so it can never
+// collide with the panel regardless of its height. Reuses the exact same
+// goHome() the pause screen's own GOHOME_BTN already calls (safe to call
+// while unpaused too -- resumeGame() no-ops via its own `if(!paused)
+// return` guard, see goHome()'s definition).
+const HOME_BTN_OVER={x:W-38,y:56,r:20};
 // "Double the Glow" rewarded-ad opportunity, Night Complete screen only.
 // Sits well clear of SHOP_BTN_OVER (bottom ~589) and the Night Complete tip
 // text above it (starts H*0.66+16=649.6, at most a few wrapped lines) --
@@ -5851,6 +5870,13 @@ cv.addEventListener('pointerdown',e=>{
       // roundS!==S staleness guard. Same "modal owns all input while
       // pending" discipline as the Extra Life offer overlay.
       if(S.rewardedDoubleCoinsPending)return;
+      // E22: the fixed corner "go home" button -- checked first among the
+      // carve-outs (a dist() circle check, same convention as every other
+      // corner close button in this file), so it can never be shadowed by
+      // the wide SHOP_BTN_OVER rect or the catch-all below. goHome() itself
+      // already discards nothing permanent -- same abandon-without-reset()
+      // semantics the pause screen's own GOHOME_BTN uses.
+      if(dist(p.x,p.y,HOME_BTN_OVER.x,HOME_BTN_OVER.y)<=hitR(HOME_BTN_OVER)){ goHome(); return; }
       // shop button is a specific carve-out; every other click on this screen
       // still replays immediately, exactly as before this session — Part B
       // must not make an existing screen's input any less forgiving
@@ -10080,6 +10106,12 @@ function drawOver(){
   ctx.fillStyle='rgba(8,10,26,'+(a*0.72)+')';
   ctx.fillRect(0,0,W,H);
   ctx.globalAlpha=a;
+  // E22: fixed corner "go home" button -- see HOME_BTN_OVER's own comment
+  // for why this lives here instead of in the Continue/Shop stack below.
+  ctx.fillStyle='rgba(25,33,67,0.6)'; ctx.strokeStyle='rgba(174,184,203,0.3)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(HOME_BTN_OVER.x,HOME_BTN_OVER.y,HOME_BTN_OVER.r,0,6.28); ctx.fill(); ctx.stroke();
+  ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='16px Georgia,serif';
+  ctx.fillText('🏠',HOME_BTN_OVER.x,HOME_BTN_OVER.y+1);
   ctx.textAlign='center'; ctx.textBaseline='middle';
   lumEyebrow('Night Complete',W/2,H*0.22,'center');
   ctx.textAlign='center'; ctx.textBaseline='alphabetic';
