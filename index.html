@@ -2070,6 +2070,34 @@ const VILLAGE1_MILESTONES=[
   {id:'m8', threshold:500, name:'Final Beacon'}
 ];
 const VILLAGE1_COMPLETION_THRESHOLD=500;
+// E20: deterministic landmark -> physical light-cluster mapping, index-
+// aligned with VILLAGE1_MILESTONES. This is the actual fix for the
+// "scattered lighting" bug: LIGHTS' own ambient glow (further below) is
+// keyed by S.score thresholds (5/10/20/30/35) that have NOTHING to do with
+// bestNightDelivered milestones -- a great round's raw score could light
+// ambient windows with zero relationship to which of the 8 landmarks had
+// actually been permanently restored. This table reuses the EXISTING
+// LIGHTS positions (no new art, no random selection) but regroups them
+// spatially so each of the 8 restoration milestones has ONE specific,
+// identifiable physical location -- see the S.landmarkAnim tick in
+// update() and its dedicated draw pass in drawVillage() for how permanent
+// restoration state (never S.score) drives it. Every one of the 19 LIGHTS
+// indices is assigned to exactly one group, 0-18, no overlaps, no gaps
+// (verified by lumora-village-lumora-landmark-groups-cover-all-lights in
+// the harness). Building 8 (Final Beacon, full completion) has none left
+// to claim -- it gets its own dedicated whole-village flourish instead
+// (the finalBeacon branch), since "the whole village culminates" reads
+// better as one unified moment than one more small cluster anyway.
+const LUMORA_LANDMARK_GROUPS=[
+  {lightIndices:[0]},
+  {lightIndices:[1,2]},
+  {lightIndices:[3,4,5,6]},
+  {lightIndices:[7,8,9]},
+  {lightIndices:[16,17,18]},
+  {lightIndices:[10,11,14]},
+  {lightIndices:[12,13,15]},
+  {lightIndices:[], finalBeacon:true}
+];
 // Moonfall (Village 2) -- its OWN independent configuration, not Lumora's
 // numbers reused: a modestly higher firefly opportunity (see
 // villageSpawnMult() near the spawn-cadence code) balanced by a genuinely
@@ -2177,6 +2205,43 @@ function isVillageUnlocked(id){
 function isVillageCompleted(id){
   const v=villageProgression.villages.find(x=>x.id===id);
   return !!v&&v.completed;
+}
+// ---------- E20: generic village progression accessor API ----------
+// Thin, explicit, named read-only accessors over the SAME villageProgression
+// state everything else already uses -- no parallel/competing state, no
+// per-village special-casing. The Details screen, the Journey screen, and
+// the renderer all read through these, so a threshold or landmark name can
+// never drift between "what the engine tracks" and "what the UI shows".
+function getVillageProgress(id){ return villageProgression.villages.find(v=>v.id===id)||null; }
+function getBestNightDelivered(id){ const v=getVillageProgress(id); return v?v.bestNightDelivered:0; }
+function getVillageLandmarks(id){ return VILLAGE_MILESTONE_DEFS[id]||[]; }
+function getRestoredMilestones(id){
+  const v=getVillageProgress(id); if(!v)return [];
+  return v.milestones.filter(m=>m.state==='restored');
+}
+// The first landmark whose threshold is still ahead of the current best --
+// null once every landmark is restored (that null IS "village complete,
+// nothing left to work toward", not a stale reference to the last one).
+function getNextMilestone(id){
+  const v=getVillageProgress(id); if(!v)return null;
+  return getVillageLandmarks(id).find(m=>v.bestNightDelivered<m.threshold)||null;
+}
+function isVillageComplete(id){ return isVillageCompleted(id); } // alias -- same authoritative flag, just matching the spec's own naming
+// One row per landmark, ready for the Details screen: {index, name,
+// threshold, state}. state is 'RESTORED' for anything the engine's own
+// rebuildVillageMilestones() has already marked restored, 'NEXT' for the
+// SINGLE landmark getNextMilestone() names, and 'LOCKED' for every other
+// not-yet-reached one -- so exactly one row can ever read NEXT, never zero
+// and never more than one, and it can never disagree with the engine's own
+// bestNightDelivered-derived state.
+function villageDetailsRows(id){
+  const v=getVillageProgress(id); if(!v)return [];
+  const defs=getVillageLandmarks(id);
+  const next=getNextMilestone(id);
+  return defs.map((d,i)=>({
+    index:i+1, id:d.id, name:d.name, threshold:d.threshold,
+    state: (v.milestones[i]&&v.milestones[i].state==='restored')?'RESTORED':(next&&next.id===d.id?'NEXT':'LOCKED')
+  }));
 }
 function persistVillageLocal(){ if(!YT){ try{ localStorage.setItem('gk2_village',JSON.stringify(villageProgression)); }catch(e){} } }
 // E21/E22: the ONE place currentVillage ever changes (mirrors grantVillageProgress()
@@ -4269,6 +4334,30 @@ let journalFrom='title'; let journalTab='story'; let journalReading=null;
 // (the title nav button, before Moonfall unlocks) keeps its exact existing
 // close behavior untouched.
 let villageFrom='title';
+// E20: which village's Details screen is currently open (set by the
+// Journey screen's "View Details" link, read by drawVillageDetailsScreen()/
+// its input handler) -- one screen, one piece of state, works for both
+// Lumora and Moonfall rather than being two separate screens.
+// villageDetailsScroll is the vertical scroll offset (px, clamped to the
+// list's real content height every draw) -- 0 for content that already
+// fits the frame, which is the common case today; kept genuinely
+// functional (not just a stub) so a future village with more than 8
+// landmarks doesn't need a second implementation.
+let villageDetailsFor='lumora', villageDetailsScroll=0;
+// villageDetailsFrom mirrors villageFrom's "return to wherever this was
+// opened from" convention, but kept as its OWN variable rather than reusing
+// villageFrom: the legacy link inside this screen also assigns villageFrom
+// (to mean "the Village hub came from here"), and overloading one variable
+// for both "where did I come from" relationships silently loses the first
+// one the moment the second is set -- the exact cross-contamination shape
+// CLAUDE.md already warns about elsewhere (see the Moonfall pct staleness
+// bug class); two variables means neither can clobber the other.
+let villageDetailsFrom='journey';
+// E20: drag-to-scroll tracking for the Details screen -- deliberately a
+// SEPARATE flag from pointer.down (which already means something specific
+// elsewhere: "the jar is being dragged"), so scrolling this screen can
+// never be confused with, or leak into, jar movement.
+let villageDetailsDragActive=false, villageDetailsDragStartY=0, villageDetailsDragStartScroll=0;
 // Phase 12: whether the Prestige confirmation modal is open -- session-level
 // UI state, same category as journalReading above (not S, not persisted;
 // cleared defensively in reset(), same reasoning as pauseConfirm's own
@@ -4297,6 +4386,16 @@ function reset(){
     // reset()/Restart Night, same as deliveredN -- never touches the
     // permanent bestNightDelivered high-water mark stored outside S.
     nightDelivered:0,
+    // E20: Lumora's own PERMANENT-restoration glow, index-aligned with
+    // LUMORA_LANDMARK_GROUPS/VILLAGE1_MILESTONES (8 entries). Eased toward
+    // 1 by a short "awaken" fade in update() ONLY for a milestone that is
+    // genuinely, permanently restored right now -- a locked landmark's
+    // slot is clamped to 0 every frame, so it can never light up no matter
+    // how high S.score/S.nightDelivered climbs this round. Deliberately a
+    // plain object (not tied to LIGHTS' own array), since it answers a
+    // completely different question (permanent restoration, not "is this
+    // round's score past some point value").
+    landmarkAnim:{},
     over:false, overT:0, tip:'',
     // E19: set at most once per round, only inside grantVillageProgress()'s
     // own completion branch (see its comment) -- so tonight's Night Complete
@@ -4425,10 +4524,12 @@ function reset(){
     weather:'clear', weatherT:rand(18,30), weatherBannerT:0, weatherMsg:'', mysteryT:rand(45,70)
   };
   LIGHTS.forEach((L,i)=>S.lightAnim[i]=0);
+  LUMORA_LANDMARK_GROUPS.forEach((g,i)=>S.landmarkAnim[i]=0);
   pointer.down=false;
   KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
   prestigeConfirmOpen=false; // Phase 12: same defensive clear as pauseConfirm above
+  villageDetailsDragActive=false; // E20: same defensive clear as pointer.down above -- a fresh round should never inherit a mid-drag scroll gesture
   // Lumora 2.0 Phase 1: the ONE place objective generation/restoration is
   // decided -- every reset() call site (initial top-level init, beginPlay(),
   // continueFromOver(), the pause menu's Restart Night) funnels through
@@ -4817,6 +4918,7 @@ const VILLAGE_CLOSE_BTN={x:W-38,y:56,r:20};
 const JOURNAL_CLOSE_BTN={x:W-38,y:56,r:20};
 const THEMES_CLOSE_BTN={x:W-38,y:56,r:20}; // Phase 7
 const JOURNEY_CLOSE_BTN={x:W-38,y:56,r:20}; // E21/E22 -- same corner every other screen's close button already uses
+const VILLAGE_DETAILS_CLOSE_BTN={x:W-38,y:56,r:20}; // E20 -- same corner, same convention
 // First-Night Tutorial panel geometry -- one fixed size/position for every
 // step (INTRO through MAGNET) rather than varying per step, so these rects
 // (single source of truth for both drawTutorialPanel() and the
@@ -5486,11 +5588,14 @@ cv.addEventListener('pointerdown',e=>{
     return;
   }
   if(screen==='village'){
-    // E21/E22: same shopFrom/journalFrom-style "return to wherever this was
-    // opened from" -- villageFrom is 'title' for every existing entry point,
-    // so this is byte-for-byte the old behavior unless the Journey screen
-    // opened it.
-    if(dist(p.x,p.y,VILLAGE_CLOSE_BTN.x,VILLAGE_CLOSE_BTN.y)<=hitR(VILLAGE_CLOSE_BTN)){ screen=villageFrom==='journey'?'journey':'title'; return; }
+    // E21/E22/E20: same shopFrom/journalFrom-style "return to wherever this
+    // was opened from" -- villageFrom is 'title' for every original entry
+    // point, 'journey' if opened from Village Selection directly, and (new
+    // in E20) 'villageDetails' when reached via the Details screen's
+    // Lumora-only legacy link -- must return there, not skip past it to
+    // title, or closing the legacy hub silently strands the player two
+    // screens away from where they actually were.
+    if(dist(p.x,p.y,VILLAGE_CLOSE_BTN.x,VILLAGE_CLOSE_BTN.y)<=hitR(VILLAGE_CLOSE_BTN)){ screen=villageFrom==='villageDetails'?'villageDetails':(villageFrom==='journey'?'journey':'title'); return; }
     // Glowkeeper Story pass: opens straight to the latest unlocked chapter
     // (not just the chapter list) -- the architecture already supports it
     // cleanly via journalReading, so no reason to settle for "just open
@@ -5515,11 +5620,12 @@ cv.addEventListener('pointerdown',e=>{
     if(dist(p.x,p.y,JOURNEY_CLOSE_BTN.x,JOURNEY_CLOSE_BTN.y)<=hitR(JOURNEY_CLOSE_BTN)){ screen='title'; return; }
     for(const rect of journeyRowRects()){
       if(!inRect(p.x,p.y,rect))continue;
-      // Lumora's small secondary link -- opens the existing rich hub
-      // (milestones/quest/journal). Checked BEFORE the whole-row select
-      // tap, same "small link inside a larger tap target" priority every
-      // other screen in this file already uses.
-      if(rect.key==='lumora'&&inRect(p.x,p.y,journeyViewDetailsRect(rect))){ villageFrom='journey'; screen='village'; return; }
+      // E20: "View Details" now opens the real Village Details screen, for
+      // BOTH villages (a still-locked Moonfall shows its own clear locked
+      // state there rather than being unreachable) -- checked BEFORE the
+      // whole-row select tap, same "small link inside a larger tap target"
+      // priority every other screen in this file already uses.
+      if(inRect(p.x,p.y,journeyViewDetailsRect(rect))){ villageDetailsFor=rect.key; villageDetailsScroll=0; villageDetailsFrom='journey'; screen='villageDetails'; return; }
       // enterVillage() itself already refuses a locked village and no-ops
       // -- this one call covers "select Lumora", "select Moonfall", and
       // "tap an already-locked Moonfall does nothing" without a single
@@ -5528,6 +5634,23 @@ cv.addEventListener('pointerdown',e=>{
       if(isVillageUnlocked(rect.key))screen='title'; // only actually leave the screen for a real selection
       return;
     }
+    return;
+  }
+  // E20: Village Details -- close button and the (Lumora-only) legacy link
+  // are both checked immediately on pointerdown, same convention every
+  // other close-button/link in this file already uses; everything else in
+  // this screen is scroll-drag territory, handled by the dedicated
+  // villageDetailsDragActive tracking below (pointermove) rather than by
+  // more tap targets here.
+  if(screen==='villageDetails'){
+    if(dist(p.x,p.y,VILLAGE_DETAILS_CLOSE_BTN.x,VILLAGE_DETAILS_CLOSE_BTN.y)<=hitR(VILLAGE_DETAILS_CLOSE_BTN)){ screen=villageDetailsFrom==='journey'?'journey':'title'; return; }
+    const layout=villageDetailsLayout(villageDetailsFor);
+    if(layout.legacyLink){
+      const {viewTop}=villageDetailsViewport(villageDetailsFor);
+      const linkScreenY=viewTop+(layout.legacyLink.y-layout.top-villageDetailsScroll);
+      if(p.y>=linkScreenY&&p.y<=linkScreenY+layout.legacyLink.h){ villageFrom='villageDetails'; screen='village'; return; }
+    }
+    villageDetailsDragActive=true; villageDetailsDragStartY=p.y; villageDetailsDragStartScroll=villageDetailsScroll;
     return;
   }
   if(screen==='themes'){
@@ -5749,11 +5872,36 @@ cv.addEventListener('pointerdown',e=>{
   cv.setPointerCapture(e.pointerId);
 });
 cv.addEventListener('pointermove',e=>{
+  // E20: Village Details drag-to-scroll -- checked first and returns,
+  // entirely independent of pointer.down/S.jar (this screen isn't 'play',
+  // so the jar-drag branch below would no-op here anyway via its own
+  // paused/S.over guards, but keeping this as an explicit early return
+  // makes the two gestures impossible to cross-wire even if that ever changes).
+  if(screen==='villageDetails'&&villageDetailsDragActive){
+    const p=toGame(e);
+    const layout=villageDetailsLayout(villageDetailsFor);
+    const {viewTop,viewBottom}=villageDetailsViewport(villageDetailsFor);
+    const maxScroll=Math.max(0,layout.totalHeight-(viewBottom-viewTop));
+    villageDetailsScroll=clamp(villageDetailsDragStartScroll-(p.y-villageDetailsDragStartY),0,maxScroll);
+    return;
+  }
   if(paused||!pointer.down||!S||S.over)return;
   const p=toGame(e);
   S.jar.tx=clamp(p.x,30,W-30); S.jar.ty=clamp(p.y-70,H*0.13,H-170);
 });
-window.addEventListener('pointerup',()=>{ pointer.down=false; }); // release is state-safe: it only clears the flag
+window.addEventListener('pointerup',()=>{ pointer.down=false; villageDetailsDragActive=false; }); // release is state-safe: it only clears flags
+
+// E20: mouse-wheel scroll for the Village Details screen (trackpad/desktop convenience;
+// touch drag above remains the primary mobile path). Same pause guard as every other
+// input handler in this file (see CLAUDE.md hard-won lesson #1).
+cv.addEventListener('wheel',e=>{
+  if(paused||screen!=='villageDetails'||!villageDetailsFor)return;
+  e.preventDefault();
+  const layout=villageDetailsLayout(villageDetailsFor);
+  const {viewTop,viewBottom}=villageDetailsViewport(villageDetailsFor);
+  const maxScroll=Math.max(0,layout.totalHeight-(viewBottom-viewTop));
+  villageDetailsScroll=clamp(villageDetailsScroll+e.deltaY,0,maxScroll);
+},{passive:false});
 
 // ---- keyboard input (SHOULD: directional input + Esc to close modals) ----
 function keyDir(k){
@@ -5933,6 +6081,27 @@ function update(dt){
   // any group without a milestone mapping, or for a player who hasn't
   // reached it yet.
   LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr)S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
+  // E20: Lumora's own permanent-restoration glow -- an unconditional
+  // "awaken" fade (same rate/shape as the cat/windmill awaken fades
+  // elsewhere in this file), gated ONLY on whether that specific milestone
+  // is genuinely, permanently restored right now. Deliberately NOT gated
+  // on S.score or S.nightDelivered at all -- that was the actual bug: an
+  // ambient light system keyed to round score has no relationship to which
+  // of the 8 landmarks have ever been unlocked. A restored landmark eases
+  // in quickly (~0.7s) so a new night doesn't pop fully lit instantly, but
+  // it is never made to wait on this round's own play to "re-earn" itself.
+  // Guarded to Lumora specifically -- currentVillageProgress().milestones
+  // only means "Lumora's 8 buildings" when currentVillage IS lumora;
+  // while playing Moonfall this simply stops updating (frozen, never
+  // rendered there), then starts fresh and correct on the next reset(),
+  // same discipline as the Moonfall pct fix from the previous phase.
+  if(villageProgression.currentVillage==='lumora'){
+    const lv=currentVillageProgress();
+    LUMORA_LANDMARK_GROUPS.forEach((grp,i)=>{
+      const restored=!!(lv.milestones[i]&&lv.milestones[i].state==='restored');
+      S.landmarkAnim[i]=restored?Math.min(1,(S.landmarkAnim[i]||0)+dt*1.5):0;
+    });
+  }
   // milestone "awaken" fades — cat/windmill used to pop in instantly at their
   // score gate; fade them in over ~0.8s instead so the milestone reads as a
   // brief transition, matching how the village lights already fade in above
@@ -8059,13 +8228,21 @@ function drawVillage(){
   drawDecorDeco();
   drawFountain();
   drawGlowkeeperStatue(); // village landmark layer -- absent unless owned+equipped, see its own comment
-  // village lights
+  // village lights -- AMBIENT ONLY (category A, per E20 direct instruction):
+  // these are the pre-existing decorative window/lantern lights, driven
+  // purely by S.score (this round's own raw points), same as before E18
+  // ever existed. They must never be mistaken for restoration, so their
+  // glow bloom is deliberately dimmed (AMBIENT_DIM) -- the window/lantern
+  // itself still clearly reads as "lit", it just doesn't bloom like a
+  // restored landmark does (see the dedicated pass right after this one).
+  const AMBIENT_DIM=0.55;
   LIGHTS.forEach((L,i)=>{
     const a=S.lightAnim[i]; if(a<=0)return;
     const flick=0.85+0.15*Math.sin(S.t*7+i*2.1);
-    ctx.globalAlpha=a*flick;
+    ctx.globalAlpha=a*flick*AMBIENT_DIM;
     const gr=L.lantern?27:32;
     ctx.drawImage(glowSprite(GLOW_Y,gr),L.x-gr,L.y-gr,gr*2,gr*2);
+    ctx.globalAlpha=a;
     ctx.fillStyle=L.lantern?'#ffd987':'#ffca6e';
     if(L.lantern){ ctx.beginPath(); ctx.arc(L.x,L.y,3.4,0,6.28); ctx.fill(); }
     else ctx.fillRect(L.x-5,L.y-6,10,12);
@@ -8074,13 +8251,48 @@ function drawVillage(){
     // lantern -- visual only, reads S.lightAnim (already the source of truth
     // for whether that light is lit) but writes nothing back, no new state
     if(L.lantern){
-      ctx.globalAlpha=a*flick*0.32;
+      ctx.globalAlpha=a*flick*0.32*AMBIENT_DIM;
       const rg=ctx.createRadialGradient(L.x,L.y+14,0,L.x,L.y+14,15);
       rg.addColorStop(0,'rgba(255,214,110,0.55)'); rg.addColorStop(1,'rgba(255,214,110,0)');
       ctx.fillStyle=rg;
       ctx.beginPath(); ctx.ellipse(L.x,L.y+14,15,4.5,0,0,6.28); ctx.fill();
       ctx.globalAlpha=1;
     }
+  });
+  // PERMANENT RESTORATION glow (category B) -- deterministic, one specific
+  // physical location per milestone (LUMORA_LANDMARK_GROUPS), deliberately
+  // brighter/warmer/with a ring accent so a restored landmark is
+  // unmistakably different from the dim ambient glow just drawn above.
+  // S.landmarkAnim[i] is 0 for any locked milestone, always, regardless of
+  // S.score/S.nightDelivered this round -- see the tick in update().
+  LUMORA_LANDMARK_GROUPS.forEach((grp,gi)=>{
+    const a=S.landmarkAnim[gi]; if(!a||a<=0)return;
+    if(grp.finalBeacon){
+      // Building 8 -- Lumora fully restored. Every other physical light is
+      // already claimed by groups 0-6, so completion gets one dedicated
+      // whole-village beacon instead of competing for an existing spot.
+      const bx=W/2, by=H-224;
+      ctx.globalAlpha=a*0.85;
+      ctx.drawImage(glowSprite(GLOW_W,95),bx-95,by-95,190,190);
+      ctx.globalAlpha=a*(0.8+0.2*Math.sin(S.t*3));
+      ctx.drawImage(glowSprite(GLOW_Y,40),bx-40,by-40,80,80);
+      ctx.globalAlpha=a;
+      ctx.fillStyle='#fff8e2';
+      ctx.beginPath(); ctx.arc(bx,by,5,0,6.28); ctx.fill();
+      ctx.globalAlpha=1;
+      return;
+    }
+    grp.lightIndices.forEach(li=>{
+      const L=LIGHTS[li];
+      const flick=0.85+0.15*Math.sin(S.t*5+li*1.7);
+      ctx.globalAlpha=a*flick;
+      const gr=(L.lantern?27:32)*1.3;
+      ctx.drawImage(glowSprite(GLOW_Y,gr),L.x-gr,L.y-gr,gr*2,gr*2);
+      ctx.globalAlpha=a;
+      ctx.strokeStyle='rgba(255,236,178,0.9)'; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.arc(L.x,L.y,(L.lantern?7:9),0,6.28); ctx.stroke();
+      ctx.globalAlpha=1;
+    });
   });
   // fireworks + balloons
   for(const p of S.fireworks){
@@ -12246,12 +12458,157 @@ function drawJourneyScreen(){
       ctx.fillText(v.bestNightDelivered+' / '+v.completionThreshold+' best night delivered',left+20,top+64);
       lumBar(left+20,top+86,rect.w-40,6,pct);
     }
-    if(v.id==='lumora'){
-      const dr=journeyViewDetailsRect(rect);
-      ctx.textAlign='right'; ctx.fillStyle='rgba(251,210,107,0.8)'; ctx.font='italic 12px Georgia,serif'; ctx.textBaseline='alphabetic';
-      ctx.fillText('View Details →',dr.x+dr.w/2,dr.y+dr.h/2+4);
+    // E20: "View Details" now opens the real Village Details screen, for
+    // BOTH villages -- including a still-locked Moonfall, which shows its
+    // own clearly-locked state rather than being unreachable. (Lumora's
+    // OLD milestones/quest/journal hub, screen='village', is a separate,
+    // still-untouched legacy screen -- see its own small link at the
+    // bottom of the new Details screen.)
+    const dr=journeyViewDetailsRect(rect);
+    ctx.textAlign='right'; ctx.fillStyle='rgba(251,210,107,0.8)'; ctx.font='italic 12px Georgia,serif'; ctx.textBaseline='alphabetic';
+    ctx.fillText('View Details →',dr.x+dr.w/2,dr.y+dr.h/2+4);
+  });
+  ctx.textAlign='center'; ctx.textBaseline='top';
+}
+// ---------- E20: Village Details screen ----------
+// Reads ENTIRELY through the generic accessor API above (getVillageProgress/
+// getVillageLandmarks/getRestoredMilestones/getNextMilestone/
+// villageDetailsRows) -- no thresholds or landmark names are re-typed here,
+// so a config change to VILLAGE1_MILESTONES/MOONFALL_MILESTONES is
+// automatically reflected here with zero further edits, per direct
+// instruction ("ONE SOURCE OF TRUTH").
+//
+// Layout is computed once by villageDetailsLayout() and consumed by BOTH
+// the draw function and the input handler (single source of truth for
+// hit-testing too, same discipline as journeyRowRects() etc.) -- genuinely
+// scrollable (villageDetailsScroll, clamped to real content height every
+// frame), not just a fixed list that happens to fit today.
+function villageDetailsLayout(id){
+  const rows=villageDetailsRows(id);
+  const top=200, gap=10;
+  let y=top;
+  const items=rows.map(r=>{
+    const h=r.state==='NEXT'?108:60;
+    const item=Object.assign({},r,{y,h});
+    y+=h+gap;
+    return item;
+  });
+  let legacyLink=null;
+  if(id==='lumora'){
+    legacyLink={y,h:36};
+    y+=36+gap;
+  }
+  return {items, legacyLink, top, totalHeight:Math.max(0,y-top-gap)};
+}
+// Single source of truth for the scrollable viewport's screen-space bounds --
+// draw, drag-scroll (pointermove), wheel-scroll, and the legacy-link hit-test
+// all previously hand-copied "sy=94, sh=...?108:88" independently, which is
+// exactly the kind of drift CLAUDE.md's shared-layout-function convention
+// (see journeyRowRects) exists to prevent.
+function villageDetailsViewport(id){
+  const sy=94, sh=isVillageCompleted(id)?108:88;
+  return {sy, sh, viewTop:sy+sh+12, viewBottom:H-24};
+}
+function drawVillageDetailsScreen(){
+  const v=getVillageProgress(villageDetailsFor);
+  if(!v){ screen='journey'; return; } // defensive -- should never happen, villageDetailsFor is only ever set to a real id
+  const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
+  const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
+  scrim.addColorStop(0,'rgba(8,10,26,0.6)'); scrim.addColorStop(1,'rgba(8,10,26,0.85)');
+  ctx.fillStyle=scrim; ctx.fillRect(0,0,W,H);
+
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillStyle=LUM_CREAM; ctx.font='600 26px Georgia,serif';
+  ctx.fillText(v.name.toUpperCase(),W/2,58);
+  const unlocked=isVillageUnlocked(v.id);
+  ctx.font='italic 13px Georgia,serif';
+  if(unlocked){
+    ctx.fillStyle='rgba(174,184,203,0.7)';
+    ctx.fillText(v.id==='lumora'?'Village 1 · Primary':'Village 2',W/2,78);
+  } else {
+    const prevIdx=villageProgression.villages.findIndex(x=>x.id===v.id)-1;
+    const prevName=prevIdx>=0?villageProgression.villages[prevIdx].name:'the previous village';
+    ctx.fillStyle='rgba(240,124,114,0.85)';
+    ctx.fillText('🔒 LOCKED · Complete '+prevName+' to unlock',W/2,78);
+  }
+
+  ctx.fillStyle='rgba(25,33,67,0.6)'; ctx.strokeStyle='rgba(174,184,203,0.3)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(VILLAGE_DETAILS_CLOSE_BTN.x,VILLAGE_DETAILS_CLOSE_BTN.y,VILLAGE_DETAILS_CLOSE_BTN.r,0,6.28); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=LUM_CREAM; ctx.font='600 18px Georgia,serif';
+  ctx.fillText('✕',VILLAGE_DETAILS_CLOSE_BTN.x,VILLAGE_DETAILS_CLOSE_BTN.y+1);
+
+  // stats summary -- three live-read facts, never a fake/preview number.
+  // Doubles as the "village complete" readout (500/500, 8/8, 100%) without
+  // needing a second, competing completion display.
+  const {sy,sh,viewTop,viewBottom}=villageDetailsViewport(v.id);
+  const sx=20, sw=W-40;
+  lumPanel(sx,sy,sw,sh,16);
+  if(isVillageCompleted(v.id)){
+    ctx.textAlign='center'; ctx.fillStyle=LUM_GOLD; ctx.font='600 15px Georgia,serif'; ctx.textBaseline='top';
+    ctx.fillText('✨ VILLAGE COMPLETE ✨',W/2,sy+10);
+  }
+  const statsY=sy+(isVillageCompleted(v.id)?32:0);
+  const colW=sw/3;
+  const restoredN=getRestoredMilestones(v.id).length, totalN=getVillageLandmarks(v.id).length;
+  const pctNum=Math.round(1000*clamp(v.bestNightDelivered/v.completionThreshold,0,1))/10;
+  [
+    ['BEST NIGHT', v.bestNightDelivered+' / '+v.completionThreshold],
+    ['BUILDINGS', restoredN+' / '+totalN+' restored'],
+    ['PROGRESS', pctNum+'%']
+  ].forEach((col,i)=>{
+    const ccx=sx+colW*i+colW/2;
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillStyle='rgba(174,184,203,0.65)'; ctx.font='600 9px Georgia,serif';
+    ctx.fillText(col[0],ccx,statsY+14);
+    ctx.fillStyle=LUM_CREAM; ctx.font='600 16px Georgia,serif'; ctx.textBaseline='alphabetic';
+    ctx.fillText(col[1],ccx,statsY+42);
+  });
+
+  const layout=villageDetailsLayout(v.id);
+  const maxScroll=Math.max(0,layout.totalHeight-(viewBottom-viewTop));
+  villageDetailsScroll=clamp(villageDetailsScroll,0,maxScroll);
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0,viewTop,W,viewBottom-viewTop); ctx.clip();
+  ctx.translate(0,viewTop-layout.top-villageDetailsScroll);
+
+  layout.items.forEach(item=>{
+    const y=item.y, h=item.h;
+    lumPanel(20,y,W-40,h,14);
+    if(item.state==='NEXT'){
+      ctx.save(); ctx.strokeStyle=LUM_CYAN; ctx.lineWidth=2; ctx.globalAlpha=0.85;
+      ctx.beginPath(); ctx.roundRect(21,y+1,W-42,h-2,13); ctx.stroke(); ctx.restore();
+    }
+    ctx.textAlign='left'; ctx.textBaseline='top';
+    ctx.fillStyle='rgba(174,184,203,0.55)'; ctx.font='600 9px Georgia,serif';
+    ctx.fillText('BUILDING '+item.index,36,y+9);
+    ctx.fillStyle=item.state==='LOCKED'?'rgba(174,184,203,0.5)':LUM_CREAM; ctx.font='500 16px Georgia,serif';
+    ctx.fillText(item.name,36,y+22);
+    ctx.textAlign='right';
+    const badgeColor=item.state==='RESTORED'?LUM_GOLD:(item.state==='NEXT'?LUM_CYAN:'rgba(174,184,203,0.5)');
+    ctx.fillStyle=badgeColor; ctx.font='700 11px Georgia,serif';
+    ctx.fillText(item.state,W-36,y+11);
+    ctx.fillStyle='rgba(174,184,203,0.7)'; ctx.font='11px Georgia,serif';
+    ctx.fillText(item.threshold+' fireflies',W-36,y+27);
+    ctx.textAlign='left';
+    if(item.state==='NEXT'){
+      // "50 / 100", NOT "23 / 50" -- the current best against the NEXT
+      // threshold, exactly as directly specified (a "within-band" fraction
+      // was explicitly called out as incorrect).
+      const remaining=item.threshold-v.bestNightDelivered;
+      ctx.fillStyle='rgba(251,210,107,0.85)'; ctx.font='italic 12px Georgia,serif';
+      ctx.fillText(remaining+' more firefl'+(remaining===1?'y':'ies')+' needed',36,y+44);
+      lumBar(36,y+64,W-72,7,Math.round(100*clamp(v.bestNightDelivered/item.threshold,0,1)));
+      ctx.fillStyle='rgba(174,184,203,0.6)'; ctx.font='10.5px Georgia,serif';
+      ctx.fillText(v.bestNightDelivered+' / '+item.threshold,36,y+82);
     }
   });
+  if(layout.legacyLink){
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='rgba(251,210,107,0.65)'; ctx.font='italic 12px Georgia,serif';
+    ctx.fillText('Quest & Journal (legacy) →',W/2,layout.legacyLink.y+layout.legacyLink.h/2);
+  }
+  ctx.restore();
   ctx.textAlign='center'; ctx.textBaseline='top';
 }
 // ---------- Phase 7: Village Themes screen ----------
@@ -12803,6 +13160,8 @@ function draw(){
     drawVillageScreen();
   } else if(screen==='journey'){
     drawJourneyScreen();
+  } else if(screen==='villageDetails'){
+    drawVillageDetailsScreen();
   } else if(screen==='journal'){
     drawJournalScreen();
   } else if(screen==='themes'){

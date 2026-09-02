@@ -2753,14 +2753,160 @@ __check('the village button on the title screen opens Village Selection', screen
 var lumoraRow = journeyRowRects().find(function(r){ return r.key === 'lumora'; });
 var viewDetails = journeyViewDetailsRect(lumoraRow);
 __fire(cv, 'pointerdown', __fakeEvent(viewDetails.x + viewDetails.w / 2, viewDetails.y + viewDetails.h / 2));
-__check('Lumora\\'s "View Details" link on the Selection screen opens the Village screen', screen === 'village');
+// E20: "View Details" now opens the new generic Village Details screen (not
+// the old per-village hub directly) -- intentional behavior change, not a
+// regression. The old hub is still reachable one tap further in via the
+// Lumora-only "Quest & Journal (legacy)" link inside this new screen.
+__check('Lumora\\'s "View Details" link on the Selection screen opens the new Village Details screen', screen === 'villageDetails');
+var detailsDrawThrew = false;
+try { [0, 12, 25].forEach(function(b){ best = b; draw(); }); } catch (e) { detailsDrawThrew = true; }
+__check('the Village Details screen draws without throwing across a spread of restoration levels (0%/partial/maxed)', !detailsDrawThrew);
+var legacyLayout = villageDetailsLayout('lumora');
+__fire(cv, 'pointerdown', __fakeEvent(W / 2, legacyLayout.legacyLink.y - villageDetailsScroll + legacyLayout.legacyLink.h / 2 + (villageDetailsViewport('lumora').viewTop - legacyLayout.top)));
+__check('the Details screen\\'s "Quest & Journal (legacy)" link still opens the old Village screen (Lumora only)', screen === 'village');
 var villageDrawThrew = false;
 try { [0, 12, 25].forEach(function(b){ best = b; draw(); }); } catch (e) { villageDrawThrew = true; }
-__check('the Village screen draws without throwing across a spread of restoration levels (0%/partial/maxed)', !villageDrawThrew);
+__check('the legacy Village screen draws without throwing across a spread of restoration levels (0%/partial/maxed)', !villageDrawThrew);
+// E20: this Village hub was reached via the Details screen's legacy link,
+// not directly from Village Selection -- its close button must return to
+// the Details screen (not skip past it to Journey or Title).
 __fire(cv, 'pointerdown', __fakeEvent(VILLAGE_CLOSE_BTN.x, VILLAGE_CLOSE_BTN.y));
-__check('the Village close button returns to Village Selection (where "View Details" opened it from)', screen === 'journey');
+__check('the Village close button returns to the Village Details screen (where the legacy link opened it from)', screen === 'villageDetails');
+__fire(cv, 'pointerdown', __fakeEvent(VILLAGE_DETAILS_CLOSE_BTN.x, VILLAGE_DETAILS_CLOSE_BTN.y));
+__check('the Village Details close button returns to Village Selection (where "View Details" opened it from)', screen === 'journey');
 __fire(cv, 'pointerdown', __fakeEvent(JOURNEY_CLOSE_BTN.x, JOURNEY_CLOSE_BTN.y));
 __check('the Village Selection close button returns to the title screen', screen === 'title');
+
+// ===== E20: village restoration lighting (bestNightDelivered-gated, never S.score) + Details screen =====
+
+// Sanity: LUMORA_LANDMARK_GROUPS must cover every one of the 19 LIGHTS
+// indices exactly once -- no gap (a light nothing ever restores) and no
+// overlap (two milestones fighting over the same physical light). This is
+// the actual "no random/scattered building" guarantee, checked structurally
+// rather than just by example.
+(function(){
+  var seen = {};
+  var dupes = [], count = 0;
+  LUMORA_LANDMARK_GROUPS.forEach(function(g){
+    (g.lightIndices || []).forEach(function(li){
+      count++;
+      if (seen[li]) dupes.push(li);
+      seen[li] = true;
+    });
+  });
+  var coveredAll = LIGHTS.every(function(L, i){ return seen[i] === true; });
+  __check('LUMORA_LANDMARK_GROUPS covers all 19 LIGHTS indices exactly once (no gaps, no overlaps)', coveredAll && dupes.length === 0 && count === LIGHTS.length, 'count=' + count + ' dupes=' + JSON.stringify(dupes));
+  __check('exactly one group (the 8th) is the dedicated finalBeacon with no physical lightIndices of its own', LUMORA_LANDMARK_GROUPS.filter(function(g){ return g.finalBeacon; }).length === 1 && LUMORA_LANDMARK_GROUPS[7].finalBeacon === true && LUMORA_LANDMARK_GROUPS[7].lightIndices.length === 0);
+})();
+
+// Helper: set Lumora's bestNightDelivered directly (bypassing the delivery
+// flow, same shortcut the pre-existing village tests already use), rebuild
+// milestones from it, then let the real per-frame S.landmarkAnim tick in
+// update() ease every group toward its target -- 90 frames * 16ms = 1.44s,
+// comfortably past the ~0.667s full ease-in (dt*1.5) with margin.
+function primeLumoraLandmarks(bestVal){
+  villageProgression.currentVillage = 'lumora';
+  villageProgression.villages[0].bestNightDelivered = bestVal;
+  rebuildVillageMilestones(villageProgression.villages[0]);
+  screen = 'village'; paused = false; // keeps newNightCardActive() false and nothing else gating update(dt)
+  for (var i = 0; i < 90; i++) __stepFrame(16);
+}
+
+// TEST A: best=27 -- below even the FIRST threshold (50). Nothing restored,
+// nothing NEXT-eligible-yet-lit: every one of the 8 groups' landmarkAnim
+// must read 0, i.e. genuinely no restoration light anywhere, matching the
+// exact bug report (27/500 must show a fully dark, unrestored village).
+primeLumoraLandmarks(27);
+__check('TEST A (best=27): 0/8 landmarks restored', getRestoredMilestones('lumora').length === 0);
+__check('TEST A (best=27): every milestone reads locked', villageProgression.villages[0].milestones.every(function(m){ return m.state === 'locked'; }));
+__check('TEST A (best=27): the next milestone is Building 1 (First Window, 50)', getNextMilestone('lumora').name === 'First Window' && getNextMilestone('lumora').threshold === 50);
+__check('TEST A (best=27): NO restoration light anywhere -- every landmarkAnim group reads 0, not just the locked ones near the threshold', LUMORA_LANDMARK_GROUPS.every(function(g, i){ return !S.landmarkAnim[i]; }), 'landmarkAnim=' + JSON.stringify(S.landmarkAnim));
+
+// TEST B: best=50 -- Building 1 crosses, and ONLY Building 1. Its own
+// specific light cluster (group 0, LIGHTS[0]) is the one and only group lit.
+primeLumoraLandmarks(50);
+__check('TEST B (best=50): exactly Building 1 is restored', getRestoredMilestones('lumora').length === 1 && villageProgression.villages[0].milestones[0].state === 'restored');
+__check('TEST B (best=50): Building 1\\'s own landmark group (index 0) is fully lit', S.landmarkAnim[0] > 0.9, 'landmarkAnim[0]=' + S.landmarkAnim[0]);
+__check('TEST B (best=50): every OTHER landmark group reads 0 -- restoration light targets Building 1 specifically, not scattered elsewhere', [1, 2, 3, 4, 5, 6, 7].every(function(i){ return !S.landmarkAnim[i]; }), 'landmarkAnim=' + JSON.stringify(S.landmarkAnim));
+__check('TEST B (best=50): the next milestone is Building 2 (Second House, 100)', getNextMilestone('lumora').name === 'Second House');
+
+// TEST C: best=100 -- Buildings 1-2 restored, groups 0-1 lit, nothing else.
+primeLumoraLandmarks(100);
+__check('TEST C (best=100): exactly Buildings 1-2 are restored', getRestoredMilestones('lumora').length === 2);
+__check('TEST C (best=100): landmark groups 0-1 are lit, 2-7 are not', S.landmarkAnim[0] > 0.9 && S.landmarkAnim[1] > 0.9 && [2, 3, 4, 5, 6, 7].every(function(i){ return !S.landmarkAnim[i]; }), 'landmarkAnim=' + JSON.stringify(S.landmarkAnim));
+
+// TEST D: best=275 (mid-progression) -- Buildings 1-5 restored (thresholds
+// 50/100/150/200/250, all <=275), Building 6 (300) is NEXT and must NOT be
+// lit yet (NEXT is a UI label, not a light -- a locked building never gets
+// restoration glow, no matter how close it is).
+primeLumoraLandmarks(275);
+__check('TEST D (best=275): exactly Buildings 1-5 are restored', getRestoredMilestones('lumora').length === 5);
+__check('TEST D (best=275): Building 6 (The Fountain, 300) is the single NEXT milestone', getNextMilestone('lumora').name === 'The Fountain' && getNextMilestone('lumora').threshold === 300);
+__check('TEST D (best=275): landmark groups 0-4 are lit, 5-7 (including the NEXT one) are not', [0, 1, 2, 3, 4].every(function(i){ return S.landmarkAnim[i] > 0.9; }) && [5, 6, 7].every(function(i){ return !S.landmarkAnim[i]; }), 'landmarkAnim=' + JSON.stringify(S.landmarkAnim));
+var rowsD = villageDetailsRows('lumora');
+__check('TEST D (best=275): the Details screen shows exactly one NEXT row (Building 6), five RESTORED, two LOCKED', rowsD.filter(function(r){ return r.state === 'NEXT'; }).length === 1 && rowsD[5].state === 'NEXT' && rowsD.filter(function(r){ return r.state === 'RESTORED'; }).length === 5 && rowsD.filter(function(r){ return r.state === 'LOCKED'; }).length === 2);
+
+// TEST E: best=500 -- full completion. 8/8 restored, Moonfall unlocks,
+// there is genuinely no NEXT any more (not a stale reference to Building 8),
+// and the finalBeacon group (index 7, no physical lightIndices) still lights
+// via the same landmarkAnim mechanism.
+primeLumoraLandmarks(500);
+__check('TEST E (best=500): 8/8 landmarks restored and the village is complete', getRestoredMilestones('lumora').length === 8 && isVillageComplete('lumora') === true);
+__check('TEST E (best=500): Moonfall is now unlocked', isVillageUnlocked('moonfall') === true);
+__check('TEST E (best=500): getNextMilestone returns null -- no misleading NEXT after completion', getNextMilestone('lumora') === null);
+__check('TEST E (best=500): every landmark group including the finalBeacon (index 7) is lit', LUMORA_LANDMARK_GROUPS.every(function(g, i){ return S.landmarkAnim[i] > 0.9; }), 'landmarkAnim=' + JSON.stringify(S.landmarkAnim));
+var rowsE = villageDetailsRows('lumora');
+__check('TEST E (best=500): every Details row reads RESTORED, none NEXT', rowsE.every(function(r){ return r.state === 'RESTORED'; }));
+
+// TEST F (regression): a genuine best of 300 (reached via the real
+// grantVillageProgress() delivery flow, not a direct assignment), followed
+// by a WORSE 40-delivery night, must never relock Buildings 1-6 or lower
+// the persisted best.
+villageProgression.villages[0].bestNightDelivered = 299;
+S.nightDelivered = 299;
+rebuildVillageMilestones(villageProgression.villages[0]);
+grantVillageProgress(); // 299 -> 300, crosses Building 6 (The Fountain)
+__check('TEST F setup: a real delivery flow reaches best=300, restoring Buildings 1-6', villageProgression.villages[0].bestNightDelivered === 300 && getRestoredMilestones('lumora').length === 6);
+reset(); // a brand-new night -- S.nightDelivered zeroes, best must not
+__check('TEST F: Restart Night for a new attempt does not touch the persisted best', villageProgression.villages[0].bestNightDelivered === 300 && S.nightDelivered === 0);
+for (var fN = 0; fN < 40; fN++) { grantVillageProgress(); } // a worse, 40-delivery night -- grantVillageProgress() itself increments S.nightDelivered, same as a real delivery call site
+__check('TEST F: a lower-scoring 40-delivery night leaves best at 300, not 40 and not regressed', villageProgression.villages[0].bestNightDelivered === 300 && S.nightDelivered === 40);
+__check('TEST F: Buildings 1-6 stay restored, 7-8 stay locked -- no relocking from the worse night', getRestoredMilestones('lumora').length === 6 && villageProgression.villages[0].milestones[6].state === 'locked' && villageProgression.villages[0].milestones[7].state === 'locked');
+
+// TEST H: Moonfall reads through the SAME generic engine with its OWN
+// thresholds (100/200/300/425/550/700/850/1000) -- best=425 restores
+// Buildings 1-4, Building 5 (Central Fountain, 550) is NEXT, no random
+// restoration. Pure accessor calls -- doesn't require currentVillage to
+// actually be Moonfall, same as the Details screen itself never needs to
+// "enter" a village just to look at its own progress.
+villageProgression.villages[1].bestNightDelivered = 425;
+rebuildVillageMilestones(villageProgression.villages[1]);
+__check('TEST H (Moonfall best=425): exactly Buildings 1-4 are restored', getRestoredMilestones('moonfall').length === 4);
+__check('TEST H (Moonfall best=425): Buildings 5-8 are locked', villageProgression.villages[1].milestones.slice(4).every(function(m){ return m.state === 'locked'; }));
+__check('TEST H (Moonfall best=425): Building 5 (Central Fountain, 550) is the single NEXT milestone', getNextMilestone('moonfall').name === 'Central Fountain' && getNextMilestone('moonfall').threshold === 550);
+var rowsH = villageDetailsRows('moonfall');
+__check('TEST H (Moonfall best=425): the Details screen agrees exactly -- 4 RESTORED, 1 NEXT, 3 LOCKED, reading Moonfall\\'s OWN names/thresholds (no Lumora leakage)', rowsH.filter(function(r){ return r.state === 'RESTORED'; }).length === 4 && rowsH[4].state === 'NEXT' && rowsH[4].name === 'Central Fountain' && rowsH.filter(function(r){ return r.state === 'LOCKED'; }).length === 3);
+villageProgression.villages[1].bestNightDelivered = 0; // leave Moonfall as this scenario found it for anything running after
+rebuildVillageMilestones(villageProgression.villages[1]);
+
+// Moonfall's Details screen is viewable even while LOCKED (Lumora is at
+// best=300 from TEST F above, well short of its own 500 completion), and
+// clearly shows its locked state -- never a silently-empty or throwing screen.
+__check('setup: Lumora is genuinely incomplete here, so Moonfall genuinely reads as locked for this check', villageProgression.villages[0].completed === false);
+villageDetailsFor = 'moonfall'; villageDetailsScroll = 0; screen = 'villageDetails';
+var moonfallLockedDrawThrew = false;
+try { draw(); } catch (e) { moonfallLockedDrawThrew = true; }
+__check('a locked Moonfall\\'s Details screen draws without throwing', !moonfallLockedDrawThrew);
+__check('a locked Moonfall\\'s Details screen clearly shows LOCKED state (not silently blank)', isVillageUnlocked('moonfall') === false);
+screen = 'title';
+
+// cleanup: restore villageProgression to its untouched starting state (both
+// villages at bestNightDelivered 0, nothing completed) -- exactly how this
+// scenario found it before TEST A-H ran -- so nothing later in this same
+// long-running scenario inherits a mid-progression or completed state by accident.
+villageProgression.villages[0].bestNightDelivered = 0;
+rebuildVillageMilestones(villageProgression.villages[0]);
+villageProgression.currentVillage = 'lumora';
 
 // ===== Village + Decoration System Correction pass ==========================
 
@@ -8105,6 +8251,23 @@ scenario('lumora-village-currentvillage-validation', null, `
 __check('19: a save naming an unreachable currentVillage (here, a locked Aurora) is ignored, defaulting safely to lumora', villageProgression.currentVillage === 'lumora');
 `);
 
+// =====================================================================
+// E20 TEST G (reload): a real mid-progression best (300, 6/8 landmarks
+// restored) must survive a reload byte-for-byte -- same best, same
+// restored/locked split, same Details-screen state -- never relocking,
+// never resetting, never drifting. Seeded with a full modern 3-entry save
+// via the runner's seed hook below (bestNightDelivered:300 for Lumora).
+scenario('lumora-village-e20-details-reload-preserves', null, `
+__check('TEST G (reload): best is preserved exactly at 300, not reset and not silently changed', currentVillageProgress().bestNightDelivered === 300);
+__check('TEST G (reload): milestones rebuild correctly from the loaded value -- 6/8 restored (crosses through 300, not yet 400)', getRestoredMilestones('lumora').length === 6 && villageProgression.villages[0].milestones[6].state === 'locked');
+__check('TEST G (reload): the Details screen reads the identical state after reload -- 6 RESTORED, Building 7 (West Row, 400) NEXT, 1 LOCKED', (function(){ var rows = villageDetailsRows('lumora'); return rows.filter(function(r){ return r.state === 'RESTORED'; }).length === 6 && rows[6].state === 'NEXT' && rows[6].name === 'West Row' && rows.filter(function(r){ return r.state === 'LOCKED'; }).length === 1; })());
+var reloadDetailsDrawThrew = false;
+try { villageDetailsFor = 'lumora'; villageDetailsScroll = 0; screen = 'villageDetails'; draw(); } catch (e) { reloadDetailsDrawThrew = true; }
+__check('TEST G (reload): the Details screen draws the reloaded state without throwing', !reloadDetailsDrawThrew);
+reset();
+__check('TEST G (reload): Restart Night after a reload still does not disturb the reloaded best or its restored landmarks', currentVillageProgress().bestNightDelivered === 300 && getRestoredMilestones('lumora').length === 6);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -8147,6 +8310,11 @@ async function main() {
       // proves the load path validates against real unlocked-ness rather
       // than trusting the saved string blindly.
       : sc.name === 'lumora-village-currentvillage-validation' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'aurora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E20 TEST G: a genuine mid-progression Lumora save (best=300, 6/8
+      // landmarks restored -- crosses through Building 6/300 but not
+      // Building 7/400) -- proves the NEW landmark-restoration state (not
+      // just the old bestNightDelivered number) survives a real reload.
+      : sc.name === 'lumora-village-e20-details-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:300,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value
