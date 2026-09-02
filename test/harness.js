@@ -3093,6 +3093,106 @@ __check('TEST F/E23: the permanent record is completely unaffected by any of thi
   })();
 })();
 
+// ===== E24 BUG 1: First Window (Building 1) previously claimed only
+// LIGHTS[0] -- verified against the original house() footprint that
+// LIGHTS[7]/[8] are genuinely part of the SAME physical house and were
+// misassigned to Building 4 instead. TEST 8/9/10 below, using this
+// report's own exact numbers. =====
+(function(){
+  var v = villageProgression.villages[0];
+  __check('E24 BUG 1: Building 1\\'s group now contains all 3 of its real physical lights (0, 7, 8), not just 1', LUMORA_LANDMARK_GROUPS[0].lightIndices.slice().sort().join(',') === '0,7,8');
+  __check('E24 BUG 1: Building 4 (Firefly Garden) keeps its one remaining light (9), not left with zero', LUMORA_LANDMARK_GROUPS[3].lightIndices.join(',') === '9');
+  __check('E24: coverage sanity still holds after the remap -- all 19 LIGHTS indices covered exactly once', (function(){ var seen = {}; var dupes = 0, count = 0; LUMORA_LANDMARK_GROUPS.forEach(function(g){ (g.lightIndices || []).forEach(function(li){ count++; if (seen[li]) dupes++; seen[li] = true; }); }); return count === LIGHTS.length && dupes === 0 && LIGHTS.every(function(_, i){ return seen[i]; }); })());
+
+  // TEST 9: best=240, current=0 -- no current-night restoration light at all.
+  v.bestNightDelivered = 240; S.nightDelivered = 0;
+  rebuildVillageMilestones(v);
+  screen = 'village'; paused = false;
+  for (var t9 = 0; t9 < 90; t9++) __stepFrame(16);
+  __check('E24 TEST 9: best=240, current=0 -- zero current-night restoration light anywhere', LUMORA_LANDMARK_GROUPS.every(function(_, gi){ return !S.landmarkAnim[gi]; }));
+
+  // TEST 8: best=240, current=50 -- Building 1's COMPLETE light group
+  // illuminates (all 3 of its real windows/lantern), Buildings 2-4 do not
+  // (permanently restored but not yet re-earned tonight), locked 5-8 do not.
+  S.nightDelivered = 50;
+  for (var t8 = 0; t8 < 90; t8++) __stepFrame(16);
+  __check('E24 TEST 8: current=50 -- Building 1\\'s landmarkAnim (the whole group, lantern+2 windows together) is fully lit', S.landmarkAnim[0] > 0.9);
+  __check('E24 TEST 8: Buildings 2-4 do NOT illuminate merely because they are permanently restored', [1, 2, 3].every(function(gi){ return !S.landmarkAnim[gi]; }));
+  __check('E24 TEST 8: locked Buildings 5-8 do not illuminate', [4, 5, 6, 7].every(function(gi){ return !S.landmarkAnim[gi]; }));
+  // Pixel-level proof all 3 of Building 1's lights actually draw, not just the state number:
+  (function(){
+    var seenLit = {};
+    var realFillRect = ctx.fillRect, realArc = ctx.arc;
+    ctx.fillRect = function(x, y, w, h){ if (ctx.globalAlpha > 0.9) { LIGHTS.forEach(function(L, li){ if (!L.lantern && Math.abs(x - (L.x - 5)) < 0.01 && Math.abs(y - (L.y - 6)) < 0.01) seenLit[li] = true; }); } return realFillRect.apply(this, arguments); };
+    ctx.arc = function(x, y, r, a0, a1){ if (ctx.globalAlpha > 0.9 && Math.abs(r - 3.4) < 0.01) { LIGHTS.forEach(function(L, li){ if (L.lantern && Math.abs(x - L.x) < 0.01 && Math.abs(y - L.y) < 0.01) seenLit[li] = true; }); } return realArc.apply(this, arguments); };
+    draw();
+    ctx.fillRect = realFillRect; ctx.arc = realArc;
+    __check('E24 TEST 8 (pixel-level): all 3 of Building 1\\'s real lights (indices 0, 7, 8) actually draw at full brightness -- not just one', seenLit[0] && seenLit[7] && seenLit[8]);
+  })();
+
+  // TEST 10: current=100 -- First Window (1) + Second House (2), nothing else.
+  S.nightDelivered = 100;
+  for (var t10 = 0; t10 < 90; t10++) __stepFrame(16);
+  __check('E24 TEST 10: current=100 -- Buildings 1 AND 2 illuminated tonight, not random buildings', S.landmarkAnim[0] > 0.9 && S.landmarkAnim[1] > 0.9 && [2, 3, 4, 5, 6, 7].every(function(gi){ return !S.landmarkAnim[gi]; }));
+
+  reset();
+  v.bestNightDelivered = 0;
+  rebuildVillageMilestones(v);
+})();
+
+// ===== E24 BUG 2: Moonfall state isolation -- proves Moonfall never
+// inherits Lumora's record, a global best, or test/legacy residue. TEST
+// 1-7/11/12 below, using this report's own exact numbers. =====
+(function(){
+  var lv = villageProgression.villages[0], mv = villageProgression.villages[1];
+
+  // TEST 1: fresh Lumora.
+  lv.bestNightDelivered = 0; rebuildVillageMilestones(lv);
+  __check('E24 TEST 1: fresh Lumora -- best=0, 0/8 restored', lv.bestNightDelivered === 0 && getRestoredMilestones('lumora').length === 0);
+
+  // TEST 2/11: fresh, unlocked-but-never-played Moonfall.
+  mv.bestNightDelivered = 0; rebuildVillageMilestones(mv);
+  __check('E24 TEST 2/11: Moonfall never played -- best=0, 0/8 restored, Building 1 (Clock Tower) NEXT', mv.bestNightDelivered === 0 && getRestoredMilestones('moonfall').length === 0 && getNextMilestone('moonfall').name === 'Clock Tower');
+
+  // TEST 3: Lumora=500, Moonfall=0 -- independent, no bleed.
+  lv.bestNightDelivered = 500; rebuildVillageMilestones(lv);
+  __check('E24 TEST 3: Lumora=500 (8/8) does not touch Moonfall, which stays at 0 (0/8)', lv.bestNightDelivered === 500 && getRestoredMilestones('lumora').length === 8 && mv.bestNightDelivered === 0 && getRestoredMilestones('moonfall').length === 0);
+  __check('E24 TEST 3: Lumora and Moonfall are genuinely distinct objects, not shared/aliased references', lv !== mv && lv.milestones !== mv.milestones);
+
+  // TEST 4/5: Moonfall reaches 100, then 225 -- via the real delivery flow.
+  villageProgression.currentVillage = 'moonfall';
+  S.nightDelivered = 0;
+  for (var t4 = 0; t4 < 100; t4++) grantVillageProgress();
+  __check('E24 TEST 4: Moonfall best=100 via real deliveries -- 1/8 restored', mv.bestNightDelivered === 100 && getRestoredMilestones('moonfall').length === 1);
+  __check('E24 TEST 4: Lumora completely unaffected by Moonfall deliveries', lv.bestNightDelivered === 500 && getRestoredMilestones('lumora').length === 8);
+  for (var t5 = 100; t5 < 225; t5++) grantVillageProgress();
+  __check('E24 TEST 5: Moonfall best=225 -- 2/8 restored', mv.bestNightDelivered === 225 && getRestoredMilestones('moonfall').length === 2);
+
+  // TEST 12: 425 is NEVER reached except by actually delivering 425 -- prove
+  // the ONLY path to Moonfall.bestNightDelivered=425 is the real delivery
+  // flow, not any default/fallback/migration value.
+  __check('E24 TEST 12: Moonfall best is still 225, NOT 425 -- no fallback/default ever silently sets 425', mv.bestNightDelivered === 225);
+  reset();
+  for (var t12 = 0; t12 < 425; t12++) grantVillageProgress();
+  __check('E24 TEST 12: Moonfall reaches exactly 425 ONLY after actually delivering 425 fireflies in a real night', mv.bestNightDelivered === 425 && getRestoredMilestones('moonfall').length === 4);
+  mv.bestNightDelivered = 225; rebuildVillageMilestones(mv); // restore TEST 5's state for TEST 6/7 below
+
+  // TEST 6: switch repeatedly, verify both unchanged.
+  villageProgression.currentVillage = 'lumora';
+  enterVillage('moonfall'); enterVillage('lumora'); enterVillage('moonfall'); enterVillage('lumora');
+  __check('E24 TEST 6: repeated switching leaves Lumora at 500/8 and Moonfall at 225/2, no bleed', lv.bestNightDelivered === 500 && getRestoredMilestones('lumora').length === 8 && mv.bestNightDelivered === 225 && getRestoredMilestones('moonfall').length === 2);
+
+  // cleanup: restore Lumora to an INCOMPLETE state (300, matching what the
+  // pre-existing "locked Moonfall Details screen" check right after this
+  // block expects) and Moonfall back to 0 -- this block borrowed both
+  // villages' state for its own isolation proof, and must not leave Lumora
+  // completed (which would silently unlock Moonfall for every test after
+  // this point, breaking the very next one).
+  villageProgression.currentVillage = 'lumora';
+  lv.bestNightDelivered = 300; rebuildVillageMilestones(lv);
+  mv.bestNightDelivered = 0; rebuildVillageMilestones(mv);
+})();
+
 // TEST H: Moonfall reads through the SAME generic engine with its OWN
 // thresholds (100/200/300/425/550/700/850/1000) -- best=425 restores
 // Buildings 1-4, Building 5 (Central Fountain, 550) is NEXT, no random
@@ -8700,6 +8800,32 @@ for (var rf = 0; rf < 90; rf++) __stepFrame(16); // plenty of time for an incorr
 __check('E23 TEST F (reload): current-night illumination does NOT pop to full just from loading a save with best=250 -- S.nightDelivered is genuinely 0 on a fresh load, so every landmark starts dark', S.nightDelivered === 0 && LUMORA_LANDMARK_GROUPS.every(function(_, gi){ return !S.landmarkAnim[gi]; }));
 `);
 
+// =====================================================================
+// E24 TEST 7: Lumora=500 and Moonfall=225 (this report's own exact
+// numbers) must both survive a real reload, completely independently --
+// this is also the direct regression check for BUG 2 itself: proves a
+// fresh load of a save containing a REAL, legitimate Moonfall record
+// reads that record back correctly (never 0, never bled from Lumora,
+// never some unrelated fallback), while a save with NO Moonfall record at
+// all (the far more common case for BUG 2, covered by the
+// e24-moonfall-never-played scenario right below) correctly stays at 0.
+scenario('lumora-village-e24-independent-reload', null, `
+__check('E24 TEST 7: Lumora is 500/8 after reload', villageProgression.villages[0].bestNightDelivered === 500 && getRestoredMilestones('lumora').length === 8);
+__check('E24 TEST 7: Moonfall is independently 225/2 after reload -- not 0, not bled from Lumora, not 425', villageProgression.villages[1].bestNightDelivered === 225 && getRestoredMilestones('moonfall').length === 2);
+__check('E24 TEST 7: the two villages are still genuinely distinct objects after loading from JSON, not aliased', villageProgression.villages[0] !== villageProgression.villages[1] && villageProgression.villages[0].milestones !== villageProgression.villages[1].milestones);
+`);
+
+// =====================================================================
+// E24 BUG 2 direct regression: a save where Moonfall was NEVER played
+// (genuinely absent bestNightDelivered, exactly what a real unlocked-but-
+// untouched Moonfall save looks like) must load Moonfall at 0, never
+// inheriting Lumora's own 500 or any other fallback value.
+scenario('lumora-village-e24-moonfall-never-played', null, `
+__check('E24 BUG 2 regression: Moonfall never played -- loads at exactly 0, NOT Lumora\\'s 500, NOT 425, NOT any other fallback', villageProgression.villages[1].bestNightDelivered === 0);
+__check('E24 BUG 2 regression: 0/8 restored, Clock Tower is NEXT', getRestoredMilestones('moonfall').length === 0 && getNextMilestone('moonfall').name === 'Clock Tower');
+__check('E24 BUG 2 regression: Lumora\\'s own real 500/8 is unaffected by Moonfall never having a record', villageProgression.villages[0].bestNightDelivered === 500 && getRestoredMilestones('lumora').length === 8);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -8754,6 +8880,16 @@ async function main() {
       // very same save never leaks into which buildings are restored.
       : sc.name === 'lumora-village-e22-best240-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:240,currentNightDelivered:114,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : sc.name === 'lumora-village-e23-best250-reload-no-autopop' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:250,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E24 TEST 7: a real, legitimate save with BOTH villages' own
+      // records -- Lumora 500 (complete), Moonfall 225 (a real, played
+      // record, deliberately NOT 425, to rule out that specific stale
+      // value ever being some kind of reload default).
+      : sc.name === 'lumora-village-e24-independent-reload' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:225,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E24 BUG 2 regression: Lumora has a real record, but the saved
+      // Moonfall entry has NO bestNightDelivered field at all -- exactly
+      // what a genuinely unlocked-but-never-played Moonfall save looks
+      // like for a real player. Must load at 0, not inherit anything.
+      : sc.name === 'lumora-village-e24-moonfall-never-played' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value

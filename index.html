@@ -2114,11 +2114,25 @@ const VILLAGE1_COMPLETION_THRESHOLD=500;
 // to claim -- it gets its own dedicated whole-village flourish instead
 // (the finalBeacon branch), since "the whole village culminates" reads
 // better as one unified moment than one more small cluster anyway.
+// E24 BUG 1 fix: Building 1 (First Window) previously claimed only
+// LIGHTS[0] (one lantern), while LIGHTS[7] and LIGHTS[8] -- genuinely part
+// of the SAME physical house -- sat misassigned to Building 4's group
+// instead. Verified against the original, unmodified house() footprint
+// (git commit 8c4fc33, the pre-restoration reference E23 already
+// established -- these house() coordinates are byte-for-byte identical to
+// today's): house(g,50,H-100,80,...) spans x=[50,130]. LIGHTS[0] (x=118),
+// LIGHTS[7] (x=70), and LIGHTS[8] (x=96) all fall inside that exact span --
+// LIGHTS[7]/[8] were never anywhere near Building 4's own footprint, they
+// were simply grouped in array order rather than by which house they
+// actually sit on. Moved them here, to the group they physically belong
+// to; Building 4 (Firefly Garden) keeps its one remaining light (a
+// standalone lamppost between houses, LIGHTS[9] at x=160, not on any
+// house wall) rather than losing its restoration light entirely.
 const LUMORA_LANDMARK_GROUPS=[
-  {lightIndices:[0]},
+  {lightIndices:[0,7,8]},
   {lightIndices:[1,2]},
   {lightIndices:[3,4,5,6]},
-  {lightIndices:[7,8,9]},
+  {lightIndices:[9]},
   {lightIndices:[16,17,18]},
   {lightIndices:[10,11,14]},
   {lightIndices:[12,13,15]},
