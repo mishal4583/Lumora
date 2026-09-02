@@ -513,6 +513,10 @@ function forestEdge(g,x0,x1,baseY,color,seed){
 // cottage family, not one shape called with different x/y. wallColor/
 // roofColor are passed in already palette-derived by the caller (renderBG),
 // per direct instruction to keep season adaptation centralized there.
+// E24: one switch controls every baked window this primitive ever draws --
+// see cottagePrimitive()'s own window-drawing line for the full story on
+// why this defaults to false.
+const COTTAGE_WINDOWS_LIT=false;
 function cottagePrimitive(g,x,y,w,h,roofH,wallColor,roofColor,opts){
   opts=opts||{};
   g.fillStyle=wallColor;
@@ -542,11 +546,33 @@ function cottagePrimitive(g,x,y,w,h,roofH,wallColor,roofColor,opts){
     const dx=x+w*0.32, dTop=y-h-roofH*0.42;
     g.fillStyle=roofColor;
     g.beginPath(); g.moveTo(dx-6,dTop+11); g.lineTo(dx,dTop); g.lineTo(dx+6,dTop+11); g.closePath(); g.fill();
-    g.globalAlpha=opts.dormerLit?0.3:0.1; g.fillStyle='rgba(255,196,120,1)';
+    // E24: same COTTAGE_WINDOWS_LIT switch as the regular windows below --
+    // this pane was ALWAYS at least 0.1 alpha even when not "dormerLit",
+    // the same always-on-regardless-of-anything bug.
+    g.globalAlpha=COTTAGE_WINDOWS_LIT?(opts.dormerLit?0.3:0.1):0; g.fillStyle='rgba(255,196,120,1)';
     g.fillRect(dx-2.2,dTop+3,4.4,6.5); g.globalAlpha=1;
   }
   if(opts.door){ g.fillStyle=lerpColor(wallColor,'#000000',0.3); g.fillRect(x+w*0.42,y-h*0.32,w*0.14,h*0.32); }
-  (opts.windows||[]).forEach(win=>{ // each window carries its OWN brightness -- see section 8: some houses bright, some dim, never a uniform lit row
+  // E24: these "ambient/always-on" baked windows (see this function's own
+  // header comment) were a real, separate bug -- direct player report,
+  // screenshotted twice, of buildings reading as lit with zero restoration
+  // and only a handful of fireflies caught. These 15 houseTypeA-E cottages
+  // (in renderBG()'s background/midground/foreground bands) are baked into
+  // the cached per-season bg canvas and were lit from FRAME 1 of every
+  // round, completely independent of S.score AND of restoration -- a THIRD
+  // light source, never gated by anything, that the E20/E23 ambient-vs-
+  // restoration work never touched because it lives entirely outside the
+  // LIGHTS/S.lightAnim/S.landmarkAnim systems. The original rationale (kept
+  // strictly at x<130/x>470, "outside the live coordinate cluster, so it
+  // can never be mistaken for an unlocked decoration") assumed a player
+  // reads the screen zone-by-zone; in practice a player sees one village
+  // and any lit window reads as "this building is lit," full stop,
+  // regardless of which x-range drew it. Fixed by not drawing them at all --
+  // COTTAGE_WINDOWS_LIT below is the one on/off switch (kept, not deleted,
+  // so the "per-window brightness variation" design intent stays visible
+  // and trivially restorable if a FUTURE feature ever wants these dark
+  // silhouettes to earn their own light some other way).
+  if(COTTAGE_WINDOWS_LIT)(opts.windows||[]).forEach(win=>{ // each window carries its OWN brightness -- see section 8: some houses bright, some dim, never a uniform lit row
     g.globalAlpha=win.a; g.fillStyle='rgba(255,196,120,1)';
     g.fillRect(x+win.dx*w-2.4,y-h+win.dy*h-3,4.8,7); g.globalAlpha=1;
   });
@@ -8256,45 +8282,28 @@ function drawVillage(){
   drawDecorDeco();
   drawFountain();
   drawGlowkeeperStatue(); // village landmark layer -- absent unless owned+equipped, see its own comment
-  // village lights -- AMBIENT ONLY (category A, per E20 direct instruction):
-  // these are the pre-existing decorative window/lantern lights, driven
-  // purely by S.score (this round's own raw points), same as before E18
-  // ever existed. E22 fix: a real player report caught this still reading
-  // as "every building restored" at score ~39 -- the earlier E20 pass only
-  // dimmed the glow BLOOM behind each window, but drew the window/lantern
-  // DOT ITSELF at full alpha, same as a restored landmark's own dot. Since
-  // ambient's own thresholds (5/10/20/30/35) are all cleared within the
-  // first minute of most rounds, "every ambient dot at full brightness" is
-  // the NORMAL steady state of most play, not a rare edge case -- exactly
-  // the scattered-lighting illusion this whole system exists to prevent.
-  // AMBIENT_DIM now applies to the dot too (lowered from 0.55 to 0.35 for
-  // a genuinely subtle read), and the restoration pass below explicitly
-  // redraws its own dot at full brightness rather than trusting whatever
-  // this ambient pass already left behind it.
-  const AMBIENT_DIM=0.35;
-  LIGHTS.forEach((L,i)=>{
-    const a=S.lightAnim[i]; if(a<=0)return;
-    const flick=0.85+0.15*Math.sin(S.t*7+i*2.1);
-    ctx.globalAlpha=a*flick*AMBIENT_DIM;
-    const gr=L.lantern?27:32;
-    ctx.drawImage(glowSprite(GLOW_Y,gr),L.x-gr,L.y-gr,gr*2,gr*2);
-    ctx.globalAlpha=a*AMBIENT_DIM;
-    ctx.fillStyle=L.lantern?'#ffd987':'#ffca6e';
-    if(L.lantern){ ctx.beginPath(); ctx.arc(L.x,L.y,3.4,0,6.28); ctx.fill(); }
-    else ctx.fillRect(L.x-5,L.y-6,10,12);
-    ctx.globalAlpha=1;
-    // Depth Pass Part 1: a soft warm reflection pooled beneath each restored
-    // lantern -- visual only, reads S.lightAnim (already the source of truth
-    // for whether that light is lit) but writes nothing back, no new state
-    if(L.lantern){
-      ctx.globalAlpha=a*flick*0.32*AMBIENT_DIM;
-      const rg=ctx.createRadialGradient(L.x,L.y+14,0,L.x,L.y+14,15);
-      rg.addColorStop(0,'rgba(255,214,110,0.55)'); rg.addColorStop(1,'rgba(255,214,110,0)');
-      ctx.fillStyle=rg;
-      ctx.beginPath(); ctx.ellipse(L.x,L.y+14,15,4.5,0,0,6.28); ctx.fill();
-      ctx.globalAlpha=1;
-    }
-  });
+  // E25 (real player report, screenshotted THREE times across E20/E23/this
+  // pass): the "ambient, dimmed" compromise never actually worked -- even
+  // after E23 dimmed the window dot itself, direct live testing (this
+  // session, alpha values confirmed correct at 0.35 and again at 0.15 via
+  // a pixel-level spy) showed the glow BLOOM sprite behind the dot still
+  // reads as a clearly "lit window" to the eye, because it's a soft,
+  // spatially-large gradient, and a low alpha MULTIPLIER on an already
+  // bright sprite core still looks lit against a near-black backdrop.
+  // Direct, repeated, explicit instruction from here on: a locked landmark
+  // must show NOTHING, full stop -- not "dimmer," not "ambient," nothing.
+  // This is now provably the correct call structurally too, not just per
+  // instruction: every one of the 19 LIGHTS positions is already claimed
+  // by exactly one of the 8 LUMORA_LANDMARK_GROUPS (see the coverage
+  // sanity test), so there is no "ownerless ambient light" left to justify
+  // a separate always-on layer for -- every position IS a specific
+  // building's own light, and that building is either restored (drawn by
+  // the PERMANENT RESTORATION pass below, unchanged) or it is dark.
+  // S.lightAnim itself is intentionally left ticking in update() --
+  // nothing here reads it for rendering any more, but the delivery-spark
+  // flight-target picker further up in update() still reads it purely to
+  // vary which position an in-flight delivery particle visually aims at
+  // (cosmetic flourish, grants nothing, never draws anything on its own).
   // PERMANENT RESTORATION glow (category B) -- deterministic, one specific
   // physical location per milestone (LUMORA_LANDMARK_GROUPS), deliberately
   // brighter/warmer/with a ring accent so a restored landmark is
