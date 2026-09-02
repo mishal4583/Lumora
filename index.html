@@ -1437,28 +1437,21 @@ function migrateRangeTier(src,dst){
 // Aurora example (1.85->"~1.95"; this rule gives 2.00) -- a rounding-level
 // difference from an "approximately" figure, not a real conflict, so kept
 // for the uniform, easy-to-explain rule rather than a jar-specific fudge.
+// E26 Round 2 (Jar Progression Value Rebalance): every base/max stat below
+// (capacity/reach/magnetReach/duration/lightValue) redesigned so a new
+// jar's BASE already beats the previous jar's MAX on every one of those 5
+// stats (verified exhaustively -- see this phase's own report's Transition
+// Proof table). Unlock prices (price:) are explicitly UNCHANGED this phase.
 const JARS=[
-  {key:'simple',  name:'Simple Glass Jar', price:0,    capacity:5,  maxCapacity:13, reachBase:55,  reachMax:64,  magnetReachBase:130, magnetReachMax:154, durationBase:4.0, durationMax:5.5,  lightValueBase:0.65, lightValueMax:0.95, glass:'rgba(128,174,182,0.20)', glassStroke:'rgba(148,194,202,0.55)', lid:'#8a6a45', lidRim:'#6f5436', glow:GLOW_Y,     desc:'The jar found beneath the old workshop.'},
-  // E16 Shop Economy Rebalance: purchase price only (500->1500) -- capacity/
-  // reach/magnetReach/duration/lightValue and every upgrade-cost formula
-  // that reads them are UNCHANGED. See this phase's own report for the
-  // income-vs-price audit that motivated the new number.
-  {key:'lantern', name:'Firefly Lantern',  price:1500, capacity:6,  maxCapacity:16, reachBase:62,  reachMax:74,  magnetReachBase:145, magnetReachMax:175, durationBase:4.5, durationMax:6.5,  lightValueBase:0.75, lightValueMax:1.10, glass:'rgba(197,170,123,0.24)', glassStroke:'rgba(217,190,143,0.6)',  lid:'#4a4a52', lidRim:'#38383e', glow:'#fbb541',  desc:'Made for Glowkeepers who learned to carry the light farther.'},
-  // E16: purchase price only (900->3500).
-  {key:'moon',    name:'Moon Jar',        price:3500, capacity:7,  maxCapacity:19, reachBase:70,  reachMax:85,  magnetReachBase:165, magnetReachMax:200, durationBase:5.0, durationMax:7.5,  lightValueBase:0.85, lightValueMax:1.20, glass:'rgba(160,187,215,0.20)', glassStroke:'rgba(180,207,235,0.6)',  lid:'#8a8a9a', lidRim:'#6f6f7f', glow:'#fbf2d4',  desc:'Its glass holds a little moonlight of its own.'},
-  // E16: purchase price only (1500->7500).
-  {key:'crystal', name:'Crystal Lantern', price:7500, capacity:8,  maxCapacity:23, reachBase:80,  reachMax:98,  magnetReachBase:190, magnetReachMax:235, durationBase:5.5, durationMax:8.5,  lightValueBase:1.00, lightValueMax:1.40, glass:'rgba(131,212,216,0.22)', glassStroke:'rgba(151,232,236,0.6)',  lid:'#4a7a7a', lidRim:'#385c5c', glow:'#7cd8e8',  desc:'Cut facets scatter each spark into a dozen smaller ones.'},
-  // E16: purchase price only (2500->15000).
-  {key:'elder',   name:'Elder Vessel',    price:15000, capacity:9,  maxCapacity:30, reachBase:90,  reachMax:114, magnetReachBase:215, magnetReachMax:265, durationBase:6.0, durationMax:9.5,  lightValueBase:1.15, lightValueMax:1.60, glass:'rgba(128,172,119,0.20)', glassStroke:'rgba(148,192,139,0.55)', lid:'#4a6a3a', lidRim:'#385228', glow:'#a4e6bb',  desc:'Older than the workshop itself. Nobody remembers who made it.'},
-  // Aurora Endgame Jar pass: capacity/reach/magnetReach/duration/lightValue
-  // all raised to their new LOCKED ceilings (see the AskUserQuestion trail
-  // this pass -- capacity uses the same flat +1/tier mechanic every other
-  // jar uses, no jar-specific nonlinear steps). `aurora:true` flags the
-  // visual-identity/effects layer below (drawJar, catch/delivery FX,
-  // prestige state) -- cosmetic only, reads nowhere in gameplay math.
-  // E16: purchase price only (4000->30000) -- the genuine endgame economic
-  // goal this phase's own audit calls for; every stat/multiplier above is untouched.
-  {key:'aurora',  name:'Aurora Jar',      price:30000, capacity:12, maxCapacity:38, reachBase:110, reachMax:150, magnetReachBase:255, magnetReachMax:340, durationBase:7.0, durationMax:13.0, lightValueBase:1.40, lightValueMax:2.00, glass:'rgba(199,175,245,0.20)', glassStroke:'rgba(219,195,255,0.55)', lid:'#7a5a8a', lidRim:'#5c4268', glow:GLOW_Y, aurora:true, desc:'The last Glowkeeper never finished making this one. Perhaps they were waiting for someone.'}
+  {key:'simple',  name:'Simple Glass Jar', price:0,    capacity:4,  maxCapacity:7,  reachBase:45,  reachMax:55,  magnetReachBase:110, magnetReachMax:130, durationBase:3.5, durationMax:4.25, lightValueBase:0.55, lightValueMax:0.70, glass:'rgba(128,174,182,0.20)', glassStroke:'rgba(148,194,202,0.55)', lid:'#8a6a45', lidRim:'#6f5436', glow:GLOW_Y,     desc:'The jar found beneath the old workshop.'},
+  {key:'lantern', name:'Firefly Lantern',  price:1500, capacity:8,  maxCapacity:11, reachBase:60,  reachMax:70,  magnetReachBase:140, magnetReachMax:165, durationBase:4.5, durationMax:5.5,  lightValueBase:0.75, lightValueMax:0.95, glass:'rgba(197,170,123,0.24)', glassStroke:'rgba(217,190,143,0.6)',  lid:'#4a4a52', lidRim:'#38383e', glow:'#fbb541',  desc:'Made for Glowkeepers who learned to carry the light farther.'},
+  {key:'moon',    name:'Moon Jar',        price:3500, capacity:12, maxCapacity:15, reachBase:75,  reachMax:88,  magnetReachBase:175, magnetReachMax:205, durationBase:5.75,durationMax:7.0,  lightValueBase:1.00, lightValueMax:1.20, glass:'rgba(160,187,215,0.20)', glassStroke:'rgba(180,207,235,0.6)',  lid:'#8a8a9a', lidRim:'#6f6f7f', glow:'#fbf2d4',  desc:'Its glass holds a little moonlight of its own.'},
+  {key:'crystal', name:'Crystal Lantern', price:7500, capacity:16, maxCapacity:20, reachBase:95,  reachMax:110, magnetReachBase:215, magnetReachMax:250, durationBase:7.25,durationMax:8.5,  lightValueBase:1.25, lightValueMax:1.50, glass:'rgba(131,212,216,0.22)', glassStroke:'rgba(151,232,236,0.6)',  lid:'#4a7a7a', lidRim:'#385c5c', glow:'#7cd8e8',  desc:'Cut facets scatter each spark into a dozen smaller ones.'},
+  {key:'elder',   name:'Elder Vessel',    price:15000, capacity:21, maxCapacity:26, reachBase:118, reachMax:138, magnetReachBase:260, magnetReachMax:300, durationBase:8.75,durationMax:10.0, lightValueBase:1.55, lightValueMax:1.80, glass:'rgba(128,172,119,0.20)', glassStroke:'rgba(148,192,139,0.55)', lid:'#4a6a3a', lidRim:'#385228', glow:'#a4e6bb',  desc:'Older than the workshop itself. Nobody remembers who made it.'},
+  // Aurora Endgame Jar pass: `aurora:true` flags the visual-identity/
+  // effects layer below (drawJar, catch/delivery FX, prestige state) --
+  // cosmetic only, reads nowhere in gameplay math.
+  {key:'aurora',  name:'Aurora Jar',      price:30000, capacity:28, maxCapacity:36, reachBase:145, reachMax:175, magnetReachBase:315, magnetReachMax:370, durationBase:10.25,durationMax:13.0, lightValueBase:1.90, lightValueMax:2.30, glass:'rgba(199,175,245,0.20)', glassStroke:'rgba(219,195,255,0.55)', lid:'#7a5a8a', lidRim:'#5c4268', glow:GLOW_Y, aurora:true, desc:'The last Glowkeeper never finished making this one. Perhaps they were waiting for someone.'}
 ];
 // Lumora 2.0 Phase 10: Jar Identity. Audit finding (see this phase's own
 // report): every JARS column above -- price, capacity, reach, magnetReach,
@@ -1538,8 +1531,36 @@ function chainMilestoneReward(baseReward){ return Math.round(baseReward*jarIdent
 // its own permanent upgrade level = current capacity" (spec section 8).
 // Switching jars does not reset or share this progress.
 function jarCapTierOwned(jarKey){ return (upgrades.jarCapTiers&&upgrades.jarCapTiers[jarKey])||0; }
-function jarCurrentCapacity(jarObj){ return Math.min(jarObj.capacity+jarCapTierOwned(jarObj.key),jarObj.maxCapacity); }
-function jarCapMaxed(jarObj){ return jarCurrentCapacity(jarObj)>=jarObj.maxCapacity; }
+// E26 Round 2 (Jar Progression Value Rebalance): capacity is no longer a
+// flat +1-per-tier count -- the new target BASE->MAX spans (e.g. Simple
+// 4->7) are narrower than the number of existing purchase levels (8), so
+// several levels necessarily repeat the same integer capacity (see this
+// phase's own report -- priced as cheap "filler" levels rather than hidden
+// or faked). CAPACITY_LEVELS is the explicit, real per-level integer
+// capacity, index 0 = 0 tiers owned (= jarObj.capacity), last index =
+// CAP_TIER_COUNT[key] tiers owned (= jarObj.maxCapacity exactly).
+const CAP_TIER_COUNT={simple:8, lantern:10, moon:12, crystal:15, elder:21, aurora:26};
+const CAPACITY_LEVELS={
+  simple:[4,4,5,5,6,6,6,7,7],
+  lantern:[8,8,9,9,9,10,10,10,10,11,11],
+  moon:[12,12,13,13,13,13,14,14,14,14,15,15,15],
+  crystal:[16,16,17,17,17,17,18,18,18,18,19,19,19,19,20,20],
+  elder:[21,21,21,22,22,22,22,23,23,23,23,24,24,24,24,25,25,25,25,26,26,26],
+  aurora:[28,28,29,29,29,30,30,30,30,31,31,31,32,32,32,33,33,33,34,34,34,34,35,35,35,36,36]
+};
+// Clamped, not a bare index -- a corrupted/tampered/stale save's
+// jarCapTiers could exceed CAP_TIER_COUNT (the old Math.min(...,
+// maxCapacity) formula clamped this for free; a raw array index does not).
+function jarCurrentCapacity(jarObj){ const levels=CAPACITY_LEVELS[jarObj.key]; return levels[Math.min(jarCapTierOwned(jarObj.key),levels.length-1)]; }
+// E26 Round 2: maxed means "every tier bought", NOT "capacity value has
+// reached its ceiling" -- these used to be identical (flat +1/tier), but
+// now several jars' capacity VALUE reaches maxCapacity one or more tiers
+// before their real last tier (see CAPACITY_LEVELS' own trailing
+// duplicates). Basing "maxed" on the stat value instead of the tier count
+// would hide the real final (filler) tier(s) behind "MAX LEVEL" in the
+// shop UI, making them permanently unpurchasable -- a real bug, not a
+// cosmetic one.
+function jarCapMaxed(jarObj){ return jarCapTierOwned(jarObj.key)>=CAP_TIER_COUNT[jarObj.key]; }
 // Aurora Endgame Jar pass: per-jar upgrade-cost multiplier, applied AFTER
 // the existing global per-tier formulas (base cost -> tier scaling -> this
 // multiplier -> final price). LOCKED per direct instruction. Applies ONLY
@@ -1670,55 +1691,58 @@ function bandedTierCost(startPrice,tierIndex,totalTiers,endgameMult){
 // (jarObj.maxCapacity-jarObj.capacity, now much larger per E1's raised
 // ceilings below) and the new JAR_ENDGAME_MULTIPLIER now shape the curve
 // instead of the old tapering-compound ratio.
-// E26 Hand-Authored Price Table: replaces bandedTierCost()-driven pricing
-// for Capacity/Reach/MagnetReach/LightValue with explicit, hand-tuned
-// per-tier prices -- one array per jar per line, index 0 = level 1's
-// price, index length matches that line's real tier count exactly
-// (jarObj.maxCapacity-jarObj.capacity for capacity, jarStatTierCount() for
-// the three stats below). Magnet Duration is deliberately NOT in this
-// table -- it still uses bandedTierCost() (the E25-rebalanced formula)
-// since no hand-authored Duration prices were given this pass.
-// Aurora's magnetReach here is 25 entries, not the 26 originally given --
-// Aurora's Magnet Reach line has exactly 25 tiers in the real game
-// ((340-255)/3.4 = 25), confirmed with the user; the given 26th price
-// (19,500) was dropped rather than adding a real 26th tier/stat-range
-// change.
+// E26 Round 2 (Jar Progression Value Rebalance): capacity/reach/
+// magnetReach/lightValue prices completely redesigned around the new
+// (much narrower, for capacity) BASE->MAX stat spans:
+// - Capacity: breakthrough levels (capacity actually increases) keep a
+//   meaningful progressive price; "filler" levels (capacity repeats the
+//   previous level's integer -- unavoidable given the new narrow spans,
+//   see this phase's report) cost a substantially cheaper, but never
+//   trivial/free, amount -- price honestly reflects what's delivered,
+//   never a full-price purchase for zero gameplay benefit.
+// - Reach/Magnet Reach/Light Value: E26 round 1's prices had the WRONG
+//   relative order for this phase's price-priority rule (Range must be
+//   cheapest, Light most expensive) -- completely regenerated so, per
+//   jar, Range total < Capacity total < Magnet total < Light total.
+// Magnet Duration is deliberately NOT in this table -- it still uses
+// bandedTierCost() (the E25-rebalanced formula), per direct instruction
+// not to build a new Duration purchase system.
 const EXPLICIT_TIER_PRICES={
   simple:{
-    capacity:[100,100,125,125,125,150,150,150],
-    reach:[75,75,100,100,100,125,125,125,150,150,175,175,200,200,225,250,275,300,325,350,375,400,450,475,500,550,600,650,700,750,850,900],
-    magnetReach:[100,125,125,125,150,150,175,175,200,200,225,250,275,300,325,325,375,400,450,475,500,550,600,650],
-    lightValue:[125,125,125,150,150,175,175,175,200,225,225,250,275,300,325,350,400,425,450,500]
+    capacity:[20,100,25,125,25,25,150,25],
+    reach:[5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,10,10,10,10,10,10,15,15,15,15,15,20,20,20,20,20],
+    magnetReach:[5,5,5,5,5,10,10,15,20,20,25,30,35,40,45,50,55,60,65,70,75,80,90,95],
+    lightValue:[5,5,5,10,15,20,25,35,40,50,60,70,80,90,100,110,125,135,150,165]
   },
   lantern:{
-    capacity:[250,275,300,300,325,350,375,400,450,475],
-    reach:[200,225,225,250,275,275,300,325,350,375,400,450,500,550,550,600,700,750,800,850,950,1050,1100,1200,1300,1400,1500,1650,1750,1900,2100],
-    magnetReach:[275,300,325,350,375,400,425,450,475,500,550,600,650,750,800,850,950,1000,1100,1200,1300,1400,1550,1650,1800],
-    lightValue:[300,300,325,350,375,400,425,475,500,550,600,650,700,750,800,900,1000,1050,1150,1250]
+    capacity:[45,275,55,55,325,65,70,70,450,85],
+    reach:[5,5,5,5,5,5,5,5,10,10,10,15,15,20,20,20,25,25,30,35,35,40,40,45,50,50,55,60,60,65,70],
+    magnetReach:[5,5,5,10,20,25,30,40,50,60,70,80,90,105,115,130,145,160,175,190,205,220,240,255,275],
+    lightValue:[5,10,20,30,45,65,80,105,125,150,180,205,235,270,300,335,375,410,450,490]
   },
   moon:{
-    capacity:[500,550,600,600,650,700,750,800,900,950,1000,1100],
-    reach:[400,425,475,500,550,550,600,650,700,750,800,900,1000,1050,1150,1200,1350,1500,1600,1700,1900,2100,2200,2400,2600,2800,3000,3300,3500,3800,4100,4400],
-    magnetReach:[550,600,650,700,750,800,850,900,950,1050,1150,1200,1350,1450,1550,1700,1850,2000,2200,2400,2600,2800,3100,3300,3600],
-    lightValue:[600,600,650,700,750,800,850,950,1000,1100,1200,1250,1400,1500,1650,1750,1950,2100,2300,2500]
+    capacity:[90,550,110,110,115,700,135,145,160,950,180,200],
+    reach:[5,5,5,5,5,10,10,15,20,20,25,30,35,40,40,45,50,60,65,70,75,80,85,95,100,110,115,120,130,135,145,155],
+    magnetReach:[5,10,15,30,40,55,75,90,110,135,155,180,210,235,265,295,330,365,400,435,470,510,550,590,635],
+    lightValue:[5,25,45,75,105,145,190,240,290,350,410,475,545,615,695,775,860,945,1035,1130]
   },
   crystal:{
-    capacity:[900,950,1050,1100,1200,1300,1350,1450,1600,1700,1850,2000,2200,2400,2600],
-    reach:[700,800,850,900,950,1000,1100,1150,1250,1350,1500,1600,1750,1900,2100,2200,2400,2700,2900,3100,3400,3700,4000,4300,4700,5000,5500,5750,6250,7000,7500,8000],
-    magnetReach:[1000,1050,1150,1250,1300,1400,1500,1600,1750,1900,2000,2200,2400,2600,2800,3000,3400,3700,4000,4300,4700,5000,5500,6000,6500],
-    lightValue:[1050,1100,1200,1300,1350,1450,1550,1700,1800,1950,2100,2300,2500,2700,2900,3200,3500,3800,4100,4500]
+    capacity:[160,950,190,200,215,1300,245,260,290,1700,335,360,395,2400,470],
+    reach:[5,5,10,10,20,25,30,40,50,60,70,80,90,105,115,130,145,160,175,190,205,225,240,260,275,295,315,335,355,380,400,420],
+    magnetReach:[5,25,45,75,115,155,200,250,305,370,430,500,575,650,735,815,905,1000,1095,1195,1300,1405,1515,1630,1745],
+    lightValue:[20,60,125,200,295,400,520,655,800,960,1125,1305,1495,1695,1910,2130,2360,2600,2850,3110]
   },
   elder:{
-    capacity:[1500,1600,1750,1850,2000,2100,2300,2400,2600,2800,3100,3300,3700,4000,4300,4600,5000,5500,6000,6500,7000],
-    reach:[1200,1300,1400,1500,1600,1700,1800,1950,2100,2300,2500,2600,2900,3200,3400,3700,4100,4400,4800,5250,5750,6250,6750,7250,7750,8500,9000,9750,10500,11500,12500,13500],
-    magnetReach:[1650,1800,1900,2000,2200,2300,2500,2700,2900,3100,3400,3600,4000,4400,4700,5000,5500,6000,6500,7000,7750,8500,9250,9750,10500],
-    lightValue:[1700,1850,2000,2100,2300,2400,2600,2800,3000,3300,3500,3800,4200,4600,4900,5250,5750,6500,7000]
+    capacity:[270,290,1750,335,360,380,2300,430,470,505,3100,595,665,720,4300,830,900,990,6000,1170,1260],
+    reach:[5,10,20,35,50,70,95,115,140,170,200,230,265,300,340,380,420,460,505,555,600,650,700,755,810,865,920,980,1040,1100,1165,1230],
+    magnetReach:[20,70,140,225,330,450,585,735,895,1070,1260,1460,1675,1900,2135,2385,2645,2915,3195,3485,3785,4095,4420,4750,5090],
+    lightValue:[65,205,415,675,985,1340,1745,2185,2670,3195,3760,4360,4995,5665,6370,7105,7880,8685,9520]
   },
   aurora:{
-    capacity:[2500,2700,2900,3100,3300,3600,3800,4100,4400,4800,5000,5500,6000,6750,7000,7750,8500,9250,10000,11000,12000,13000,14000,15000,16000,17500],
-    reach:[2000,2200,2300,2500,2600,2800,3000,3200,3500,3800,4100,4400,4900,5250,5750,6000,6750,7500,8000,8500,9500,10500,11000,12000,13000,14000,15000,16500,17500,19000,20500],
-    magnetReach:[2800,3000,3200,3400,3600,3900,4200,4500,4800,5250,5750,6000,6750,7250,7750,8500,9250,10000,11000,12000,13000,14000,15500,16500,18000],
-    lightValue:[2900,3100,3300,3600,3800,4100,4400,4700,5000,5500,6000,6250,7000,7500,8250,8750,9750,10500,11500,12500,13500]
+    capacity:[450,2700,520,560,3300,650,685,740,4400,865,900,5500,1080,1215,7000,1395,1530,9250,1800,1980,2160,13000,2520,2700,16000,3150],
+    reach:[10,35,75,120,180,240,315,395,480,575,680,785,900,1020,1150,1285,1420,1565,1720,1875,2035,2205,2375,2555,2740,2930,3120,3320,3525,3735,3950],
+    magnetReach:[65,215,430,705,1030,1400,1820,2285,2795,3340,3930,4555,5220,5920,6655,7430,8235,9075,9950,10855,11795,12765,13765,14800,15860],
+    lightValue:[155,495,990,1610,2355,3210,4170,5235,6395,7650,8995,10430,11950,13555,15240,17010,18855,20780,22780,24855,27005]
   }
 };
 // E25 Workshop Economy Rebalance V2's bandedTierCost()-based formula is
@@ -1752,14 +1776,18 @@ function legacyCapacityBonus(tier){ let s=0; for(let i=0;i<Math.min(tier,LEGACY_
 // base, "your workshop investment followed you to the jar you were
 // actually using," not a blanket unlock across the whole collection. The
 // raw bonus converts 1:1 into jarCapTiers steps (that field is just a
-// +1-per-purchase count, no per-tier step table of its own), capped at
-// that jar's own ceiling so an old high jarTier can't overshoot a low-max jar.
+// tier-owned COUNT, no per-tier step table of its own), capped at that
+// jar's own real tier count so an old high jarTier can't overshoot it.
+// E26 Round 2: the cap used to be jar.maxCapacity-jar.capacity, which was
+// exactly the real tier count back when capacity was flat +1/tier -- now
+// that capacity's own span can be narrower than its tier count (see
+// CAPACITY_LEVELS), the real bound is CAP_TIER_COUNT, not the raw stat span.
 function migrateJarTier(src,dstUpgrades){
   if(typeof src.jarTier!=='number'||src.jarTier<=0)return;
   const bonus=legacyCapacityBonus(src.jarTier);
   const jar=JARS.find(j=>j.key===(dstUpgrades.equippedJar||'simple'));
   if(!jar)return;
-  const seeded=Math.min(jar.maxCapacity-jar.capacity,bonus);
+  const seeded=Math.min(CAP_TIER_COUNT[jar.key],bonus);
   if(seeded>(dstUpgrades.jarCapTiers[jar.key]||0))dstUpgrades.jarCapTiers[jar.key]=seeded;
 }
 // Phase 1 economy pass: generic per-jar progression for Jar Reach, Magnet
@@ -1802,11 +1830,62 @@ function migrateJarTier(src,dstUpgrades){
 // smaller steps land at: reach ~31-32 levels, magnetReach ~24-25,
 // duration ~27-28, lightValue ~19-20 per jar, all within E1's target
 // ranges (Section 2/4/5/6 of the E2 spec).
+// E26 Round 2 (Jar Progression Value Rebalance): reach/magnetReach/
+// lightValue below are now MIGRATION-ONLY (frozen at their pre-this-phase
+// values) -- live gameplay no longer reads a flat per-tier step for these
+// three, it reads STAT_LEVELS' own explicit per-level curve instead (see
+// jarCurrentStat()/jarStatTierCount() below). Only duration's entry is
+// still live (updated to the new base/max span below, same flat-step
+// formula/purchase mechanism as before -- no separate Duration purchase
+// system was built, per direct instruction).
 const PER_JAR_STAT_STEP={
   reach:       {simple:0.29,  lantern:0.39,  moon:0.48,  crystal:0.58,  elder:0.77,  aurora:1.3},
   magnetReach: {simple:1,     lantern:1.2,   moon:1.4,   crystal:1.8,   elder:2,     aurora:3.4},
-  duration:    {simple:0.056, lantern:0.074, moon:0.093, crystal:0.111, elder:0.13,  aurora:0.222},
+  duration:    {simple:0.02778, lantern:0.03572, moon:0.0463, crystal:0.04465, elder:0.0463, aurora:0.09822},
   lightValue:  {simple:0.015, lantern:0.018, moon:0.018, crystal:0.021, elder:0.024, aurora:0.03}
+};
+// E26 Round 2: real per-level tier counts for reach/magnetReach/lightValue,
+// exactly preserved from before this phase (no levels added or removed) --
+// used by jarStatTierCount() below instead of the old ceil((max-base)/step)
+// formula, since these 3 stats no longer have a single flat step (their
+// per-level value now comes from STAT_LEVELS' own curve, of exactly this
+// many entries).
+const JAR_STAT_TIER_COUNT={
+  reach:{simple:32, lantern:31, moon:32, crystal:32, elder:32, aurora:31},
+  magnetReach:{simple:24, lantern:25, moon:25, crystal:25, elder:25, aurora:25},
+  lightValue:{simple:20, lantern:20, moon:20, crystal:20, elder:19, aurora:21}
+};
+// E26 Round 2: explicit per-level stat curve for reach/magnetReach/
+// lightValue -- index 0 = 0 tiers owned (equals jarObj's own *Base exactly),
+// last index = JAR_STAT_TIER_COUNT tiers owned (equals jarObj's own *Max
+// exactly). Mildly accelerating (small early gains, larger late gains, per
+// direct instruction) rather than the old flat-step model, since the old
+// model gave every level an IDENTICAL increment regardless of position.
+const STAT_LEVELS={
+  reach:{
+    simple:[45,45.186,45.412,45.657,45.915,46.183,46.459,46.742,47.031,47.325,47.625,47.929,48.237,48.549,48.865,49.184,49.506,49.832,50.16,50.491,50.825,51.161,51.499,51.84,52.183,52.529,52.876,53.225,53.576,53.93,54.285,54.641,55],
+    lantern:[60,60.193,60.428,60.682,60.949,61.227,61.513,61.806,62.106,62.412,62.722,63.038,63.357,63.681,64.008,64.339,64.674,65.011,65.352,65.695,66.041,66.39,66.741,67.094,67.45,67.808,68.169,68.531,68.895,69.262,69.63,70],
+    moon:[75,75.242,75.536,75.854,76.19,76.538,76.896,77.264,77.64,78.023,78.412,78.807,79.208,79.614,80.024,80.439,80.858,81.281,81.708,82.138,82.572,83.009,83.449,83.892,84.338,84.787,85.239,85.693,86.149,86.609,87.07,87.534,88],
+    crystal:[95,95.279,95.619,95.986,96.373,96.774,97.188,97.612,98.046,98.488,98.937,99.393,99.855,100.324,100.797,101.276,101.759,102.247,102.74,103.236,103.737,104.241,104.749,105.26,105.775,106.293,106.814,107.338,107.865,108.394,108.927,109.462,110],
+    elder:[118,118.372,118.825,119.315,119.83,120.366,120.917,121.483,122.061,122.65,123.249,123.857,124.474,125.098,125.73,126.368,127.013,127.663,128.32,128.982,129.649,130.321,130.999,131.68,132.366,133.057,133.752,134.45,135.153,135.859,136.569,137.283,138],
+    aurora:[145,145.578,146.283,147.045,147.847,148.68,149.539,150.419,151.318,152.235,153.167,154.113,155.072,156.043,157.025,158.018,159.021,160.034,161.055,162.085,163.123,164.169,165.223,166.283,167.351,168.425,169.506,170.593,171.686,172.785,173.89,175]
+  },
+  magnetReach:{
+    simple:[110,110.517,111.148,111.83,112.548,113.293,114.061,114.849,115.654,116.474,117.308,118.154,119.013,119.881,120.761,121.649,122.547,123.453,124.366,125.288,126.217,127.153,128.096,129.045,130],
+    lantern:[140,140.617,141.369,142.183,143.039,143.928,144.844,145.783,146.743,147.721,148.716,149.725,150.749,151.785,152.834,153.894,154.964,156.044,157.135,158.234,159.342,160.458,161.582,162.714,163.853,165],
+    moon:[175,175.74,176.643,177.619,178.646,179.713,180.813,181.94,183.092,184.266,185.459,186.671,187.899,189.142,190.401,191.672,192.957,194.253,195.561,196.88,198.21,199.549,200.899,202.257,203.624,205],
+    crystal:[215,215.864,216.917,218.056,219.254,220.499,221.781,223.097,224.44,225.81,227.202,228.616,230.049,231.5,232.967,234.451,235.95,237.462,238.988,240.527,242.078,243.641,245.215,246.8,248.395,250],
+    elder:[260,260.987,262.191,263.492,264.862,266.284,267.75,269.253,270.789,272.354,273.945,275.561,277.198,278.857,280.534,282.23,283.942,285.671,287.415,289.174,290.947,292.733,294.531,296.343,298.166,300],
+    aurora:[315,316.357,318.012,319.802,321.685,323.641,325.656,327.723,329.835,331.987,334.175,336.396,338.648,340.928,343.234,345.566,347.921,350.298,352.696,355.114,357.552,360.007,362.481,364.971,367.478,370]
+  },
+  lightValue:{
+    simple:[0.55,0.5548,0.5606,0.5669,0.5736,0.5805,0.5876,0.5949,0.6023,0.6099,0.6176,0.6254,0.6334,0.6414,0.6495,0.6577,0.666,0.6744,0.6829,0.6914,0.7],
+    lantern:[0.75,0.7564,0.7642,0.7726,0.7814,0.7906,0.8001,0.8098,0.8197,0.8298,0.8401,0.8506,0.8611,0.8719,0.8827,0.8937,0.9047,0.9159,0.9272,0.9385,0.95],
+    moon:[1,1.0064,1.0142,1.0226,1.0314,1.0406,1.0501,1.0598,1.0697,1.0798,1.0901,1.1006,1.1111,1.1219,1.1327,1.1437,1.1547,1.1659,1.1772,1.1885,1.2],
+    crystal:[1.25,1.258,1.2677,1.2782,1.2893,1.3008,1.3126,1.3248,1.3372,1.3498,1.3627,1.3757,1.3889,1.4023,1.4159,1.4296,1.4434,1.4574,1.4715,1.4857,1.5],
+    elder:[1.55,1.5585,1.5688,1.5799,1.5917,1.6039,1.6164,1.6293,1.6425,1.6559,1.6695,1.6833,1.6974,1.7116,1.726,1.7405,1.7552,1.77,1.7849,1.8],
+    aurora:[1.9,1.9121,1.9268,1.9427,1.9594,1.9768,1.9947,2.0131,2.0318,2.051,2.0704,2.0902,2.1102,2.1304,2.1509,2.1717,2.1926,2.2137,2.235,2.2565,2.2782,2.3]
+  }
 };
 // Migration only: the frozen shape of the OLD flat per-stat step (one
 // number shared by every jar, pre-E2) -- kept ONLY so migrateEconomyV2()
@@ -1817,10 +1896,27 @@ const PER_JAR_STAT_STEP={
 // LEGACY_CAPACITY_STEPS already established.
 const OLD_PER_JAR_STAT_STEP={reach:3, magnetReach:10, duration:0.5, lightValue:0.05};
 // Migration only: the frozen OLD ceiling for lightValue (the one per-jar
-// stat whose ceiling actually changed -- reach/magnetReach/duration keep
-// their exact old ceiling today, so no ceiling-side migration is needed
-// for them at all). Keyed by jar, since each jar's old ceiling differed.
+// stat whose ceiling actually changed -- reach/magnetReach/duration kept
+// their exact old ceiling UNTIL E26 Round 2, so no ceiling-side migration
+// was needed for them before now). Keyed by jar, since each jar's old
+// ceiling differed. Superseded by PRE_E26R2_STAT_RANGE below for anything
+// post-Round-2 -- kept only because migrateEconomyV2() still references it
+// for saves reconstructed before this phase ever ran.
 const OLD_LIGHT_VALUE_MAX={simple:0.80, lantern:0.95, moon:1.05, crystal:1.25, elder:1.45, aurora:1.85};
+// E26 Round 2 (Jar Progression Value Rebalance): migration only. reach/
+// magnetReach/duration/lightValue's base AND max all changed for the first
+// time since E2 -- migrateEconomyV2()'s old "ceiling never changed, so the
+// LIVE jarStatBase()/jarStatMax() already equal the old ones" assumption
+// (see that function's own comment) no longer holds for any of the four.
+// Frozen here so an ancient (pre-E2) save can still be reconstructed
+// against the ceiling that was actually true for it, independent of
+// whatever the live base/max become in a later phase.
+const PRE_E26R2_STAT_RANGE={
+  reach:{simple:{base:55,max:64},lantern:{base:62,max:74},moon:{base:70,max:85},crystal:{base:80,max:98},elder:{base:90,max:114},aurora:{base:110,max:150}},
+  magnetReach:{simple:{base:130,max:154},lantern:{base:145,max:175},moon:{base:165,max:200},crystal:{base:190,max:235},elder:{base:215,max:265},aurora:{base:255,max:340}},
+  duration:{simple:{base:4.0,max:5.5},lantern:{base:4.5,max:6.5},moon:{base:5.0,max:7.5},crystal:{base:5.5,max:8.5},elder:{base:6.0,max:9.5},aurora:{base:7.0,max:13.0}},
+  lightValue:{simple:{base:0.65,max:0.80},lantern:{base:0.75,max:0.95},moon:{base:0.85,max:1.05},crystal:{base:1.00,max:1.25},elder:{base:1.15,max:1.45},aurora:{base:1.40,max:1.85}}
+};
 // Migration only: the frozen OLD Coin Value steps (3 flat +10pp entries) --
 // kept ONLY so migrateEconomyV2() can reconstruct the exact bonus an
 // existing player's old lightTier count actually produced, then find the
@@ -1845,8 +1941,31 @@ function jarStatTiersField(statKey){ return statKey+'Tiers'; }
 function jarStatTierOwned(statKey,jarKey){ const t=upgrades[jarStatTiersField(statKey)]; return (t&&t[jarKey])||0; }
 // tier count this jar's own base->max range actually supports for this
 // stat — NOT assumed uniform across jars, now genuinely different per jar
-function jarStatTierCount(statKey,jarObj){ return Math.ceil((jarStatMax(statKey,jarObj)-jarStatBase(statKey,jarObj))/PER_JAR_STAT_STEP[statKey][jarObj.key]); }
-function jarCurrentStat(statKey,jarObj){ return Math.min(jarStatBase(statKey,jarObj)+jarStatTierOwned(statKey,jarObj.key)*PER_JAR_STAT_STEP[statKey][jarObj.key], jarStatMax(statKey,jarObj)); }
+// E26 Round 2: duration stays on the old ceil((max-base)/step) formula
+// (no hand-authored Duration table exists, per direct instruction); reach/
+// magnetReach/lightValue now read their real, preserved tier count
+// straight from JAR_STAT_TIER_COUNT instead of deriving it from a step.
+function jarStatTierCount(statKey,jarObj){
+  if(statKey==='duration')return Math.ceil((jarStatMax(statKey,jarObj)-jarStatBase(statKey,jarObj))/PER_JAR_STAT_STEP[statKey][jarObj.key]);
+  return JAR_STAT_TIER_COUNT[statKey][jarObj.key];
+}
+// E26 Round 2: duration stays flat-step (base+tierOwned*step, capped at
+// max); reach/magnetReach/lightValue now read their real per-level value
+// straight from STAT_LEVELS' own explicit curve.
+function jarCurrentStat(statKey,jarObj){
+  if(statKey==='duration')return Math.min(jarStatBase(statKey,jarObj)+jarStatTierOwned(statKey,jarObj.key)*PER_JAR_STAT_STEP[statKey][jarObj.key], jarStatMax(statKey,jarObj));
+  // Clamped, not a bare index -- see jarCurrentCapacity()'s own comment on why.
+  const levels=STAT_LEVELS[statKey][jarObj.key];
+  return levels[Math.min(jarStatTierOwned(statKey,jarObj.key),levels.length-1)];
+}
+// E26 Round 2: the "Next" value the shop UI shows -- duration keeps the
+// flat-step lookahead it always had; reach/magnetReach/lightValue peek one
+// index ahead in STAT_LEVELS (clamped at the final index, i.e. max).
+function jarNextStatValue(statKey,jarObj){
+  if(statKey==='duration')return Math.min(jarCurrentStat(statKey,jarObj)+PER_JAR_STAT_STEP[statKey][jarObj.key], jarStatMax(statKey,jarObj));
+  const levels=STAT_LEVELS[statKey][jarObj.key];
+  return levels[Math.min(jarStatTierOwned(statKey,jarObj.key)+1, levels.length-1)];
+}
 function jarStatMaxed(statKey,jarObj){ return jarCurrentStat(statKey,jarObj)>=jarStatMax(statKey,jarObj); }
 // Aurora shop-presentation pass: {base, current, max} for any one of the
 // five per-jar stats (capacity included, via its own base/current/max
@@ -1941,17 +2060,32 @@ function migrateEconomyV2(){
   // value, find smallest new tier that meets or exceeds it" principle,
   // applied independently per jar (a player's progress on one jar was
   // always independent of every other, and stays that way here).
+  // E26 Round 2: oldBase/oldMax now come from the frozen PRE_E26R2_
+  // STAT_RANGE, not the live jarStatBase()/jarStatMax() -- those changed
+  // for the first time this phase, so the old "ceiling never changed"
+  // shortcut no longer holds for any of the four stats. reach/magnetReach/
+  // lightValue no longer have a flat step to divide by, so their new tier
+  // is found by searching STAT_LEVELS' own (monotonic) curve instead;
+  // duration keeps the old flat-step division since it has no hand-
+  // authored table.
   ['reach','magnetReach','duration','lightValue'].forEach(statKey=>{
     const oldStep=OLD_PER_JAR_STAT_STEP[statKey];
     JARS.forEach(jar=>{
       const tiersObj=upgrades[jarStatTiersField(statKey)];
       const oldTierOwned=(tiersObj&&tiersObj[jar.key])||0;
       if(oldTierOwned<=0)return;
-      const oldMax=statKey==='lightValue'?OLD_LIGHT_VALUE_MAX[jar.key]:jarStatMax(statKey,jar); // reach/magnetReach/duration ceilings never changed, so jarStatMax() (the LIVE, post-E2 value) already equals the old one for those three
-      const oldVal=Math.min(jarStatBase(statKey,jar)+oldTierOwned*oldStep,oldMax);
-      const newStep=PER_JAR_STAT_STEP[statKey][jar.key];
+      const oldRange=PRE_E26R2_STAT_RANGE[statKey][jar.key];
+      const oldVal=Math.min(oldRange.base+oldTierOwned*oldStep,oldRange.max);
       const newTierCount=jarStatTierCount(statKey,jar);
-      let newTierOwned=Math.ceil((oldVal-jarStatBase(statKey,jar))/newStep-1e-9);
+      let newTierOwned;
+      if(statKey==='duration'){
+        const newStep=PER_JAR_STAT_STEP[statKey][jar.key];
+        newTierOwned=Math.ceil((oldVal-jarStatBase(statKey,jar))/newStep-1e-9);
+      } else {
+        const levels=STAT_LEVELS[statKey][jar.key];
+        newTierOwned=levels.findIndex(v=>v>=oldVal-1e-9);
+        if(newTierOwned===-1)newTierOwned=newTierCount;
+      }
       newTierOwned=Math.max(0,Math.min(newTierOwned,newTierCount));
       if(newTierOwned>oldTierOwned)tiersObj[jar.key]=newTierOwned;
     });
@@ -11793,7 +11927,11 @@ function drawUpgradeCard(key,rect){
 // the tab doesn't look like a different feature.
 function drawJarCapacityCard(rect){
   const jar=currentJar(), cur=jarCurrentCapacity(jar), maxed=jarCapMaxed(jar);
-  const totalSteps=jar.maxCapacity-jar.capacity, owned=jarCapTierOwned(jar.key);
+  // E26 Round 2: totalSteps is now CAP_TIER_COUNT, not maxCapacity-capacity
+  // -- capacity's own span can be narrower than its real tier count now
+  // (several levels share the same integer, see CAPACITY_LEVELS), so the
+  // old "span == tier count" shortcut is no longer true.
+  const totalSteps=CAP_TIER_COUNT[jar.key], owned=jarCapTierOwned(jar.key);
   lumGlassPanel(rect.x,rect.y,rect.w,rect.h,18);
   const pad=18, tx=rect.x+pad;
   // Container Size pass: font sizes bumped a notch to match the bigger card.
@@ -11807,7 +11945,11 @@ function drawJarCapacityCard(rect){
     const nx=tx+104;
     lumEyebrow('Next',nx,descEnd+20,'left',12);
     ctx.fillStyle=WS_GOLD; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
-    ctx.fillText((cur+1)+'',nx,descEnd+48);
+    // E26 Round 2: the real next level's capacity, NOT cur+1 -- several
+    // "filler" levels repeat the same integer as the current one (cheaply
+    // priced, see EXPLICIT_TIER_PRICES' own comment), so cur+1 would
+    // display a capacity gain the purchase doesn't actually deliver.
+    ctx.fillText(CAPACITY_LEVELS[jar.key][owned+1]+'',nx,descEnd+48);
   }
   const mx=tx+(maxed?104:198);
   lumEyebrow('Max',mx,descEnd+20,'left',12);
@@ -11865,7 +12007,9 @@ function drawJarStatCard(statKey,label,desc,rect,fmt,accent){
     const nx=tx+104;
     lumEyebrow('Next',nx,descEnd+20,'left',12);
     ctx.fillStyle=WS_GOLD; ctx.font='500 22px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
-    ctx.fillText(fmt(Math.min(cur+PER_JAR_STAT_STEP[statKey][jar.key],maxVal)),nx,descEnd+48);
+    // E26 Round 2: jarNextStatValue() replaces the flat cur+step calc --
+    // reach/magnetReach/lightValue's per-level gain is no longer flat.
+    ctx.fillText(fmt(jarNextStatValue(statKey,jar)),nx,descEnd+48);
   }
   const mx=tx+(maxed?104:198);
   lumEyebrow('Max',mx,descEnd+20,'left',12);
