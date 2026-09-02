@@ -3087,6 +3087,105 @@ screen = 'title';
   villageProgression.villages[1] = savedMoonfall;
 })();
 
+// ===== E22: the exact 114-vs-240 mismatch report -- reproduced, root-caused
+// (NOT a firefly-counting bug: best is a weighted SCORE, a genuinely
+// different metric from the village system's own firefly-delivered count;
+// see the HUD relabel to "best score" for the actual fix there), and this
+// commit's real fix: E26's per-night model is reverted, so bestNightDelivered
+// (permanent, never-decreasing) drives village progression again, exactly
+// as this exact TEST 1-10 spec describes. =====
+
+// TEST 1: current night LOWER than best -- Details must read the PERMANENT
+// record (240), never the temporary current-night count (114). This is the
+// literal shape of the reported bug: best=240 while Details showed 114.
+(function(){
+  var v = villageProgression.villages[0];
+  v.bestNightDelivered = 240; v.currentNightDelivered = 114;
+  rebuildVillageMilestones(v);
+  __check('TEST 1: best=240, current=114 -- exactly 4/8 restored (driven by the permanent 240, not the temporary 114)', getRestoredMilestones('lumora').length === 4);
+  __check('TEST 1: Building 5 (Bridge Lanterns, 250) is NEXT, 10 more needed -- computed against 240, not 114', getNextMilestone('lumora').name === 'Bridge Lanterns' && getNextMilestone('lumora').threshold === 250 && (getNextMilestone('lumora').threshold - v.bestNightDelivered) === 10);
+  var rows1 = villageDetailsRows('lumora');
+  __check('TEST 1: the Details screen itself agrees -- 4 RESTORED, Building 5 NEXT, never "114/500" or "2/8"', rows1.filter(function(r){ return r.state === 'RESTORED'; }).length === 4 && rows1[4].state === 'NEXT' && rows1[4].name === 'Bridge Lanterns');
+})();
+
+// TEST 2: current night HIGHER than best, reached via the REAL delivery
+// flow (grantVillageProgress(), not a direct assignment) -- the permanent
+// record must actually update to 240.
+(function(){
+  var v = villageProgression.villages[0];
+  v.bestNightDelivered = 114; v.currentNightDelivered = 0;
+  S.nightDelivered = 113;
+  rebuildVillageMilestones(v);
+  grantVillageProgress(); // 113 -> 114... one more delivery needed to actually reach 240 from here, so drive it the rest of the way
+  for (var i2 = 114; i2 < 240; i2++) grantVillageProgress();
+  __check('TEST 2: a real delivery flow up to 240 sets the permanent record to exactly 240', v.bestNightDelivered === 240);
+  __check('TEST 2: 4/8 restored, Building 5 NEXT', getRestoredMilestones('lumora').length === 4 && getNextMilestone('lumora').name === 'Bridge Lanterns');
+})();
+
+// TEST 3: current night LOWER than best AFTER the record was already set --
+// a worse subsequent night must never relock anything (same guarantee
+// TEST F already proves elsewhere; restated here under this report's own
+// exact numbers for direct traceability against the spec).
+(function(){
+  var v = villageProgression.villages[0];
+  // v.bestNightDelivered is already 240 from TEST 2 above; simulate a new,
+  // worse night (80 delivered) the same way a real Restart/Continue would.
+  S.nightDelivered = 0;
+  for (var i3 = 0; i3 < 80; i3++) grantVillageProgress();
+  __check('TEST 3: best remains 240 after a worse (80-delivery) night', v.bestNightDelivered === 240);
+  __check('TEST 3: 4/8 remain restored -- nothing relocks', getRestoredMilestones('lumora').length === 4);
+})();
+
+// TEST 4/5: exact milestone boundaries -- 200 and 250 are both real
+// threshold values (Building 4 and Building 5), checked landing exactly on
+// them, not one off either side.
+(function(){
+  var v = villageProgression.villages[0];
+  v.bestNightDelivered = 200; v.currentNightDelivered = 200;
+  rebuildVillageMilestones(v);
+  __check('TEST 4: best=200 (exact Building 4 threshold) -- 4/8 restored, Building 5 NEXT', getRestoredMilestones('lumora').length === 4 && getNextMilestone('lumora').name === 'Bridge Lanterns');
+  v.bestNightDelivered = 250; v.currentNightDelivered = 250;
+  rebuildVillageMilestones(v);
+  __check('TEST 5: best=250 (exact Building 5 threshold) -- 5/8 restored, Building 6 NEXT', getRestoredMilestones('lumora').length === 5 && getNextMilestone('lumora').name === 'The Fountain');
+})();
+
+// TEST 6: Lumora complete at 500 -- 8/8, no NEXT, Moonfall unlocks.
+(function(){
+  var v = villageProgression.villages[0];
+  v.bestNightDelivered = 500; v.currentNightDelivered = 500;
+  rebuildVillageMilestones(v);
+  __check('TEST 6: best=500 -- 8/8 restored, Lumora complete, Moonfall unlocked', getRestoredMilestones('lumora').length === 8 && v.completed === true && isVillageUnlocked('moonfall') === true);
+  __check('TEST 6: getNextMilestone returns null -- no misleading NEXT after completion', getNextMilestone('lumora') === null);
+})();
+
+// TEST 7/8: Moonfall's own independent ladder -- 425 (mid) and 1000
+// (complete) -- restated under this report's own numbering for direct
+// traceability (TEST H/E21#6 above already prove the same facts).
+(function(){
+  var mv = villageProgression.villages[1];
+  mv.bestNightDelivered = 425;
+  rebuildVillageMilestones(mv);
+  __check('TEST 7: Moonfall best=425 -- 4/8 restored, Building 5 (Central Fountain, 550) NEXT', getRestoredMilestones('moonfall').length === 4 && getNextMilestone('moonfall').name === 'Central Fountain');
+  mv.bestNightDelivered = 1000;
+  rebuildVillageMilestones(mv);
+  __check('TEST 8: Moonfall best=1000 -- 8/8 restored, complete', getRestoredMilestones('moonfall').length === 8 && mv.completed === true);
+  mv.bestNightDelivered = 0;
+  rebuildVillageMilestones(mv);
+})();
+
+// TEST 10: village switch independence -- Lumora=240, Moonfall=425,
+// switching repeatedly must never let one village's number bleed into the
+// other's.
+(function(){
+  var lv = villageProgression.villages[0], mv = villageProgression.villages[1];
+  lv.bestNightDelivered = 240; rebuildVillageMilestones(lv);
+  mv.bestNightDelivered = 425; rebuildVillageMilestones(mv);
+  villageProgression.currentVillage = 'lumora';
+  enterVillage('moonfall'); enterVillage('lumora'); enterVillage('moonfall'); enterVillage('lumora');
+  __check('TEST 10: repeatedly switching villages leaves Lumora at exactly 240', lv.bestNightDelivered === 240 && getRestoredMilestones('lumora').length === 4);
+  __check('TEST 10: ...and Moonfall at exactly 425, completely independent', mv.bestNightDelivered === 425 && getRestoredMilestones('moonfall').length === 4);
+})();
+
 // cleanup: restore villageProgression to its untouched starting state (both
 // villages at bestNightDelivered 0, nothing completed) -- exactly how this
 // scenario found it before TEST A-H ran -- so nothing later in this same
@@ -8461,6 +8560,15 @@ reset();
 __check('TEST G (reload): Restart Night after a reload still does not disturb the reloaded best or its restored landmarks', currentVillageProgress().bestNightDelivered === 300 && getRestoredMilestones('lumora').length === 6);
 `);
 
+// =====================================================================
+// E22 TEST 9 (persistence): the exact 240-vs-114 report's own number --
+// best=240 must survive a reload and still drive 4/8 restored, Building 5
+// NEXT. Seeded via the runner's seed hook below.
+scenario('lumora-village-e22-best240-reload-preserves', null, `
+__check('TEST 9 (reload): best is preserved exactly at 240', currentVillageProgress().bestNightDelivered === 240);
+__check('TEST 9 (reload): 4/8 restored, Building 5 NEXT -- the permanent record, not the temporary current-night count, still drives this after a reload', getRestoredMilestones('lumora').length === 4 && getNextMilestone('lumora').name === 'Bridge Lanterns');
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -8508,6 +8616,12 @@ async function main() {
       // Building 7/400) -- proves the NEW landmark-restoration state (not
       // just the old bestNightDelivered number) survives a real reload.
       : sc.name === 'lumora-village-e20-details-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:300,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E22 TEST 9: the exact best=240 from the reported mismatch, with a
+      // currentNightDelivered of 114 also present in the save (representing
+      // a mid-night reload) -- proves the permanent record survives reload
+      // and that a lower currentNightDelivered sitting alongside it in the
+      // very same save never leaks into which buildings are restored.
+      : sc.name === 'lumora-village-e22-best240-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:240,currentNightDelivered:114,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value

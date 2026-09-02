@@ -9041,7 +9041,15 @@ function drawHUD(){
   drawContractChip(); // D3: persistent active-contract chip -- hides itself (activeContract<0 or S.over), same discipline as the line above
   ctx.font='500 18px Georgia,serif';
   ctx.fillStyle='#8992ba'; ctx.textAlign='right';
-  ctx.fillText('best '+best,W-22,32);
+  // E22: relabeled from bare "best" -- this is the all-time high SCORE
+  // (S.score, weighted 1-5 points per firefly type), never a firefly-
+  // delivery count. Confirmed via direct player report that the shared
+  // word "best" here and villageProgression's own bestNightDelivered (a
+  // genuinely different metric, an actual firefly count) read as the same
+  // number and caused real confusion. Cosmetic label only -- the
+  // underlying score system, its persistence, and every other consumer of
+  // `best` (difficulty, old milestones, sendScore) are untouched.
+  ctx.fillText('best score '+best,W-22,32);
   // Stage 2 Part A: read-only coin readout, same HUD styling as best above it —
   // no shop, nothing to tap, purely visibility so the earn rate can be eyeballed
   // in a real playtest before Part B prices anything against it
@@ -13182,7 +13190,7 @@ function drawPaused(){
   ctx.fillStyle=LUM_CREAM; ctx.font='600 22px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillText('✦ '+S.score,W/2,H*0.32+90);
   ctx.fillStyle='rgba(174,184,203,0.85)'; ctx.font='500 15px Georgia,serif';
-  ctx.fillText('best '+best,W/2,H*0.32+118);
+  ctx.fillText('best score '+best,W/2,H*0.32+118); // E22: same relabel as the main HUD, same reasoning
   if(pauseReason==='user'){
     if(pauseConfirm==='restart'){
       drawConfirmModal('Restart this night?','Your current night progress will be lost. Any fireflies currently held in your jar will be discarded. Your permanent coins, upgrades, equipped jar, village restoration, and journal progress will remain safe.','Restart Night');
