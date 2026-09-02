@@ -6135,25 +6135,40 @@ function update(dt){
   // any group without a milestone mapping, or for a player who hasn't
   // reached it yet.
   LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr)S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
-  // E20: Lumora's own permanent-restoration glow -- an unconditional
-  // "awaken" fade (same rate/shape as the cat/windmill awaken fades
-  // elsewhere in this file), gated ONLY on whether that specific milestone
-  // is genuinely, permanently restored right now. Deliberately NOT gated
-  // on S.score or S.nightDelivered at all -- that was the actual bug: an
-  // ambient light system keyed to round score has no relationship to which
-  // of the 8 landmarks have ever been unlocked. A restored landmark eases
-  // in quickly (~0.7s) so a new night doesn't pop fully lit instantly, but
-  // it is never made to wait on this round's own play to "re-earn" itself.
+  // E23: Lumora's own restoration glow -- an "awaken" fade (same rate/shape
+  // as the cat/windmill awaken fades elsewhere in this file), now gated on
+  // TWO separate conditions that must BOTH hold, per direct instruction
+  // that permanent restoration and current-night illumination are
+  // different concepts:
+  //   1. permanentlyRestored -- lv.milestones[i].state==='restored', driven
+  //      by bestNightDelivered (E22's authoritative model, UNCHANGED --
+  //      this still gates the Details screen/.completed/Moonfall's unlock,
+  //      and a milestone that has never been reached this way can never
+  //      light up here no matter what S.nightDelivered says).
+  //   2. littTonight -- S.nightDelivered (temporary, zeroed by reset() at
+  //      the start of every night) has ALSO reached that landmark's own
+  //      threshold THIS session. A building restored on a PAST night stays
+  //      permanently restored (Details/completion untouched) but starts
+  //      every new night dark again visually, exactly like a first-time
+  //      player would see it, and re-lights only as tonight's own
+  //      deliveries actually reach that threshold again -- it is never
+  //      made to auto-illuminate purely because it was already unlocked.
   // Guarded to Lumora specifically -- currentVillageProgress().milestones
   // only means "Lumora's 8 buildings" when currentVillage IS lumora;
   // while playing Moonfall this simply stops updating (frozen, never
-  // rendered there), then starts fresh and correct on the next reset(),
-  // same discipline as the Moonfall pct fix from the previous phase.
+  // rendered there), then starts fresh and correct on the next reset().
+  // Moonfall itself never had this bug -- its own drawVillage() branch
+  // already reveals structures via S.nightDelivered/pct, never the
+  // permanent bestNightDelivered (see that branch's own comment) -- this
+  // change brings Lumora's landmark glow in line with that same,
+  // already-correct precedent, not a new invention.
   if(villageProgression.currentVillage==='lumora'){
     const lv=currentVillageProgress();
     LUMORA_LANDMARK_GROUPS.forEach((grp,i)=>{
-      const restored=!!(lv.milestones[i]&&lv.milestones[i].state==='restored');
-      S.landmarkAnim[i]=restored?Math.min(1,(S.landmarkAnim[i]||0)+dt*1.5):0;
+      const m=lv.milestones[i];
+      const permanentlyRestored=!!(m&&m.state==='restored');
+      const litTonight=permanentlyRestored&&m&&S.nightDelivered>=m.threshold;
+      S.landmarkAnim[i]=litTonight?Math.min(1,(S.landmarkAnim[i]||0)+dt*1.5):0;
     });
   }
   // milestone "awaken" fades — cat/windmill used to pop in instantly at their
@@ -8305,11 +8320,22 @@ function drawVillage(){
   // vary which position an in-flight delivery particle visually aims at
   // (cosmetic flourish, grants nothing, never draws anything on its own).
   // PERMANENT RESTORATION glow (category B) -- deterministic, one specific
-  // physical location per milestone (LUMORA_LANDMARK_GROUPS), deliberately
-  // brighter/warmer/with a ring accent so a restored landmark is
-  // unmistakably different from the dim ambient glow just drawn above.
-  // S.landmarkAnim[i] is 0 for any locked milestone, always, regardless of
-  // S.score/S.nightDelivered this round -- see the tick in update().
+  // physical location per milestone (LUMORA_LANDMARK_GROUPS).
+  // S.landmarkAnim[i] is 0 unless BOTH permanently restored AND lit tonight
+  // -- see the tick in update() for the current gating.
+  // E23 (direct instruction): the window/lantern visual itself is restored
+  // to the ORIGINAL pre-village-progression treatment -- verified against
+  // git history at commit 8c4fc33 (the last commit before E18 introduced
+  // any restoration-lighting concept at all), where every light was simply
+  // `gr=L.lantern?27:32` and a plain fill dot, no ring, no radius bump. The
+  // 1.3x radius and ring-stroke accent added here in E20 existed only to
+  // stay visually distinct from the separate dimmed "ambient" layer that
+  // used to sit alongside it -- E25 removed that ambient layer entirely
+  // (every LIGHTS position now belongs to exactly one landmark group, dark
+  // until earned, nothing left to visually compete with), so there is
+  // nothing left to differentiate FROM, and no reason left to render a
+  // restored landmark any differently from how every light always looked
+  // before restoration existed as a concept.
   LUMORA_LANDMARK_GROUPS.forEach((grp,gi)=>{
     const a=S.landmarkAnim[gi]; if(!a||a<=0)return;
     if(grp.finalBeacon){
@@ -8331,21 +8357,12 @@ function drawVillage(){
       const L=LIGHTS[li];
       const flick=0.85+0.15*Math.sin(S.t*5+li*1.7);
       ctx.globalAlpha=a*flick;
-      const gr=(L.lantern?27:32)*1.3;
+      const gr=L.lantern?27:32; // original radius, no multiplier -- see this pass's own header comment
       ctx.drawImage(glowSprite(GLOW_Y,gr),L.x-gr,L.y-gr,gr*2,gr*2);
-      // E22: redraw the window/lantern dot itself at FULL brightness here,
-      // rather than trusting whatever the ambient pass above already left
-      // it at (now dimmed to AMBIENT_DIM=0.35) -- a restored landmark must
-      // never look dim just because its own light also happens to sit
-      // below an ambient score threshold too. This is the actual visible
-      // three-tier distinction: dim ambient dot, vs this full-brightness
-      // dot + ring + stronger bloom for a genuinely restored one.
       ctx.globalAlpha=a;
       ctx.fillStyle=L.lantern?'#ffd987':'#ffca6e';
       if(L.lantern){ ctx.beginPath(); ctx.arc(L.x,L.y,3.4,0,6.28); ctx.fill(); }
       else ctx.fillRect(L.x-5,L.y-6,10,12);
-      ctx.strokeStyle='rgba(255,236,178,0.9)'; ctx.lineWidth=1.4;
-      ctx.beginPath(); ctx.arc(L.x,L.y,(L.lantern?7:9),0,6.28); ctx.stroke();
       ctx.globalAlpha=1;
     });
   });
