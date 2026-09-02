@@ -1253,7 +1253,7 @@ function continueFromOver(){
     enterContractScreen();
     return;
   }
-  reset(); beginNewNightVillageReset();
+  reset();
 }
 // Phase 1 economy pass: LOCAL-ONLY playtest instrumentation, per direct
 // request to expose enough data to see how income actually evolves across
@@ -2069,25 +2069,20 @@ function commitNightStreak(){
     if(before<m&&nightStreak>=m)applyCoinsOrLuckReward('coins',NIGHT_STREAK_MILESTONE_REWARDS[m]);
   });
 }
-// ---------- Village Restoration: PERMANENT vs PER-NIGHT ----------
-// The progression metric is the player's SINGLE-NIGHT delivered-firefly
-// count, never cumulative lifetime deliveries. Two separate numbers track
-// it, deliberately never conflated:
-//   - v.bestNightDelivered: the permanent, never-decreasing all-time
-//     record. Only ever moves UP (see grantVillageProgress()), lives
-//     entirely outside S (never touched by reset()), and is the ONE thing
-//     that gates a village's .completed flag / the next village's unlock.
-//     A later lower night can never lower this record or un-complete a
-//     village.
-//   - v.currentNightDelivered (E26, direct instruction -- reverses this
-//     comment's own earlier "a low night can never lock a building back
-//     up" claim): THIS attempt's own live count, mirrored from
-//     S.nightDelivered every delivery, zeroed at the start of every
-//     genuine new night by beginNewNightVillageReset(). THIS is what
-//     rebuildVillageMilestones() actually reads to decide which buildings
-//     are lit right now -- a building must be re-earned every night, and
-//     a worse (or simply not-yet-repeated) night genuinely shows fewer
-//     buildings lit, even though the permanent record above is unaffected.
+// ---------- Village Restoration: PERMANENT vs TEMPORARY ----------
+// PERMANENT-VILLAGE-RESTORATION pass: the progression metric is now the
+// player's BEST SINGLE-NIGHT delivered-firefly count (bestNightDelivered),
+// never cumulative lifetime deliveries. bestNightDelivered only ever moves
+// UP (see grantVillageProgress()) -- a later low-scoring night can never
+// lower it, lock a building back up, or un-complete a village. This lives
+// entirely outside S (never touched by reset()), same as before.
+// Separately, S.nightDelivered (added to the S={} literal in reset()) is
+// the TEMPORARY, round-scoped "how many real deliveries THIS match" count
+// -- it resets to 0 every reset() and drives ONLY the temporary night
+// lighting (see the LIGHTS tick in update() and drawVillage()'s Moonfall
+// branch), never permanent restoration. These two are deliberately never
+// conflated: bestNightDelivered answers "is this building EVER restored,
+// forever", S.nightDelivered answers "is it LIT RIGHT NOW, tonight".
 // Thresholds below are the new tuning values (was a 15/40/.../450 cumulative
 // ladder pre-pivot) -- data, not hardcoded into any drawing function.
 const VILLAGE1_MILESTONES=[
@@ -2185,19 +2180,10 @@ const MOONFALL_SPAWN_RATE_BONUS=1.15;
 function defaultVillageProgression(){
   return {
     currentVillage:'lumora',
-    // E26: currentNightDelivered (direct instruction reversal -- see
-    // rebuildVillageMilestones()'s own comment) is the NEW field driving
-    // which buildings currently glow: THIS attempt's own live delivered
-    // count, zeroed by reset() at the start of every new night/restart, so
-    // a building must be re-earned every night rather than staying lit
-    // forever. bestNightDelivered is kept, UNCHANGED in meaning, as the
-    // permanent all-time record that still (and only) gates the next
-    // village's unlock via .completed -- re-earning a building nightly
-    // does not mean re-earning ACCESS to Moonfall nightly.
     villages:[
-      { id:'lumora', name:'Lumora', bestNightDelivered:0, currentNightDelivered:0, completionThreshold:VILLAGE1_COMPLETION_THRESHOLD, milestones:[], completed:false },
-      { id:'moonfall', name:'Moonfall', bestNightDelivered:0, currentNightDelivered:0, completionThreshold:MOONFALL_COMPLETION_THRESHOLD, milestones:[], completed:false },
-      { id:'aurora', name:'Aurora', bestNightDelivered:0, currentNightDelivered:0, completionThreshold:null, milestones:[], completed:false }
+      { id:'lumora', name:'Lumora', bestNightDelivered:0, completionThreshold:VILLAGE1_COMPLETION_THRESHOLD, milestones:[], completed:false },
+      { id:'moonfall', name:'Moonfall', bestNightDelivered:0, completionThreshold:MOONFALL_COMPLETION_THRESHOLD, milestones:[], completed:false },
+      { id:'aurora', name:'Aurora', bestNightDelivered:0, completionThreshold:null, milestones:[], completed:false }
     ]
   };
 }
@@ -2222,34 +2208,13 @@ const VILLAGE_MILESTONE_DEFS={ lumora: VILLAGE1_MILESTONES, moonfall: MOONFALL_M
 // moment it's created. Genuinely load-bearing, not defensive filler.
 function rebuildVillageMilestones(v){
   const defs=VILLAGE_MILESTONE_DEFS[v.id]||[];
-  // E26 (direct instruction, reversing the earlier "once restored, always
-  // restored" rule): 'restored' here now means restored TONIGHT -- driven
-  // by v.currentNightDelivered, THIS attempt's own live delivered count,
-  // zeroed by beginNewNightVillageReset() at the start of every genuine new
-  // night/restart (see its own comment for why that ISN'T just folded into
-  // reset() itself). A building must be re-earned every night; a worse
-  // night genuinely re-locks it. v.completed is the one thing that
-  // intentionally stays keyed to the PERMANENT bestNightDelivered
-  // high-water mark below -- it is a once-ever achievement (gates the next
-  // village's unlock), not "is a building glowing right now," and
-  // re-earning a building nightly must never mean re-earning ACCESS to
-  // Moonfall nightly.
-  v.milestones=defs.map(m=>({id:m.id, threshold:m.threshold, state:(v.currentNightDelivered||0)>=m.threshold?'restored':'locked'}));
+  // 'restored' here means PERMANENTLY restored (isBuildingRestored()-
+  // equivalent) -- driven by bestNightDelivered, the persistent high-water
+  // mark, never by anything round-scoped. A milestone can never regress to
+  // 'locked' once bestNightDelivered has ever reached it, because
+  // bestNightDelivered itself never decreases (see grantVillageProgress()).
+  v.milestones=defs.map(m=>({id:m.id, threshold:m.threshold, state:v.bestNightDelivered>=m.threshold?'restored':'locked'}));
   v.completed=v.completionThreshold!=null&&v.bestNightDelivered>=v.completionThreshold;
-}
-// E26: deliberately NOT called from inside reset() itself -- reset() also
-// runs once at module top-level, automatically, before the player has done
-// anything at all, purely to give S a valid initial shape; treating THAT
-// call as "the player started a new night" would wipe a just-loaded save's
-// currentNightDelivered back to 0 before the player ever sees it (a real
-// bug, caught by this session's own reload tests). Called instead from the
-// three genuine "the player is starting a fresh night" sites: the title
-// screen's BEGIN button, the Restart Night confirmation, and
-// continueFromOver() -- each already calls reset() right alongside this.
-function beginNewNightVillageReset(){
-  const v=currentVillageProgress();
-  v.currentNightDelivered=0;
-  rebuildVillageMilestones(v);
 }
 function currentVillageProgress(){ return villageProgression.villages.find(v=>v.id===villageProgression.currentVillage)||villageProgression.villages[0]; }
 // E19: generic across any number of villages -- the FIRST village is always
@@ -2286,24 +2251,17 @@ function isVillageCompleted(id){
 // never drift between "what the engine tracks" and "what the UI shows".
 function getVillageProgress(id){ return villageProgression.villages.find(v=>v.id===id)||null; }
 function getBestNightDelivered(id){ const v=getVillageProgress(id); return v?v.bestNightDelivered:0; }
-// E26: the NEW live number driving what's currently lit -- see
-// rebuildVillageMilestones()'s own comment. Distinct from
-// getBestNightDelivered() (the permanent all-time record), which is now
-// only relevant to .completed/Moonfall's unlock, not to a building's
-// current glow.
-function getCurrentNightDelivered(id){ const v=getVillageProgress(id); return v?(v.currentNightDelivered||0):0; }
 function getVillageLandmarks(id){ return VILLAGE_MILESTONE_DEFS[id]||[]; }
 function getRestoredMilestones(id){
   const v=getVillageProgress(id); if(!v)return [];
   return v.milestones.filter(m=>m.state==='restored');
 }
-// The first landmark whose threshold is still ahead of TONIGHT's own
-// delivered count -- null once every landmark is restored for tonight
-// (that null IS "fully lit right now, nothing left to work toward this
-// night," not a stale reference to the last one).
+// The first landmark whose threshold is still ahead of the current best --
+// null once every landmark is restored (that null IS "village complete,
+// nothing left to work toward", not a stale reference to the last one).
 function getNextMilestone(id){
   const v=getVillageProgress(id); if(!v)return null;
-  return getVillageLandmarks(id).find(m=>(v.currentNightDelivered||0)<m.threshold)||null;
+  return getVillageLandmarks(id).find(m=>v.bestNightDelivered<m.threshold)||null;
 }
 function isVillageComplete(id){ return isVillageCompleted(id); } // alias -- same authoritative flag, just matching the spec's own naming
 // One row per landmark, ready for the Details screen: {index, name,
@@ -2339,25 +2297,33 @@ function enterVillage(id){
   return true;
 }
 // The ONE place a village's TEMPORARY per-night delivered count advances
-// (S.nightDelivered) AND the ONE place both v.currentNightDelivered (what's
-// lit RIGHT NOW) and v.bestNightDelivered (the permanent all-time record)
-// ever advance. Called only from the delivery-success site (the same
-// s.t>=1 block score/coins/quest progress already use), and only once the
-// caller has already confirmed this is a real, non-tutorial delivery.
+// (S.nightDelivered) AND the ONE place its PERMANENT bestNightDelivered
+// high-water mark ever advances. Called only from the delivery-success
+// site (the same s.t>=1 block score/coins/quest progress already use), and
+// only once the caller has already confirmed this is a real, non-tutorial
+// delivery.
 //
-// E26 (direct instruction, reversing the earlier "once restored, always
-// restored" rule): v.currentNightDelivered now mirrors S.nightDelivered
-// unconditionally, every delivery, even after the village is already
-// permanently v.completed -- a building must be re-earned every single
-// night, and a worse night genuinely re-locks it (see
-// rebuildVillageMilestones()). v.bestNightDelivered is kept, UNCHANGED in
-// behavior from before E26: a live high-water-mark that only ever moves up
-// and is the ONE thing that permanently unlocks the next village --
-// re-earning a building nightly does not mean re-earning ACCESS to
-// Moonfall nightly.
+// PERMANENT vs TEMPORARY pass: S.nightDelivered increments on EVERY such
+// delivery, unconditionally -- including after the village is already
+// fully completed, since it's just "how many deliveries tonight" and also
+// drives temporary lighting (see the LIGHTS tick in update() and
+// drawVillage()'s Moonfall branch), which should keep responding even in
+// an already-complete village. bestNightDelivered, by contrast, only ever
+// moves in the direction of this call's own live high-water-mark check
+// (Math.max, expressed as "only assign if greater") -- a worse night can
+// never lower it, and once a village is v.completed the early return below
+// means bestNightDelivered can never even be re-evaluated, let alone drop.
 function grantVillageProgress(){
   const v=currentVillageProgress();
   S.nightDelivered++;
+  if(v.completed)return;
+  // Live high-water-mark: bestNightDelivered only updates when THIS
+  // night's own count has just pushed past the previous record. A night
+  // that never beats the existing best changes nothing here at all --
+  // exactly "the game must never perform currentNight<threshold -> building
+  // becomes locked", because locking never happens in the first place;
+  // there is simply no write when the current night isn't a new record.
+  if(S.nightDelivered<=v.bestNightDelivered)return;
   // Genericized across villages (not hardcoded to Lumora's own constants) --
   // Moonfall reads its OWN threshold/milestone defs, not Lumora's. A
   // village with no completionThreshold defined (Aurora, still a
@@ -2365,39 +2331,23 @@ function grantVillageProgress(){
   // to a locked/undefined village), but Infinity keeps this defensive
   // rather than silently completing via the 0>=null hazard.
   const cap=v.completionThreshold!=null?v.completionThreshold:Infinity;
-  // E26 (direct instruction, reversing the earlier "once restored, always
-  // restored" rule): currentNightDelivered updates on EVERY delivery,
-  // unconditionally -- including after the village is already permanently
-  // v.completed, since a completed village's buildings must still be
-  // re-earned nightly under the new rule. This is what actually decides
-  // which buildings glow (see rebuildVillageMilestones()); the celebration
-  // banner below now fires on TONIGHT crossing a threshold, every night it
-  // happens, not just on an all-time first.
-  const prevCurrent=v.currentNightDelivered||0;
-  v.currentNightDelivered=Math.min(cap,S.nightDelivered);
+  v.bestNightDelivered=Math.min(cap,S.nightDelivered);
   const defs=VILLAGE_MILESTONE_DEFS[v.id]||[];
-  const justHitTonight=defs.find(m=>m.threshold>prevCurrent&&m.threshold<=v.currentNightDelivered);
+  const justHit=defs.find(m=>m.threshold===v.bestNightDelivered);
   rebuildVillageMilestones(v);
   persistVillageLocal();
-  if(justHitTonight)capMilestoneFx('✨ '+justHitTonight.name+' restored ✨');
-  // Permanent record-keeping below is UNCHANGED in spirit from before E26:
-  // bestNightDelivered is still the all-time high-water mark, still never
-  // decreases, and is still the ONE thing that permanently unlocks the
-  // next village -- re-earning a building nightly does not mean re-earning
-  // ACCESS to Moonfall nightly. Skipped entirely once already completed,
-  // same idempotency guard as before.
-  if(v.completed)return;
-  if(S.nightDelivered<=v.bestNightDelivered)return;
-  v.bestNightDelivered=Math.min(cap,S.nightDelivered);
-  rebuildVillageMilestones(v); // re-derives v.completed from the just-updated bestNightDelivered -- the one canonical place, not a second inline formula
-  persistVillageLocal();
-  // E19: completion is reached in this SAME call, the instant bestNightDelivered
+  // Minimal feedback (E18 §11): reuses the existing generic celebration
+  // banner (sound + particle puff + on-screen text) rather than any new UI --
+  // fires only on the 8 real milestone crossings for the whole village, not
+  // once per delivery.
+  if(justHit)capMilestoneFx('✨ '+justHit.name+' restored ✨');
+  // E19: completion is reached in this SAME call, the instant restorationProgress
   // hits completionThreshold -- v.completed was already checked false at the
-  // top of this branch, so reaching here means this call is the ONE time it
-  // flips true; every later call for this village hits the early return
-  // above and never re-enters this block -- no separate "has this already
-  // fired" flag needed, the completed boolean itself IS the idempotency guard,
-  // same as jarCanAcceptCatch().
+  // top of this function (the early return above), so reaching here means
+  // this call is the ONE time it flips true; every later call for this
+  // village hits that same early return and never re-enters this block --
+  // no separate "has this already fired" flag needed, the completed
+  // boolean itself IS the idempotency guard, same as jarCanAcceptCatch().
   if(v.completed){
     const idx=villageProgression.villages.indexOf(v);
     const next=villageProgression.villages[idx+1]||null;
@@ -2422,23 +2372,19 @@ function grantVillageProgress(){
     capMilestoneFx('🌟 '+v.name.toUpperCase()+' COMPLETE'+(next?(' — '+next.name+' unlocked'):'')+' 🌟');
   }
 }
-// History note (this comment predates and has been overtaken by E20/E25/
-// E26 -- kept for the historical reasoning, not as a description of
-// current behavior): an early pass here removed a lightGroupRestored()/
-// LIGHTS_THR_VILLAGE_MILESTONE mechanism for the "village looks already
-// fully lit at the start of every match" bug it caused, and switched
-// temporary night lighting to S.score instead. E20 later replaced THAT
-// with the deterministic LUMORA_LANDMARK_GROUPS system, and E25 removed
-// ambient S.score-driven lighting from these positions entirely (see
-// drawVillage()'s own comment). E26 (direct instruction) then reversed
-// "once restored, always restored" itself: v.milestones now reflects
-// v.currentNightDelivered (this attempt's own live count, zeroed at the
-// start of every genuine new night by beginNewNightVillageReset()), not
-// the permanent bestNightDelivered record -- a building must be re-earned
-// every night. v.bestNightDelivered/.completed remain the one permanent,
-// never-decreasing exception, since they gate Moonfall's unlock and that
-// must not re-lock nightly. See rebuildVillageMilestones()'s own comment
-// for the authoritative, current description of this split.
+// PERMANENT-VILLAGE-RESTORATION pass: lightGroupRestored()/
+// LIGHTS_THR_VILLAGE_MILESTONE removed. That was precisely the "village
+// looks already fully lit at the start of every match" bug -- it let a
+// permanently-earned milestone bypass the round-scoped reveal and light a
+// LIGHTS group from frame 1 of every future night, regardless of tonight's
+// own delivered count. Temporary night lighting is now driven purely by
+// S.score again (see the LIGHTS tick in update()), exactly like a
+// first-time player experiences it, every single night -- permanent
+// restoration state (bestNightDelivered/milestones/completed) still exists
+// and still persists forever, it just no longer feeds this light-reveal
+// check at all. See isBuildingRestored() vs isBuildingLitTonight()-style
+// separation: permanent state answers "is this ever unlocked", the LIGHTS
+// tick answers "is it glowing RIGHT NOW", and the two must never merge.
 let objectivesCompleted={}; // Night Objectives (Phase 1) -- historical record of
 // completed objectives, keyed by objective id. Always {} until Phase 1 exists.
 let eventHistory=[]; // Night Events (future phase) -- past event ids the player has
@@ -3734,14 +3680,6 @@ if(!YT){
           :(typeof sv.restorationProgress==='number'?sv.restorationProgress:null);
         if(raw!=null&&raw>v.bestNightDelivered)
           v.bestNightDelivered=Math.max(0,Math.min(v.completionThreshold,Math.floor(raw)));
-        // E26: currentNightDelivered is the CURRENT attempt's own live count
-        // -- a reload mid-night must preserve it exactly (same "no
-        // accidental progress loss on reload" principle as everything
-        // else here), never force it back to 0 just because the page
-        // reloaded. A save written before this field existed simply has
-        // none, defaulting to the 0 already set by defaultVillageProgression().
-        if(typeof sv.currentNightDelivered==='number')
-          v.currentNightDelivered=Math.max(0,Math.min(v.completionThreshold!=null?v.completionThreshold:Infinity,Math.floor(sv.currentNightDelivered)));
       });
       // currentVillage itself was never actually restored from the save
       // before E21/E22 -- harmless while 'lumora' was the only value it
@@ -4282,9 +4220,6 @@ if(YT&&YT.game&&YT.game.loadData){
             :(typeof dv.restorationProgress==='number'?dv.restorationProgress:null);
           if(raw!=null&&raw>v.bestNightDelivered)
             v.bestNightDelivered=Math.max(0,Math.min(v.completionThreshold,Math.floor(raw)));
-          // E26: same currentNightDelivered restore as the non-YT path's own comment.
-          if(typeof dv.currentNightDelivered==='number')
-            v.currentNightDelivered=Math.max(0,Math.min(v.completionThreshold!=null?v.completionThreshold:Infinity,Math.floor(dv.currentNightDelivered)));
         });
         // same currentVillage restore as the non-YT load path -- held until
         // rebuildVillageMilestones() below makes the unlocked-ness check
@@ -4488,18 +4423,15 @@ function reset(){
     // reset()/Restart Night, same as deliveredN -- never touches the
     // permanent bestNightDelivered high-water mark stored outside S.
     nightDelivered:0,
-    // E20/E26: Lumora's own restoration glow, index-aligned with
+    // E20: Lumora's own PERMANENT-restoration glow, index-aligned with
     // LUMORA_LANDMARK_GROUPS/VILLAGE1_MILESTONES (8 entries). Eased toward
-    // 1 by a short "awaken" fade in update() ONLY for a milestone that
-    // reads 'restored' right now -- as of E26 that means restored TONIGHT
-    // (v.currentNightDelivered), not permanently -- a locked landmark's
+    // 1 by a short "awaken" fade in update() ONLY for a milestone that is
+    // genuinely, permanently restored right now -- a locked landmark's
     // slot is clamped to 0 every frame, so it can never light up no matter
-    // how high S.score climbs this round, and no building lights up at all
-    // until THIS night's own deliveries actually earn it. Deliberately a
+    // how high S.score/S.nightDelivered climbs this round. Deliberately a
     // plain object (not tied to LIGHTS' own array), since it answers a
-    // different question than the ambient system ever did ("is this
-    // milestone's threshold met tonight," not "is this round's score past
-    // some point value").
+    // completely different question (permanent restoration, not "is this
+    // round's score past some point value").
     landmarkAnim:{},
     over:false, overT:0, tip:'',
     // E19: set at most once per round, only inside grantVillageProgress()'s
@@ -4662,7 +4594,7 @@ function beginPlay(){
   // free (ensureNightObjectives()/ensureNightEvent()'s own tutorialDone
   // guard), so this branch is byte-for-byte the original behavior for it.
   if(upgrades.tutorialDone){ enterContractScreen(); return; }
-  screen='play'; reset(); beginNewNightVillageReset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
+  screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
   beginTutorialIfNew();
 }
 // D3: the one entry point onto the Contract Selection screen -- from the
@@ -4699,7 +4631,7 @@ function acceptContract(){
 // contract's forced category immediately, on this very first frame of play.
 function finishContractAccept(){
   activeContract=contractSel;
-  screen='play'; reset(); beginNewNightVillageReset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
+  screen='play'; reset(); sMagnet(); puff(BEGIN_BTN.x,BEGIN_BTN.y,GLOW_Y,14,90,0.8);
 }
 
 // Depth Pass Part 1 retune: maxFlies/patience/speed/mothRate used to sit
@@ -5627,7 +5559,7 @@ cv.addEventListener('pointerdown',e=>{
         // whatever was underneath.
         if(inRect(p.x,p.y,CONFIRM_CANCEL_BTN))pauseConfirm=null;
         else if(inRect(p.x,p.y,CONFIRM_ACTION_BTN)){
-          if(pauseConfirm==='restart'){ pauseConfirm=null; resumeGame(); reset(); beginNewNightVillageReset(); }
+          if(pauseConfirm==='restart'){ pauseConfirm=null; resumeGame(); reset(); }
           else if(pauseConfirm==='gohome')goHome();
         }
       } else if(dist(p.x,p.y,RESUME_BTN.x,RESUME_BTN.y)<=RESUME_BTN.r)resumeGame();
@@ -6197,24 +6129,21 @@ function update(dt){
   }
   if(S.weatherBannerT>0)S.weatherBannerT=Math.max(0,S.weatherBannerT-dt);
   if(S.score>=30)S.constA=Math.min(1,S.constA+dt*0.15); // 100->30, same reasoning as the shooting-star threshold above
-  // Plain S.score-driven tick, unrelated to restoration -- E25 removed the
-  // actual RENDERING of this state (see drawVillage()'s own comment), but
-  // the state itself still ticks here since the delivery-spark
-  // flight-target picker further up in update() still reads it purely for
-  // cosmetic variety in where an in-flight particle visually aims.
+  // E18: a light group also stays lit once its matching Village 1 milestone
+  // is persistently restored -- see lightGroupRestored()'s own comment.
+  // Additive OR only; the original S.score gate is completely unchanged for
+  // any group without a milestone mapping, or for a player who hasn't
+  // reached it yet.
   LIGHTS.forEach((L,i)=>{ if(S.score>=L.thr)S.lightAnim[i]=Math.min(1,S.lightAnim[i]+dt*1.5); });
-  // E20/E26: Lumora's own restoration glow -- an unconditional "awaken"
-  // fade (same rate/shape as the cat/windmill awaken fades elsewhere in
-  // this file), gated ONLY on whether that specific milestone reads
-  // 'restored' right now. Deliberately NOT gated on S.score at all -- an
+  // E20: Lumora's own permanent-restoration glow -- an unconditional
+  // "awaken" fade (same rate/shape as the cat/windmill awaken fades
+  // elsewhere in this file), gated ONLY on whether that specific milestone
+  // is genuinely, permanently restored right now. Deliberately NOT gated
+  // on S.score or S.nightDelivered at all -- that was the actual bug: an
   // ambient light system keyed to round score has no relationship to which
-  // of the 8 landmarks are lit. As of E26 (direct instruction reversal),
-  // 'restored' means restored TONIGHT (v.currentNightDelivered), not
-  // permanently -- a fresh night's own rebuildVillageMilestones() call
-  // (via beginNewNightVillageReset()) already re-locks every milestone
-  // before this tick ever runs, so this eases each one back in ONLY as
-  // this same night's own deliveries re-earn it; it does not remember
-  // last night's progress on its own.
+  // of the 8 landmarks have ever been unlocked. A restored landmark eases
+  // in quickly (~0.7s) so a new night doesn't pop fully lit instantly, but
+  // it is never made to wait on this round's own play to "re-earn" itself.
   // Guarded to Lumora specifically -- currentVillageProgress().milestones
   // only means "Lumora's 8 buildings" when currentVillage IS lumora;
   // while playing Moonfall this simply stops updating (frozen, never
@@ -12593,16 +12522,12 @@ function drawJourneyScreen(){
       ctx.fillStyle='rgba(174,184,203,0.6)'; ctx.font='italic 12.5px Georgia,serif'; ctx.textBaseline='top';
       ctx.fillText('Complete '+villageProgression.villages[villageProgression.villages.findIndex(x=>x.id===v.id)-1].name+' to unlock',left+20,top+64);
     } else if(v.completionThreshold!=null){
-      // E26: TONIGHT's own live count -- never a fake/preview percentage,
-      // never the lifetime/cumulative total, and (as of E26) never the
-      // permanent all-time record either -- that number no longer decides
-      // which buildings are currently lit, so showing it here would just
-      // reintroduce the exact "displayed number doesn't match what's
-      // actually lit" confusion this whole pass exists to fix.
-      const tonightN=getCurrentNightDelivered(v.id);
-      const pct=Math.round(100*clamp(tonightN/v.completionThreshold,0,1));
+      // real, live BEST SINGLE-NIGHT delivered count -- never a fake/preview
+      // percentage, and never the lifetime/cumulative total (that metric no
+      // longer exists for this progression system at all).
+      const pct=Math.round(100*clamp(v.bestNightDelivered/v.completionThreshold,0,1));
       ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.font='12.5px Georgia,serif'; ctx.textBaseline='top';
-      ctx.fillText(tonightN+' / '+v.completionThreshold+' delivered tonight',left+20,top+64);
+      ctx.fillText(v.bestNightDelivered+' / '+v.completionThreshold+' best night delivered',left+20,top+64);
       lumBar(left+20,top+86,rect.w-40,6,pct);
     }
     // E20: "View Details" now opens the real Village Details screen, for
@@ -12703,14 +12628,9 @@ function drawVillageDetailsScreen(){
   const statsY=sy+(isVillageCompleted(v.id)?32:0);
   const colW=sw/3;
   const restoredN=getRestoredMilestones(v.id).length, totalN=getVillageLandmarks(v.id).length;
-  // E26: TONIGHT's own live count -- not the permanent all-time record --
-  // is what actually decides which buildings are lit right now (see
-  // rebuildVillageMilestones()), so this stat now reads the same number,
-  // never a different one that would silently disagree with BUILDINGS/PROGRESS.
-  const tonightN=getCurrentNightDelivered(v.id);
-  const pctNum=Math.round(1000*clamp(tonightN/v.completionThreshold,0,1))/10;
+  const pctNum=Math.round(1000*clamp(v.bestNightDelivered/v.completionThreshold,0,1))/10;
   [
-    ['TONIGHT', tonightN+' / '+v.completionThreshold],
+    ['BEST NIGHT', v.bestNightDelivered+' / '+v.completionThreshold],
     ['BUILDINGS', restoredN+' / '+totalN+' restored'],
     ['PROGRESS', pctNum+'%']
   ].forEach((col,i)=>{
@@ -12750,17 +12670,15 @@ function drawVillageDetailsScreen(){
     ctx.fillText(item.threshold+' fireflies',W-36,y+27);
     ctx.textAlign='left';
     if(item.state==='NEXT'){
-      // "50 / 100", NOT "23 / 50" -- TONIGHT's own count against the NEXT
-      // threshold (E26: was the permanent best-ever, now the per-night
-      // live count -- see rebuildVillageMilestones()), exactly as directly
-      // specified (a "within-band" fraction was explicitly called out as
-      // incorrect either way).
-      const remaining=item.threshold-tonightN;
+      // "50 / 100", NOT "23 / 50" -- the current best against the NEXT
+      // threshold, exactly as directly specified (a "within-band" fraction
+      // was explicitly called out as incorrect).
+      const remaining=item.threshold-v.bestNightDelivered;
       ctx.fillStyle='rgba(251,210,107,0.85)'; ctx.font='italic 12px Georgia,serif';
       ctx.fillText(remaining+' more firefl'+(remaining===1?'y':'ies')+' needed',36,y+44);
-      lumBar(36,y+64,W-72,7,Math.round(100*clamp(tonightN/item.threshold,0,1)));
+      lumBar(36,y+64,W-72,7,Math.round(100*clamp(v.bestNightDelivered/item.threshold,0,1)));
       ctx.fillStyle='rgba(174,184,203,0.6)'; ctx.font='10.5px Georgia,serif';
-      ctx.fillText(tonightN+' / '+item.threshold,36,y+82);
+      ctx.fillText(v.bestNightDelivered+' / '+item.threshold,36,y+82);
     }
   });
   if(layout.legacyLink){

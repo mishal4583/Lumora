@@ -2882,21 +2882,10 @@ __check('the Village Selection close button returns to the title screen', screen
 // milestones from it, then let the real per-frame S.landmarkAnim tick in
 // update() ease every group toward its target -- 90 frames * 16ms = 1.44s,
 // comfortably past the ~0.667s full ease-in (dt*1.5) with margin.
-// E26: sets CURRENT-night delivered (the field that now actually drives
-// which buildings are lit -- see rebuildVillageMilestones()'s own
-// comment), not the permanent all-time bestNightDelivered. Also nudges
-// bestNightDelivered up to the same value when it's the lower of the two,
-// purely so isVillageCompleted()/isVillageUnlocked() (still permanent,
-// unaffected by E26) behave sensibly for tests that reach 500 -- a real
-// player would only ever see currentNightDelivered=500 by having actually
-// delivered 500 fireflies, which would trip that same permanent ratchet
-// for real via grantVillageProgress().
 function primeLumoraLandmarks(bestVal){
   villageProgression.currentVillage = 'lumora';
-  var v = villageProgression.villages[0];
-  v.currentNightDelivered = bestVal;
-  if (bestVal > v.bestNightDelivered) v.bestNightDelivered = bestVal;
-  rebuildVillageMilestones(v);
+  villageProgression.villages[0].bestNightDelivered = bestVal;
+  rebuildVillageMilestones(villageProgression.villages[0]);
   screen = 'village'; paused = false; // keeps newNightCardActive() false and nothing else gating update(dt)
   for (var i = 0; i < 90; i++) __stepFrame(16);
 }
@@ -2927,7 +2916,7 @@ __check('TEST A (best=27): NO restoration light anywhere -- every landmarkAnim g
 (function(){
   reset(); screen = 'village'; paused = false;
   S.score = 40; // would have cleared every OLD ambient threshold (5/10/20/30/35) -- now irrelevant to rendering
-  villageProgression.villages[0].currentNightDelivered = 46; // E26: the field that now drives which buildings are lit
+  villageProgression.villages[0].bestNightDelivered = 46;
   rebuildVillageMilestones(villageProgression.villages[0]); // 0/8 restored
   for (var i = 0; i < 90; i++) __stepFrame(16);
   var L3 = LIGHTS[3]; // {x:388,y:H-150,r:6,thr:20} -- a plain (non-lantern) window, part of landmark group 2 (index 2, lightIndices [3,4,5,6])
@@ -2939,7 +2928,7 @@ __check('TEST A (best=27): NO restoration light anywhere -- every landmarkAnim g
   __check('E25: with 0/8 restored, a locked landmark\\'s window draws NOTHING at all -- not dimmed, genuinely absent -- regardless of how high S.score is', seenDraws === 0, 'seenDraws=' + seenDraws);
 
   // Now restore that SAME light's landmark group (index 2, threshold 150) and confirm its dot appears at full brightness
-  villageProgression.villages[0].currentNightDelivered = 150;
+  villageProgression.villages[0].bestNightDelivered = 150;
   rebuildVillageMilestones(villageProgression.villages[0]);
   for (var j = 0; j < 90; j++) __stepFrame(16); // ease S.landmarkAnim[2] to 1
   var seenAlphas = [];
@@ -2988,36 +2977,32 @@ __check('TEST E (best=500): every landmark group including the finalBeacon (inde
 var rowsE = villageDetailsRows('lumora');
 __check('TEST E (best=500): every Details row reads RESTORED, none NEXT', rowsE.every(function(r){ return r.state === 'RESTORED'; }));
 
-// TEST F (E26 rewrite -- direct instruction reversal): reaching a genuine
-// 300 (via the real grantVillageProgress() delivery flow, not a direct
-// assignment) still sets the PERMANENT bestNightDelivered record, which
-// still never decreases and still never re-locks Moonfall's unlock gate.
-// But the VISIBLE per-building state now genuinely resets every new night
-// and must be re-earned -- a worse (or simply not-yet-repeated) night
-// really does show fewer buildings lit, which is the opposite of what
-// this test originally verified before the reversal.
-villageProgression.villages[0].currentNightDelivered = 299;
+// TEST F (regression): a genuine best of 300 (reached via the real
+// grantVillageProgress() delivery flow, not a direct assignment), followed
+// by a WORSE 40-delivery night, must never relock Buildings 1-6 or lower
+// the persisted best.
 villageProgression.villages[0].bestNightDelivered = 299;
 S.nightDelivered = 299;
 rebuildVillageMilestones(villageProgression.villages[0]);
-grantVillageProgress(); // 299 -> 300, crosses Building 6 (The Fountain) for BOTH tonight's display and the permanent record
-__check('TEST F setup: a real delivery flow reaches 300, restoring Buildings 1-6 for tonight AND setting the permanent record', villageProgression.villages[0].bestNightDelivered === 300 && getRestoredMilestones('lumora').length === 6);
-reset(); beginNewNightVillageReset(); // a brand-new night, same as the real BEGIN/Restart/Continue call sites -- S.nightDelivered AND currentNightDelivered both zero; bestNightDelivered must not
-__check('TEST F: a new night does not touch the permanent bestNightDelivered record', villageProgression.villages[0].bestNightDelivered === 300 && S.nightDelivered === 0);
-// E26 (direct instruction): "unlocked building should only be lit up when
-// correct amount of lights are delivered in each night, not always" --
-// buildings genuinely go dark at the start of every new night now, not
-// just their animation.
-__check('TEST F/E26: a new night starts with EVERY building locked again -- 0/8 restored, despite last night having reached 300', getRestoredMilestones('lumora').length === 0 && villageProgression.villages[0].milestones.every(function(m){ return m.state === 'locked'; }));
-__check('TEST F/E26: the landmark ANIMATION also reads 0 for every group immediately after reset() (no instant pop, nothing to pop to)', LUMORA_LANDMARK_GROUPS.every(function(_, gi){ return !S.landmarkAnim[gi]; }));
+grantVillageProgress(); // 299 -> 300, crosses Building 6 (The Fountain)
+__check('TEST F setup: a real delivery flow reaches best=300, restoring Buildings 1-6', villageProgression.villages[0].bestNightDelivered === 300 && getRestoredMilestones('lumora').length === 6);
+reset(); // a brand-new night -- S.nightDelivered zeroes, best must not
+__check('TEST F: Restart Night for a new attempt does not touch the persisted best', villageProgression.villages[0].bestNightDelivered === 300 && S.nightDelivered === 0);
+// E21 #4 (new-night visual state): reset() immediately zeroes the ANIMATION
+// (S.landmarkAnim), not the PERMANENT restoration state -- so a fresh night
+// never pops in instantly fully lit (matches the pre-existing cat/windmill
+// "awaken fade" convention), while the underlying milestones stay restored
+// throughout and visibly ease back in over the next few frames, never
+// requiring the player to "re-earn" them this round.
+__check('TEST F/E21 #4: immediately after reset(), the landmark ANIMATION dips to 0 (no instant full-brightness pop)...', LUMORA_LANDMARK_GROUPS.every(function(_, gi){ return !S.landmarkAnim[gi]; }));
+__check('TEST F/E21 #4: ...while the PERMANENT milestone state is untouched -- Buildings 1-6 are still restored, not temporarily unrestored', getRestoredMilestones('lumora').length === 6);
 screen = 'village'; paused = false; // matches primeLumoraLandmarks()'s own gating, see its comment above
-for (var fnv = 0; fnv < 90; fnv++) __stepFrame(16); // ~1.44s -- plenty of time for the old "auto ease back in" behavior to have shown itself, if it still existed
-__check('TEST F/E26: buildings 1-6 do NOT automatically ease back in on their own -- last night\\'s progress genuinely does not carry over without a fresh delivery this night', LUMORA_LANDMARK_GROUPS.every(function(_, gi){ return !S.landmarkAnim[gi]; }));
-// Now re-earn PART of the way there THIS night (120 -- crosses Buildings 1-2 again, not yet 3) --
-// proving re-earning genuinely works forward from a fresh 0, independent of the permanent record.
-for (var fR = 0; fR < 120; fR++) { grantVillageProgress(); }
-__check('TEST F/E26: re-earning 120 THIS night restores exactly Buildings 1-2 again -- tonight\\'s own live count, nothing borrowed from the permanent record', getRestoredMilestones('lumora').length === 2 && S.nightDelivered === 120 && villageProgression.villages[0].currentNightDelivered === 120);
-__check('TEST F/E26: the permanent record from last night (300) is still completely unaffected by this new, lower night', villageProgression.villages[0].bestNightDelivered === 300);
+for (var fnv = 0; fnv < 90; fnv++) __stepFrame(16); // ~1.44s -- past the ~0.667s ease-in
+__check('TEST F/E21 #4: after a few frames, the SAME already-restored landmarks (1-6) ease back in on their own, with no new delivery needed this round', [0, 1, 2, 3, 4, 5].every(function(gi){ return S.landmarkAnim[gi] > 0.9; }));
+__check('TEST F/E21 #4: the still-locked landmarks (7-8) never receive any glow, restored or otherwise, during this same ease-in window', [6, 7].every(function(gi){ return !S.landmarkAnim[gi]; }));
+for (var fN = 0; fN < 40; fN++) { grantVillageProgress(); } // a worse, 40-delivery night -- grantVillageProgress() itself increments S.nightDelivered, same as a real delivery call site
+__check('TEST F: a lower-scoring 40-delivery night leaves best at 300, not 40 and not regressed', villageProgression.villages[0].bestNightDelivered === 300 && S.nightDelivered === 40);
+__check('TEST F: Buildings 1-6 stay restored, 7-8 stay locked -- no relocking from the worse night', getRestoredMilestones('lumora').length === 6 && villageProgression.villages[0].milestones[6].state === 'locked' && villageProgression.villages[0].milestones[7].state === 'locked');
 
 // TEST H: Moonfall reads through the SAME generic engine with its OWN
 // thresholds (100/200/300/425/550/700/850/1000) -- best=425 restores
@@ -3025,14 +3010,14 @@ __check('TEST F/E26: the permanent record from last night (300) is still complet
 // restoration. Pure accessor calls -- doesn't require currentVillage to
 // actually be Moonfall, same as the Details screen itself never needs to
 // "enter" a village just to look at its own progress.
-villageProgression.villages[1].currentNightDelivered = 425; // E26: the field that now actually drives which buildings are lit
+villageProgression.villages[1].bestNightDelivered = 425;
 rebuildVillageMilestones(villageProgression.villages[1]);
 __check('TEST H (Moonfall best=425): exactly Buildings 1-4 are restored', getRestoredMilestones('moonfall').length === 4);
 __check('TEST H (Moonfall best=425): Buildings 5-8 are locked', villageProgression.villages[1].milestones.slice(4).every(function(m){ return m.state === 'locked'; }));
 __check('TEST H (Moonfall best=425): Building 5 (Central Fountain, 550) is the single NEXT milestone', getNextMilestone('moonfall').name === 'Central Fountain' && getNextMilestone('moonfall').threshold === 550);
 var rowsH = villageDetailsRows('moonfall');
 __check('TEST H (Moonfall best=425): the Details screen agrees exactly -- 4 RESTORED, 1 NEXT, 3 LOCKED, reading Moonfall\\'s OWN names/thresholds (no Lumora leakage)', rowsH.filter(function(r){ return r.state === 'RESTORED'; }).length === 4 && rowsH[4].state === 'NEXT' && rowsH[4].name === 'Central Fountain' && rowsH.filter(function(r){ return r.state === 'LOCKED'; }).length === 3);
-villageProgression.villages[1].currentNightDelivered = 0; // leave Moonfall as this scenario found it for anything running after
+villageProgression.villages[1].bestNightDelivered = 0; // leave Moonfall as this scenario found it for anything running after
 rebuildVillageMilestones(villageProgression.villages[1]);
 
 // E21 #6: Moonfall 1000 = 8/8, same as Lumora's own TEST E at 500 --
@@ -3040,11 +3025,11 @@ rebuildVillageMilestones(villageProgression.villages[1]);
 // completion tests (which reach 1000 via the real delivery flow) since
 // this one is via the same direct-assignment path TEST A-H already use,
 // for exact parity of method with the rest of this block.
-villageProgression.villages[1].currentNightDelivered = 1000;
+villageProgression.villages[1].bestNightDelivered = 1000;
 rebuildVillageMilestones(villageProgression.villages[1]);
 __check('E21 #6 (Moonfall best=1000): 8/8 landmarks restored', getRestoredMilestones('moonfall').length === 8);
 __check('E21 #6 (Moonfall best=1000): getNextMilestone returns null -- no misleading NEXT after completion', getNextMilestone('moonfall') === null);
-villageProgression.villages[1].currentNightDelivered = 0; // restore, same as above
+villageProgression.villages[1].bestNightDelivered = 0; // restore, same as above
 rebuildVillageMilestones(villageProgression.villages[1]);
 
 // E21 #6: structural cross-village-leakage sanity check -- Lumora's and
@@ -8303,15 +8288,8 @@ __check('migration: existing unrelated progress (best itself) is left completely
 // sit between two of the NEW thresholds too, just to prove the read/rebuild
 // both use it correctly either way).
 scenario('lumora-village-lumora-migration-old-field-name', null, `
-__check('a save with only the OLD restorationProgress field name is read as an initial bestNightDelivered floor (permanent record)', currentVillageProgress().bestNightDelivered === 260);
-// E26: an old save from before currentNightDelivered existed has no way to
-// know what "tonight's" progress was -- every building correctly starts
-// dark/re-earnable from 0 after this migration, even though the PERMANENT
-// bestNightDelivered record itself is still floored in above. This is the
-// one-time, unavoidable migration cost of the per-night re-earn model:
-// there is no historical per-night number to reconstruct.
-__check('milestones rebuild to ALL LOCKED after migrating an old save with no currentNightDelivered concept at all -- buildings must be re-earned fresh under the new per-night model', villageProgression.villages[0].milestones.every(function(m){ return m.state === 'locked'; }));
-__check('...while the permanent record migrated in above still means the village is not yet completed (260 < 500)', villageProgression.villages[0].completed === false);
+__check('a save with only the OLD restorationProgress field name is read as an initial bestNightDelivered floor', currentVillageProgress().bestNightDelivered === 260);
+__check('milestones rebuild correctly off that migrated value (crosses 50/100/150/200/250, not yet 300)', villageProgression.villages[0].milestones[4].state === 'restored' && villageProgression.villages[0].milestones[5].state === 'locked');
 `);
 
 // =====================================================================
@@ -8499,23 +8477,13 @@ async function main() {
     // one-time load-time logic (reload-survival, the old-100%-restoration
     // migration) without a second vm context mid-driver.
     const seed = sc.name === 'standalone' ? `try{ localStorage.setItem('gk2_best','7'); }catch(e){}\n`
-      // E26: a modern save now also carries currentNightDelivered (the
-      // field that actually drives which buildings are lit) -- set equal
-      // to bestNightDelivered here to represent "the night that set this
-      // record was still the current one at save time," a realistic modern
-      // save shape.
-      : sc.name === 'lumora-village-lumora-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:220,currentNightDelivered:220,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
+      : sc.name === 'lumora-village-lumora-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:220,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
       : sc.name === 'lumora-village-lumora-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
       // PERMANENT-VILLAGE-RESTORATION pass: a save written with the OLD field
       // name (restorationProgress, pre-pivot) -- proves the one-time
       // defensive dual-field-name read treats it as an initial
       // bestNightDelivered floor rather than dropping an existing dev/test
-      // save's progress to 0. Deliberately has NO currentNightDelivered at
-      // all (an even older save format never had the concept of "current
-      // night" -- that's the whole point of this scenario) -- E26 means
-      // migrating this save correctly leaves every BUILDING dark/re-earnable
-      // from 0, even though the permanent bestNightDelivered record itself
-      // is still floored in from the old field.
+      // save's progress to 0.
       : sc.name === 'lumora-village-lumora-migration-old-field-name' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',restorationProgress:260,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
       // a save written BEFORE the Village Journey existed -- a 1-entry
       // villages[] array (no moonfall/aurora at all), Lumora already
@@ -8523,13 +8491,13 @@ async function main() {
       // locked placeholders for free, via the same by-id merge, no new
       // migration code" claim for real, not just for a fresh player --
       // still true after the bestNightDelivered field rename.
-      : sc.name === 'lumora-village-lumora-reload-preserves-completion' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,currentNightDelivered:500,completionThreshold:500,milestones:[],completed:true}]})); }catch(e){}\n`
+      : sc.name === 'lumora-village-lumora-reload-preserves-completion' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true}]})); }catch(e){}\n`
       // a full modern 3-entry save -- Lumora completed, Moonfall
       // mid-progress, currentVillage already switched to 'moonfall' --
       // proving BOTH that Moonfall's own progress survives reload AND that
       // currentVillage itself comes back correctly instead of silently
       // reverting to 'lumora'.
-      : sc.name === 'lumora-village-moonfall-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,currentNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:730,currentNightDelivered:730,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,currentNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      : sc.name === 'lumora-village-moonfall-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:730,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       // a corrupted/tampered save claiming currentVillage:'aurora' while
       // Aurora is still genuinely locked (Moonfall itself isn't complete) --
       // proves the load path validates against real unlocked-ness rather
@@ -8537,9 +8505,9 @@ async function main() {
       : sc.name === 'lumora-village-currentvillage-validation' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'aurora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       // E20 TEST G: a genuine mid-progression Lumora save (best=300, 6/8
       // landmarks restored -- crosses through Building 6/300 but not
-      // Building 7/400) -- proves the CURRENT-night landmark-restoration
-      // state (E26: the number that actually matters now) survives a real reload.
-      : sc.name === 'lumora-village-e20-details-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:300,currentNightDelivered:300,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // Building 7/400) -- proves the NEW landmark-restoration state (not
+      // just the old bestNightDelivered number) survives a real reload.
+      : sc.name === 'lumora-village-e20-details-reload-preserves' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:300,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value
