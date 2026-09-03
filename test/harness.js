@@ -9220,6 +9220,27 @@ __check('TEST F: bestNightDelivered (87, the real E28-fixed first-night delivere
 __check('TEST F b: milestones rebuild correctly off the reloaded 87 (First Window restored, Second House not yet)', villageProgression.villages[0].milestones[0].state === 'restored' && villageProgression.villages[0].milestones[1].state === 'locked');
 `);
 
+// ---- E29: Night Complete's "Light Delivered" row must show the actual delivered COUNT (S.deliveredN), never the weighted SCORE (S.score) ----
+scenario('e29-night-complete-light-delivered-count', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false;
+best = 0; bestAtRoundStart = 0; nightNumber = 1;
+S.over = true; S.overT = 1; S.objectiveActive = []; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins;
+// the exact live-reported case: 74 real deliveries, 104 weighted points (mixed firefly types)
+S.deliveredN = 74; S.score = 104;
+var __fillTextCalls = [];
+var __origFillText = ctx.fillText;
+ctx.fillText = function(text, x, y){ __fillTextCalls.push(text); };
+var __threwE29 = false;
+try { drawOver(); } catch (e) { __threwE29 = true; } finally { ctx.fillText = __origFillText; }
+__check('E29 setup: drawOver() renders without throwing', __threwE29 === false);
+var lightDeliveredLabelIdx = __fillTextCalls.indexOf('LIGHT DELIVERED');
+__check('E29 setup: the Night Complete panel actually rendered a LIGHT DELIVERED row', lightDeliveredLabelIdx !== -1);
+__check('E29: "Light Delivered" displays the actual delivered COUNT (74), not the weighted score (104)', __fillTextCalls[lightDeliveredLabelIdx + 1] === '74', 'value shown=' + __fillTextCalls[lightDeliveredLabelIdx + 1]);
+__check('E29: S.score itself is completely untouched by this fix -- still the real weighted score (104)', S.score === 104);
+__check('E29: S.deliveredN is completely untouched by this fix -- still 74', S.deliveredN === 74);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;

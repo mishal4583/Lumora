@@ -10412,7 +10412,15 @@ function drawOver(){
 
   const restBefore=restorationPct(bestAtRoundStart), restAfter=restorationPct(best), restDelta=restAfter-restBefore;
   const coinsEarned=coins-coinsAtRoundStart;
-  const rows=[['Light Delivered',S.score+''],['Coins Earned','+'+coinsEarned],['Village Restored','+'+Math.max(0,restDelta)+'%']];
+  // E29 fix: this row is labeled "Light Delivered" -- it must show the
+  // actual delivered firefly COUNT (S.deliveredN), matching Village
+  // Details and every other "delivered" figure in the game, not the
+  // weighted score (S.score). Reported live: village correctly showed 74
+  // while this row showed 104, because it was reading S.score (weighted
+  // points, 1-5 per firefly type) under a label that reads as a count.
+  // S.score itself, its calculation, and every other row here are
+  // untouched.
+  const rows=[['Light Delivered',S.deliveredN+''],['Coins Earned','+'+coinsEarned],['Village Restored','+'+Math.max(0,restDelta)+'%']];
   // Lumora 2.0 Phase 1: hasObjectives is false for the tutorial night (its
   // own S.objectiveActive is always []), so the ENTIRE block below --
   // taller panel, the objectives sub-section, and the resulting shift to
