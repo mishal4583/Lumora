@@ -9349,6 +9349,19 @@ __fire(cv, 'pointerdown', __fakeEvent(lumoraRow.x - lumoraRow.w / 2 + 10, lumora
 __check('E31: tapping elsewhere on the card does not open Details (existing row-select behavior instead)', screen !== 'villageDetails');
 `);
 
+// ---- E31 audit fix: recordNightEconomy()'s dev-only economyLog field "lightDelivered" must hold the actual delivered COUNT, not the weighted score -- same mislabeling class as the real Night Complete bug, found this phase's full-game audit ----
+scenario('e31-economy-log-light-delivered-count', null, `
+reset(); coinsAtRoundStart = coins;
+S.score = 0; S.deliveredN = 0;
+['g', 'y', 'y', 'e'].forEach(function(t){ S.carried.push({ type: t, ph: 0, sp: 1 }); });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i = 0; i < 300 && (S.sparks.length > 0 || S.carried.length > 0); i++) __stepFrame(16);
+__check('setup: 4 fireflies delivered (g=3+y=1+y=1+e=4=9 weighted points, 4 actual deliveries) -- score and count genuinely differ', S.score === 9 && S.deliveredN === 4, 'score=' + S.score + ' deliveredN=' + S.deliveredN);
+recordNightEconomy();
+var lastEntry = economyLog[economyLog.length - 1];
+__check('E31: economyLog\\'s "lightDelivered" field holds the actual delivered COUNT (4), not the weighted score (9)', lastEntry.lightDelivered === 4, 'lightDelivered=' + lastEntry.lightDelivered);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;

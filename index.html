@@ -1295,7 +1295,15 @@ function recordNightEconomy(){
     magnetReachTier:jarStatTierOwned('magnetReach',jarKey),
     magnetDurationTier:jarStatTierOwned('duration',jarKey),
     coinValueTier:upgrades.lightTier,
-    lightDelivered:S.score
+    // E31 audit fix: this field is named "lightDelivered" (a delivered-
+    // firefly COUNT, for eyeballing coins-per-delivery rate in this dev-
+    // only log) but was reading S.score (weighted points) -- the exact
+    // same count-vs-score mislabeling class this session already fixed on
+    // the Night Complete screen (E29), just in this local-only playtest
+    // instrumentation instead. Never surfaced to a player, never part of
+    // saveData, never read by any gameplay code (see this function's own
+    // comment) -- zero risk, narrow, one field.
+    lightDelivered:S.deliveredN
   });
 }
 // console.table if available (real browsers/devtools); falls back to
