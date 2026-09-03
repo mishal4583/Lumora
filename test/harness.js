@@ -3779,7 +3779,7 @@ return __tick(5).then(function(){
   // on some smaller in-range tier. Capacity is untouched (its formula
   // never changed) and economyV2Migrated is now set, guarding against
   // this ever running a second time.
-  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 32, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 24, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 27, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 32, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 24, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 27, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('reopening restores the Tracker toggle exactly', trackerOn === true);
   __check('reopening restores the persisted lastPlayed and quest progress exactly', prevLastPlayed === staleLastPlayed && quests.length === 1 && quests[0].progress === 3, 'prevLastPlayed=' + prevLastPlayed + ' quests=' + JSON.stringify(quests));
 
@@ -3895,7 +3895,7 @@ return __tick(5).then(function(){
 // full extended schema from then on.
 // =====================================================================
 scenario('playables-old-format-save', { audioEnabled: true }, `
-__check('coins, journal (including Mystery), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
+__check('coins, journal (including Mystery), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
 __spy.loadResolve(JSON.stringify({ best: 12 })); // the exact shape the shipped build has always saved -- no coins, journal, upgrades, or trackerOn at all
 return __tick(5).then(function(){
   __check('an old-format {best}-only save loads without throwing', best === 12, 'best=' + best);
@@ -3908,7 +3908,7 @@ return __tick(5).then(function(){
   // already-all-zero upgrades object, but it DOES set economyV2Migrated,
   // which a completely fresh/old-format player should carry from here on
   // (so a later real purchase never re-triggers a migration pass).
-  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('trackerOn defaults sensibly (off) when the old save has no trackerOn field', trackerOn === false);
   __check('an old-format save with no lastPlayed field is treated as a genuine first-ever session (fresh quests rolled, not an empty/broken list)', quests.length > 0 && quests.length <= 3);
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
@@ -9456,6 +9456,99 @@ __check('TEST 9b: a fresh script load starts with S.constA at 0 (no leaked const
 __check('TEST 9c: the reloaded save correctly restored Moonfall as the current village', villageProgression.currentVillage === 'moonfall');
 `);
 
+// ---- E33 (New Player Discovery): first-milestone / new-village-unlocked / first-Moonfall-entry discovery cards, plus the explicit E28-class regression the spec requires ----
+scenario('e33-discovery-instructions', null, `
+// ---- Section 29 regression: tutorial incomplete + a real delivery must still credit everything normally, completely unaffected by any new instruction/discovery state ----
+upgrades.tutorialDone = false;
+reset(); screen = 'play'; paused = false;
+var beforeScore = S.score, beforeDeliveredN = S.deliveredN, beforeCoinsTotal = coins + coinFraction, beforeNightDelivered = S.nightDelivered, beforeVillageBest = villageProgression.villages[0].bestNightDelivered;
+S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i = 0; i < 300 && (S.sparks.length > 0 || S.carried.length > 0); i++) __stepFrame(16);
+__check('E33 regression (spec Section 29): a real delivery before tutorial completion still increases score', S.score === beforeScore + 1);
+__check('E33 regression: still increases deliveredN', S.deliveredN === beforeDeliveredN + 1);
+// coins+coinFraction together (not coins alone) -- a single Curious delivery's raw coin value is fractional and may not cross a whole coin by itself (see grantDeliveryCoins()'s own fractional-accumulation design), so the real signal is the combined total rising, not the whole-coin counter specifically.
+__check('E33 regression: still increases coins (combined whole+fractional total)', (coins + coinFraction) > beforeCoinsTotal, 'before=' + beforeCoinsTotal + ' after=' + (coins + coinFraction));
+__check('E33 regression: still increases the current-night delivered count', S.nightDelivered === beforeNightDelivered + 1);
+__check('E33 regression: village best-night can still increase, unaffected by any discovery/instruction state', villageProgression.villages[0].bestNightDelivered === beforeVillageBest + 1);
+__check('E33 regression: none of this required upgrades.seenFirstMilestoneDiscovery to be true first', upgrades.seenFirstMilestoneDiscovery === false);
+
+// ---- fresh player: a genuinely first-ever building restoration queues the discovery card, but it does not interrupt gameplay -- only opens once Night Complete actually happens ----
+upgrades.tutorialDone = true;
+villageProgression = defaultVillageProgression();
+upgrades.seenFirstMilestoneDiscovery = false;
+reset(); screen = 'play'; paused = false;
+for (var iM = 0; iM < 50; iM++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var iM2 = 0; iM2 < 800 && (S.sparks.length > 0 || S.carried.length > 0); iM2++){ S.flies.length = 0; S.moths.length = 0; __stepFrame(16); }
+__check('setup: 50 real deliveries crossed the First Window milestone', villageProgression.villages[0].bestNightDelivered === 50 && getRestoredMilestones('lumora').length === 1);
+__check('E33: the discovery card has NOT opened yet mid-round -- queued, not shown immediately (does not interrupt gameplay)', discoveryCard === null && S.firstMilestoneDiscoveryPending === 'First Window');
+finalizeNight();
+__check('E33: finalizeNight() opens the first-milestone discovery card exactly once Night Complete happens, using the real milestone name from VILLAGE_MILESTONE_DEFS', discoveryCard !== null && discoveryCard.heading === 'First Window restored.');
+__check('E33: the discovery card explains the real best-night mechanic, not a cumulative-total claim', discoveryCard.body.indexOf('best single night') !== -1);
+__check('E33: upgrades.seenFirstMilestoneDiscovery is now true -- marked at the moment of actually showing it, not merely because the milestone happened', upgrades.seenFirstMilestoneDiscovery === true);
+
+// ---- dismissing the discovery card ----
+__fire(cv, 'pointerdown', __fakeEvent(DISCOVERY_CARD_BTN.x, DISCOVERY_CARD_BTN.y));
+__check('E33: tapping "Got it" dismisses the discovery card', discoveryCard === null);
+
+// ---- a SUBSEQUENT building restoration does not reopen the (already-seen) first-milestone discovery card ----
+// A fresh new night that itself reaches 100 in one go (bestNightDelivered is a
+// per-night high-water mark, not cumulative across nights -- delivering 50
+// in one night then 50 more in a SEPARATE night would only tie the existing
+// best of 50, never reach 100; see grantVillageProgress()'s own comment).
+reset(); screen = 'play'; paused = false;
+for (var iM3 = 0; iM3 < 100; iM3++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var iM4 = 0; iM4 < 1500 && (S.sparks.length > 0 || S.carried.length > 0); iM4++){ S.flies.length = 0; S.moths.length = 0; __stepFrame(16); } // clear any organically-spawned fireflies/moths each frame so a long-running batch can never accumulate a stray miss and end the round early
+__check('setup: a second night reached 100, crossing the Second House milestone', villageProgression.villages[0].bestNightDelivered === 100 && getRestoredMilestones('lumora').length === 2, 'best=' + villageProgression.villages[0].bestNightDelivered);
+finalizeNight();
+__check('E33: a SUBSEQUENT building restoration does not reopen the first-milestone discovery card -- shown once, ever', discoveryCard === null);
+
+// ---- village completion + Moonfall unlock: a prominent, one-time discovery card on the Village Selection screen ----
+villageProgression.villages[0].bestNightDelivered = 500;
+villageProgression.villages[0].completed = true;
+upgrades.seenMoonfallUnlockDiscovery = false;
+screen = 'journey';
+draw();
+__check('E33: opening Village Selection after Moonfall unlocks shows the new-village discovery card', discoveryCard !== null && discoveryCard.heading === 'Moonfall');
+__check('E33: it explains selection is manual and Lumora remains available -- no auto-switch', discoveryCard.body.indexOf('Choose your village') !== -1 && discoveryCard.body.indexOf('Lumora stays') !== -1);
+__check('E33: upgrades.seenMoonfallUnlockDiscovery is now true', upgrades.seenMoonfallUnlockDiscovery === true);
+__check('E33: village selection logic itself is untouched -- Moonfall is unlocked but current village did not auto-switch', villageProgression.currentVillage === 'lumora');
+__fire(cv, 'pointerdown', __fakeEvent(DISCOVERY_CARD_BTN.x, DISCOVERY_CARD_BTN.y));
+__check('E33: dismissing the Moonfall-unlock card works', discoveryCard === null);
+
+// ---- replaying an already-seen discovery: reopening Village Selection again does not reshow it ----
+screen = 'title'; screen = 'journey';
+draw();
+__check('E33: reopening Village Selection again does not reshow the already-seen Moonfall discovery', discoveryCard === null);
+
+// ---- first Moonfall entry: a small one-time welcome banner via the EXISTING capMsg slot, not a new UI primitive ----
+upgrades.seenMoonfallFirstEntry = false;
+villageProgression.currentVillage = 'moonfall';
+reset();
+__check('E33: the first reset() as Moonfall shows the one-time welcome banner via the existing capMsg slot', S.capMsg.indexOf('Moonfall') !== -1 && S.capMsgT > 0);
+__check('E33: upgrades.seenMoonfallFirstEntry is now true', upgrades.seenMoonfallFirstEntry === true);
+reset();
+__check('E33: a SECOND Moonfall night does not repeat the welcome banner', S.capMsg === '');
+`);
+
+// ---- E33 TEST: reload preserves the discovery-acknowledgment state, so an already-seen card never comes back just because the underlying milestone still exists ----
+scenario('e33-discovery-reload', null, `
+__check('E33 reload: the already-seen first-milestone flag survives a genuine fresh reload', upgrades.seenFirstMilestoneDiscovery === true);
+__check('E33 reload: the underlying village progress (50 delivered) also survived, independently of the discovery flag', villageProgression.villages[0].bestNightDelivered === 50);
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false;
+// this night must itself reach 100 (bestNightDelivered is a per-night high-water
+// mark, not cumulative -- the seeded 50 was a DIFFERENT, already-completed night)
+for (var i = 0; i < 100; i++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i2 = 0; i2 < 1500 && (S.sparks.length > 0 || S.carried.length > 0); i2++){ S.flies.length = 0; S.moths.length = 0; __stepFrame(16); }
+__check('setup: crossed the Second House milestone (100) on this fresh-loaded save', villageProgression.villages[0].bestNightDelivered === 100);
+finalizeNight();
+__check('E33 reload: the first-milestone discovery card does not reappear after a reload that already had it marked seen', discoveryCard === null);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -9485,6 +9578,12 @@ async function main() {
       // leaked or duplicated from whatever a prior session happened to
       // leave in memory.
       : sc.name === 'e32-moonfall-sky-parity-reload' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E33 TEST: a save that already acknowledged the first-milestone
+      // discovery (seenFirstMilestoneDiscovery:true) must keep it
+      // acknowledged after a genuine fresh reload -- the card must never
+      // reappear just because the underlying milestone (bestNightDelivered
+      // already past the first threshold) still exists.
+      : sc.name === 'e33-discovery-reload' ? `try{ localStorage.setItem('gk2_upgrades', JSON.stringify({seenFirstMilestoneDiscovery:true})); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:50,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
       : sc.name === 'lumora-village-lumora-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
       // PERMANENT-VILLAGE-RESTORATION pass: a save written with the OLD field
       // name (restorationProgress, pre-pivot) -- proves the one-time

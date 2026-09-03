@@ -1033,6 +1033,20 @@ function finalizeNight(){
     if(CONTRACTS[activeContract].tokenReward)workshopTokens++;
   }
   S.over=true; S.overT=0; sOver(); saveProgress(); recordNightEconomy();
+  // E33 (New Player Discovery): the "best-night" discovery card, shown
+  // exactly once ever, the instant a player's genuinely first-ever
+  // building restoration reaches Night Complete. upgrades.seenFirst
+  // MilestoneDiscovery is set true HERE (the moment it's actually about
+  // to be shown), not back in grantVillageProgress() where the milestone
+  // itself was earned -- so a missed/never-reached Night Complete (closed
+  // tab, crash) never silently counts as "seen." Pure UI: does not touch
+  // S.nightDelivered/bestNightDelivered/milestones/persistVillageLocal(),
+  // all of which already committed unconditionally earlier this round.
+  if(S.firstMilestoneDiscoveryPending&&!upgrades.seenFirstMilestoneDiscovery){
+    upgrades.seenFirstMilestoneDiscovery=true;
+    persistUpgradesLocal(); saveProgress();
+    openDiscoveryCard('✨ The Village Is Waking',S.firstMilestoneDiscoveryPending+' restored.','Your best single night of delivered fireflies restores the village — not the total across every night. Beat your record to light the next landmark.');
+  }
   // Night Complete tips: picked once, right here, rather than re-rolled
   // every drawOver() frame -- same "pick once at the moment of the event"
   // discipline as S.batchPerfect elsewhere.
@@ -2134,7 +2148,15 @@ function migrateEconomyV2(){
 // tutorialPanelOpen, see below) is deliberately NOT persisted here or
 // anywhere else -- it's session-only, same precedent as
 // villageHintShown/refillHintShown.
-let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, dailyDeal:null};
+// E33 (New Player Discovery): three one-time discovery-acknowledgment
+// flags, exact same flat-boolean convention as tutorialDone above --
+// each flips true the single time its own discovery card/banner is
+// actually shown (never merely because the underlying milestone/unlock
+// happened -- see openDiscoveryCard()'s own call sites). Pure UI-seen
+// state: nothing here is ever read by grantVillageProgress(), delivery
+// crediting, coin grants, or any other progression path, per direct
+// instruction not to repeat the tutorialDone/village-credit bug class.
+let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, seenFirstMilestoneDiscovery:false, seenMoonfallUnlockDiscovery:false, seenMoonfallFirstEntry:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, dailyDeal:null};
 if(!YT){
   try{
     const u=JSON.parse(localStorage.getItem('gk2_upgrades')||'{}');
@@ -2171,6 +2193,10 @@ if(!YT){
     if(u.statueOwned===true)upgrades.statueOwned=true;
     if(u.statueEquipped===true)upgrades.statueEquipped=true;
     if(u.tutorialDone===true)upgrades.tutorialDone=true;
+    // E33: same flat-boolean load pattern as tutorialDone directly above.
+    if(u.seenFirstMilestoneDiscovery===true)upgrades.seenFirstMilestoneDiscovery=true;
+    if(u.seenMoonfallUnlockDiscovery===true)upgrades.seenMoonfallUnlockDiscovery=true;
+    if(u.seenMoonfallFirstEntry===true)upgrades.seenMoonfallFirstEntry=true;
     if(u.ownedJars&&typeof u.ownedJars==='object'){ Object.keys(u.ownedJars).forEach(k=>{ if(u.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
     if(typeof u.equippedJar==='string')upgrades.equippedJar=u.equippedJar;
     // legacy: a save from before the Jar Collection port only has ownedSkins/
@@ -2593,6 +2619,18 @@ function grantVillageProgress(){
   // fires only on the 8 real milestone crossings for the whole village, not
   // once per delivery.
   if(justHit)capMilestoneFx('✨ '+justHit.name+' restored ✨');
+  // E33 (New Player Discovery): a genuinely first-ever building restoration
+  // (across BOTH villages -- one flag, one flat boolean, same convention
+  // as tutorialDone) also queues the fuller "best-night" discovery card,
+  // round-scoped exactly like S.villageCompletedThisNight above so it can
+  // only ever fire for the one real night that earns it. Deliberately NOT
+  // marking upgrades.seenFirstMilestoneDiscovery here -- that only
+  // happens once the card is actually shown (finalizeNight()), per direct
+  // instruction that a missed/skipped discovery must never be silently
+  // considered "seen." This is pure UI queuing: nothing above this line
+  // (S.nightDelivered, v.bestNightDelivered, rebuildVillageMilestones(),
+  // persistVillageLocal()) is touched or gated by it.
+  if(justHit&&!upgrades.seenFirstMilestoneDiscovery)S.firstMilestoneDiscoveryPending=justHit.name;
   // E19: completion is reached in this SAME call, the instant restorationProgress
   // hits completionThreshold -- v.completed was already checked false at the
   // top of this function (the early return above), so reaching here means
@@ -4401,6 +4439,10 @@ if(YT&&YT.game&&YT.game.loadData){
         if(d.upgrades.statueOwned===true)upgrades.statueOwned=true;
         if(d.upgrades.statueEquipped===true)upgrades.statueEquipped=true;
         if(d.upgrades.tutorialDone===true)upgrades.tutorialDone=true;
+        // E33: same flat-boolean load pattern as tutorialDone directly above.
+        if(d.upgrades.seenFirstMilestoneDiscovery===true)upgrades.seenFirstMilestoneDiscovery=true;
+        if(d.upgrades.seenMoonfallUnlockDiscovery===true)upgrades.seenMoonfallUnlockDiscovery=true;
+        if(d.upgrades.seenMoonfallFirstEntry===true)upgrades.seenMoonfallFirstEntry=true;
         if(d.upgrades.ownedJars&&typeof d.upgrades.ownedJars==='object'){ Object.keys(d.upgrades.ownedJars).forEach(k=>{ if(d.upgrades.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
         if(typeof d.upgrades.equippedJar==='string')upgrades.equippedJar=d.upgrades.equippedJar;
         if(d.upgrades.ownedSkins&&typeof d.upgrades.ownedSkins==='object'){ Object.keys(d.upgrades.ownedSkins).forEach(k=>{ if(d.upgrades.ownedSkins[k]===true)upgrades.ownedJars[k==='classic'?'simple':k]=true; }); }
@@ -4671,6 +4713,16 @@ let prestigeConfirmOpen=false;
 // Jar Hero). Closed defensively wherever the shop is entered/exited so a
 // stray open modal can't survive into an unrelated shop visit.
 let jarCompareOpen=false;
+// E33 (New Player Discovery): the ONE shared slot for a one-time
+// "discovery card" -- a small dismissible overlay for a genuinely major,
+// one-time-ever explanation (the best-night village mechanic, a new
+// village unlocking). Session-level UI state, same category as
+// jarCompareOpen/prestigeConfirmOpen above (not S, not persisted itself --
+// see openDiscoveryCard()/drawDiscoveryCard() for the actual one-time
+// PERSISTED flags this is driven by). Cleared defensively in reset() so a
+// stray open card can't survive into an unrelated round, same reasoning
+// as pauseConfirm/prestigeConfirmOpen's own defensive clears.
+let discoveryCard=null;
 let S=null;
 function reset(){
   stopPad();
@@ -4705,6 +4757,10 @@ function reset(){
     // like every other per-night completion flag; cleared for free by
     // reset() replacing S wholesale, no explicit clear needed.
     villageCompletedThisNight:null,
+    // E33: same round-scoped, set-at-most-once shape as villageCompletedThisNight
+    // directly above -- see grantVillageProgress()'s own comment for why this
+    // is pure UI queuing, never a progression gate.
+    firstMilestoneDiscoveryPending:null,
     // rewarded-ad state, per round like everything else here -- a fresh
     // round always gets a fresh opportunity at each offer. Never persisted.
     rewardedDoubleCoinsPending:false, rewardedDoubleCoinsClaimed:false, rewardedDoubleCoinsAmount:0, coinsEarnedThisNight:0,
@@ -4826,10 +4882,32 @@ function reset(){
   };
   LIGHTS.forEach((L,i)=>S.lightAnim[i]=0);
   LUMORA_LANDMARK_GROUPS.forEach((g,i)=>S.landmarkAnim[i]=0);
+  // E33 (New Player Discovery), TEST 7/first Moonfall entry: the ONE-TIME
+  // welcome line for a player's genuinely first night in Moonfall --
+  // fires exactly once ever (upgrades.seenMoonfallFirstEntry, same
+  // persisted-flag convention as tutorialDone), reusing the EXISTING
+  // shared capMsg banner slot (see capMilestoneFx()) rather than a new
+  // rendering primitive. Placed here, inside reset(), so it's already
+  // live the instant the round actually begins (drawHUD() only ever runs
+  // while screen==='play', so this is guaranteed to render). Pure
+  // display -- does not touch villageProgression, bestNightDelivered, or
+  // any other progression value; Moonfall's own isolation from Lumora is
+  // completely unaffected by whether this banner has ever been shown.
+  // Copy kept short on purpose: banner()/drawHUD() render this centered,
+  // single-line, no wrapping (ctx.measureText confirms this exact string
+  // is ~482px, comfortably inside the 540px canvas -- a longer first
+  // draft clipped off both edges, caught live in browser verification).
+  if(villageProgression.currentVillage==='moonfall'&&!upgrades.seenMoonfallFirstEntry){
+    upgrades.seenMoonfallFirstEntry=true;
+    persistUpgradesLocal(); saveProgress();
+    S.capMsg='Moonfall keeps its own progress, apart from Lumora.';
+    S.capMsgT=4.5; S.capMsgKind='generic';
+  }
   pointer.down=false;
   KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
   prestigeConfirmOpen=false; // Phase 12: same defensive clear as pauseConfirm above
+  discoveryCard=null; // E33: same defensive clear as pauseConfirm/prestigeConfirmOpen above -- a stray open discovery card can't survive into an unrelated round
   villageDetailsDragActive=false; // E20: same defensive clear as pointer.down above -- a fresh round should never inherit a mid-drag scroll gesture
   // Lumora 2.0 Phase 1: the ONE place objective generation/restoration is
   // decided -- every reset() call site (initial top-level init, beginPlay(),
@@ -5167,6 +5245,11 @@ const GOHOME_BTN={x:W/2,y:RESTART_BTN.y+56,w:220,h:48,fontSize:13};
 // "confirm" hit-testing/drawing for either destructive action.
 const CONFIRM_CANCEL_BTN={x:W/2-84,y:H*0.5+96,w:150,h:48,fontSize:12};
 const CONFIRM_ACTION_BTN={x:W/2+84,y:H*0.5+96,w:150,h:48,fontSize:12};
+// E33 (New Player Discovery): the discovery card's own single dismiss
+// button -- same "one rect drives both draw and hit-test" discipline as
+// CONFIRM_CANCEL_BTN/CONFIRM_ACTION_BTN above. Only one button (this is
+// an explanation, not a choice), so there is nothing to cancel.
+const DISCOVERY_CARD_BTN={x:W/2,y:H*0.5+96,w:180,h:48,fontSize:12};
 const BEGIN_BTN={x:W/2,y:H*0.66,r:60};
 // D3 (Claude Design spec, C1/C3): Contract Selection screen geometry --
 // shared by drawContractScreen() and the pointerdown hit-test above, same
@@ -5814,6 +5897,18 @@ function buyDailyDeal(){
 }
 cv.addEventListener('pointerdown',e=>{
   const p=toGame(e);
+  // E33 (New Player Discovery): the discovery card swallows ALL input too,
+  // same "modal overlay owns everything" guard as pause/tutorial/welcome-
+  // back below -- checked FIRST, ahead of even `paused`, since a discovery
+  // card can appear on more than one screen (Night Complete, Village
+  // Selection) and must always be dismissible regardless of whatever
+  // other state happens to be true underneath it. Only its own "Got it"
+  // button responds; this purely closes the card -- it never touches
+  // score, coins, village progression, or any other gameplay value.
+  if(discoveryCard){
+    if(inRect(p.x,p.y,DISCOVERY_CARD_BTN))discoveryCard=null;
+    return;
+  }
   if(paused){ // pause overlay swallows ALL input; only the resume/restart/gohome targets (and the confirm modal over them) act, only for user pauses
     if(pauseReason==='user'){
       if(pauseConfirm){
@@ -11142,6 +11237,33 @@ function drawConfirmModal(heading,body,actionLabel){
   lumButton(CONFIRM_ACTION_BTN,actionLabel,'primary');
   ctx.textBaseline='top';
 }
+// E33 (New Player Discovery): the ONE generic "discovery card" -- a small,
+// dismissible, one-time-ever explanation for a genuinely major discovery
+// (the best-night village mechanic on a player's first-ever restored
+// building; a new village unlocking). Deliberately modeled on
+// drawConfirmModal() directly above it (same dim+glass-panel+glow-heading
+// language) but with exactly one button, since this is an explanation,
+// not a yes/no choice. discoveryCard itself ({eyebrow,heading,body}) is
+// pure session UI state -- see its own declaration for why it is not
+// persisted directly; openDiscoveryCard()'s own call sites are what write
+// the real one-time PERSISTED upgrades.seen*Discovery flag, exactly once,
+// at the moment this is actually shown -- never merely because the
+// underlying milestone/unlock happened (see Section 22 of the E33 spec:
+// the real progression must never be gated on whether this fired).
+function openDiscoveryCard(eyebrow,heading,body){ discoveryCard={eyebrow,heading,body}; }
+function drawDiscoveryCard(){
+  if(!discoveryCard)return;
+  const w=460,h=250,x=W/2-w/2,y=H*0.5-105;
+  ctx.fillStyle='rgba(5,7,27,0.6)'; ctx.fillRect(0,0,W,H);
+  lumPanel(x,y,w,h,20);
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  lumEyebrow(discoveryCard.eyebrow,W/2,y+38,'center',12);
+  lumGlow(discoveryCard.heading,W/2,y+74,22,'center');
+  ctx.fillStyle='rgba(174,184,203,0.9)'; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
+  wrapText(discoveryCard.body,W/2,y+100,w-64,18,'center');
+  lumButton(DISCOVERY_CARD_BTN,'Got it','primary');
+  ctx.textBaseline='top';
+}
 // ---------- first-night tutorial ----------
 // Resolves which live gameplay object (if any) the current step should
 // highlight -- reads the exact same state the trigger conditions in
@@ -12871,6 +12993,20 @@ function journeyViewDetailsRect(rect){
   return {x:right-20-w/2, y:bottom-40, w, h};
 }
 function drawJourneyScreen(){
+  // E33 (New Player Discovery): the "new village unlocked" discovery card,
+  // shown exactly once, the first time this screen is ever opened after
+  // Moonfall genuinely unlocks. Deliberately NOT triggered the instant
+  // Lumora completes (that moment already has its own live capMilestoneFx
+  // banner + Night Complete row -- see grantVillageProgress()'s own
+  // completion branch) -- this is the fuller, "major discovery" version,
+  // at the natural point a player would actually go choose a village.
+  // Pure UI: isVillageUnlocked()/villageProgression are only ever READ
+  // here, never written.
+  if(isVillageUnlocked('moonfall')&&!upgrades.seenMoonfallUnlockDiscovery&&!discoveryCard){
+    upgrades.seenMoonfallUnlockDiscovery=true;
+    persistUpgradesLocal(); saveProgress();
+    openDiscoveryCard('🌙 New Village Unlocked','Moonfall','A new village waits beneath a different sky. Choose your village before beginning tonight\'s hunt — Lumora stays right where you left it, and you decide when to visit Moonfall.');
+  }
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
   const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
   scrim.addColorStop(0,'rgba(8,10,26,0.6)');
@@ -13654,6 +13790,12 @@ function draw(){
     // matters for the gameReady lifecycle hook
     if(showWelcomeBack)drawWelcomeBack();
   }
+  // E33 (New Player Discovery): topmost overlay of all, same precedent as
+  // drawPaused()/drawTutorialPanel() above -- checked here, once, outside
+  // the whole screen if/else-if chain, since a discovery card can appear
+  // on more than one screen (Night Complete's screen==='play', Village
+  // Selection's screen==='journey').
+  if(discoveryCard)drawDiscoveryCard();
 }
 
 // ---------- loop ----------
