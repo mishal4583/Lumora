@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed},villageProgression})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed},villageProgression,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1288,7 +1288,7 @@ function continueFromOver(){
     // introduces or is scoped to fix -- but the streak/reward specifically
     // must be protected per direct instruction, hence this one flag).
     if(!S.streakCommitted){ S.streakCommitted=true; commitNightStreak(); }
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
@@ -2875,7 +2875,7 @@ function seasonProgressAdd(n){
   seasonProgress=Math.min(seasonProgress+(n||1),currentSeason().milestones);
   for(let lvl=prev+1;lvl<=seasonProgress;lvl++)grantSeasonLevel(lvl);
   if(seasonProgress>prev){
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     saveProgress();
   }
 }
@@ -2922,8 +2922,61 @@ const PRESTIGE_MAX=PRESTIGE_REWARDS.length;
 // established reasoning), and eligibility is always re-derived live, never
 // duplicated into a second stored flag that could drift out of sync.
 let prestigeLevel=0;
+// E37: Prestige eligibility migration off the legacy villageLevel()
+// (restorationPct(best)/nightNumber) gate, onto the real two-village
+// architecture. Declared here (same early "Phase 0 foundation fields"
+// zone as prestigeLevel above, well before STORY_CHAPTERS/village-load
+// blocks below need to reference it) to avoid the ordering hazard CLAUDE.md
+// documents -- these two flags are only ever WRITTEN this early (plain
+// load-time restore, no computation needed yet); the actual grandfather
+// COMPUTATION is deferred to ensurePrestigeMigrated() below, run lazily on
+// first real prestigeEligible() call, by which point everything it reads
+// (villageLevel(), getDiscoveredFireflyCount(), villageProgression) is
+// safely available. Both fields are monotonic-safe to compute lazily
+// rather than strictly at load time: villageLevel()/collection count only
+// ever increase, so a slightly-later computation can only grandfather AT
+// LEAST as much as a strict load-time snapshot would have -- never less,
+// never a regression.
+let prestigeMigrated=false, prestigeLegacyEligible=false;
+// E37: same migration-state pattern for Story -- see ensureStoryMigrated()
+// near STORY_CHAPTERS itself (declared much later in the file) for the
+// actual computation. Declared here for the identical ordering-hazard
+// reason: the load blocks below need somewhere safe to restore these two
+// fields from a save long before STORY_CHAPTERS exists.
+let storyMigrated=false, storyLegacyUnlocked={};
+// One-time grandfather pass: a player who was ALREADY eligible under the
+// old villageLevel()-based gate, but had not yet clicked Prestige, keeps
+// that eligibility permanently -- this does NOT grant the reward itself
+// (nothing is fabricated; prestigeLevel is never touched here), it only
+// keeps the button reachable exactly as it already was, so shipping this
+// migration can never make a previously-clickable Prestige button
+// disappear out from under a player. A player who was NOT yet eligible
+// under the old gate gets nothing extra -- they simply fall through to the
+// new, real two-village requirement below, same as any player who starts
+// fresh after this migration ships.
+function ensurePrestigeMigrated(){
+  if(prestigeMigrated)return;
+  if(villageLevel()===3&&getDiscoveredFireflyCount()===Object.keys(TYPES).length)prestigeLegacyEligible=true;
+  prestigeMigrated=true;
+}
+// E37: migrated off villageLevel() (restorationPct(best)/nightNumber, the
+// pre-Village-Journey single-village meter -- see E35/E36) onto the real
+// current architecture: Lumora AND Moonfall BOTH genuinely completed
+// (villages[i].completed, the same authoritative flag Village Details/
+// Night Complete already read), plus the existing full-collection
+// requirement, untouched. Explicitly named 'lumora'/'moonfall' by id --
+// deliberately NOT "every village in villageProgression.villages", so a
+// future Aurora entry (still completionThreshold:null, still excluded from
+// isVillageUnlocked()) can never silently become a THIRD Prestige
+// requirement just by existing in the array. PRESTIGE_MAX/the reward
+// itself are completely untouched by this change.
 function prestigeEligible(){
-  return prestigeLevel<PRESTIGE_MAX && villageLevel()===3 && getDiscoveredFireflyCount()===Object.keys(TYPES).length;
+  ensurePrestigeMigrated();
+  if(prestigeLevel>=PRESTIGE_MAX)return false;
+  if(prestigeLegacyEligible)return true;
+  const lumora=villageProgression.villages.find(v=>v.id==='lumora');
+  const moonfall=villageProgression.villages.find(v=>v.id==='moonfall');
+  return !!lumora&&!!moonfall&&lumora.completed&&moonfall.completed&&getDiscoveredFireflyCount()===Object.keys(TYPES).length;
 }
 function grantPrestigeReward(level){
   const r=PRESTIGE_REWARDS.find(x=>x.level===level);
@@ -2951,7 +3004,7 @@ function activatePrestige(){
   if(!prestigeEligible())return false;
   prestigeLevel+=1;
   grantPrestigeReward(prestigeLevel);
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -3003,6 +3056,18 @@ if(!YT){
     // hypothetical future build with more approved reward tiers) can never
     // read as more complete than this build's own reward table supports.
     if(typeof l2.prestigeLevel==='number'&&l2.prestigeLevel>=0)prestigeLevel=Math.min(Math.floor(l2.prestigeLevel),PRESTIGE_MAX);
+    // E37: plain restores, same defensive-per-field pattern as every field
+    // above -- the actual one-time migration COMPUTATION (ensureStoryMigrated()/
+    // ensurePrestigeMigrated()) runs later, lazily, on first real access
+    // (see their own comments for why); this just carries an already-
+    // completed migration's result forward across a reload so it only ever
+    // runs once per save, not once per session.
+    if(typeof l2.storyMigrated==='boolean')storyMigrated=l2.storyMigrated;
+    if(l2.storyLegacyUnlocked&&typeof l2.storyLegacyUnlocked==='object'){
+      Object.keys(l2.storyLegacyUnlocked).forEach(k=>{ if(l2.storyLegacyUnlocked[k]===true)storyLegacyUnlocked[k]=true; });
+    }
+    if(typeof l2.prestigeMigrated==='boolean')prestigeMigrated=l2.prestigeMigrated;
+    if(l2.prestigeLegacyEligible===true)prestigeLegacyEligible=true;
   }catch(e){}
 }
 // ---------- Lumora 2.0 Phase 9: Weekly Progression ----------
@@ -3301,7 +3366,25 @@ function generateNightObjectives(prevObjectives){
   const active=[], progress={};
   chosen.forEach(cat=>{
     const eligible=OBJECTIVE_POOL.filter(o=>o.category===cat&&o[tier]);
-    let tmpl=eligible[Math.floor(rand(0,eligible.length))];
+    // E37: Collector's own "Collection objective" specifically means
+    // Playful (contractPlayfulMult() is what it actually boosts) -- prefer
+    // catch_playful over the uniform-random pick for the forced 'catch'
+    // slot when Collector is the active contract, so the card's own
+    // Playful modifier and its objective are never mismatched. catch_playful
+    // defines BOTH early and later tiers (unlike catch_shy, later-only), so
+    // it's always present in `eligible` here -- no tier gap, no fallback
+    // needed for that reason (the `||` below is pure defensive belt-and-
+    // suspenders, not an expected path). Narrowly scoped to
+    // activeContract's id being exactly 'collector' AND this exact category
+    // -- every other contract, and no-contract nights, fall through to the
+    // byte-identical uniform-random pick below, untouched. The E9 variety
+    // reroll immediately after this still runs unchanged on top of
+    // whichever tmpl is chosen here, so a repeat-night collision still
+    // falls back to the SAME existing reroll-among-alternatives behavior --
+    // never a fabricated target/reward, never a second variety system.
+    let tmpl=(activeContract>=0&&cat==='catch'&&CONTRACTS[activeContract].id==='collector')
+      ? (eligible.find(o=>o.id==='catch_playful')||eligible[Math.floor(rand(0,eligible.length))])
+      : eligible[Math.floor(rand(0,eligible.length))];
     // E9 Night Variety: if this exact template also appeared last night,
     // and this category actually offers a different eligible template,
     // reroll among the alternatives -- same "reroll on collision, uniform
@@ -3351,7 +3434,7 @@ function ensureNightObjectives(){
     // this is what makes a genuine page reload mid-night restore the SAME
     // 3 objectives instead of silently rerolling a different set for what
     // the player experiences as the same night.
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     saveProgress();
     S.isNewNight=true; // a genuine new night -- show the reveal card
   }
@@ -3431,7 +3514,7 @@ function ensureNightEvent(){
     // real happens" discipline as ensureNightObjectives()'s own generate
     // branch, so a genuine page reload mid-night restores the exact same
     // outcome instead of silently rerolling.
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     saveProgress();
   }
 }
@@ -4250,7 +4333,7 @@ function equipTheme(id){
   if(!validVillageTheme(id)||!isThemeOwned(id))return false;
   if(equippedTheme===id)return true;
   equippedTheme=id;
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -4525,6 +4608,14 @@ if(YT&&YT.game&&YT.game.loadData){
       if(typeof d.seasonProgress==='number'&&d.seasonProgress>=0)seasonProgress=Math.min(d.seasonProgress,currentSeason().milestones);
       // Phase 12: same defensive clamp as the non-YT load path's own comment.
       if(typeof d.prestigeLevel==='number'&&d.prestigeLevel>=0)prestigeLevel=Math.min(Math.floor(d.prestigeLevel),PRESTIGE_MAX);
+      // E37: same plain restores / lazy-migration split as the non-YT load
+      // path's own comment just above the equivalent lines.
+      if(typeof d.storyMigrated==='boolean')storyMigrated=d.storyMigrated;
+      if(d.storyLegacyUnlocked&&typeof d.storyLegacyUnlocked==='object'){
+        Object.keys(d.storyLegacyUnlocked).forEach(k=>{ if(d.storyLegacyUnlocked[k]===true)storyLegacyUnlocked[k]=true; });
+      }
+      if(typeof d.prestigeMigrated==='boolean')prestigeMigrated=d.prestigeMigrated;
+      if(d.prestigeLegacyEligible===true)prestigeLegacyEligible=true;
       // E18: Village 1 persistent restoration -- same defensive per-field
       // ratchet as every other field above. milestones[]/completed are never
       // read from the save at all, always rebuilt from restorationProgress
@@ -13356,25 +13447,40 @@ function drawThemesScreen(){
 }
 // ---------- Glowkeeper Story (Journal narrative pass) ----------
 // Static story data only -- no new engine, no new progression currency.
-// Unlock gating reuses restorationPct(best) directly against the SAME pct
-// thresholds VILLAGE_MILESTONES already uses (10/25/40/60/80/100), so a
-// chapter unlocks in lockstep with the milestone of the same name. No
-// second save field: unlock state is derived live from `best`, same as
-// the Village screen's own milestone list.
+// E37: unlock gating migrated OFF restorationPct(best) (the legacy global
+// best-SCORE meter -- see E35/E36) and ONTO real Lumora village progress
+// (villageThreshold, checked against villages[lumora].bestNightDelivered).
+// `pct` is kept, unchanged, purely as the historical record of the OLD
+// gate and as the input to the one-time grandfather migration below --
+// nothing reads it for live unlock decisions any more.
+//
+// villageThreshold mapping: NOT arbitrarily chosen. It's pct*5, i.e. the
+// exact same percentage rescaled onto Lumora's own real 0-500 completion
+// scale (VILLAGE1_COMPLETION_THRESHOLD) -- the scale the OLD 100%-restored-
+// at-best>=25 system was itself already built to preview. This isn't a
+// coincidence discovered after the fact: 5 of the 7 resulting thresholds
+// (50/200/300/400/500) land EXACTLY on a real VILLAGE1_MILESTONES entry,
+// and two of those five (50, 300) share the IDENTICAL milestone name
+// ('First Window', 'The Fountain') this chapter already uses. The other
+// two chapters (0, always-unlocked; 125, the bakery) fall cleanly between
+// two adjacent real milestones (m2:100/m3:150) rather than matching one
+// exactly, which is expected given 7 chapters were being mapped onto 8
+// milestones -- not a sign the formula is wrong, just that the two lists
+// were never meant to be 1:1.
 const STORY_CHAPTERS=[
-  {key:'first-night', pct:0,   title:'The First Night',
+  {key:'first-night', pct:0,   villageThreshold:0,   title:'The First Night',
    text:'I found the old jar beneath the workshop tonight. It was covered in dust. I almost left it there. Then something moved inside. A single firefly. I don\'t know who left the jar. I don\'t know why the fireflies came back. But tonight, I carried the light home.'},
-  {key:'first-window', pct:10, title:'First Window',
+  {key:'first-window', pct:10, villageThreshold:50,  title:'First Window', // == VILLAGE1_MILESTONES m1, same name, exact threshold match
    text:'Tonight, I saw a light in one of the windows. Just one. Someone is still awake. I stood beneath it for a while. I don\'t think they saw me. But somehow, it felt like they were waiting.'},
-  {key:'bakery', pct:25, title:'The Bakery',
+  {key:'bakery', pct:25, villageThreshold:125, title:'The Bakery', // between m2 (100) and m3 (150) -- no exact milestone, a clean midpoint of the pct*5 rescale
    text:'The bakery opened this morning. There was flour on the doorstep. Smoke curled from the chimney. And for the first time in years, the village smelled like bread. I had forgotten that smell. I didn\'t realize I had missed it.'},
-  {key:'lantern-garden', pct:40, title:'Lantern Garden',
+  {key:'lantern-garden', pct:40, villageThreshold:200, title:'Lantern Garden', // == VILLAGE1_MILESTONES m4 "Firefly Garden", exact threshold match
    text:'Someone planted flowers beneath the old lanterns. I don\'t remember seeing them yesterday. Perhaps the villagers planted them. Perhaps the garden simply needed a little light. Either way, the path home feels different tonight.'},
-  {key:'fountain', pct:60, title:'The Fountain',
+  {key:'fountain', pct:60, villageThreshold:300, title:'The Fountain', // == VILLAGE1_MILESTONES m6, same name, exact threshold match
    text:'The fountain is running again. I heard laughter in the square tonight. Children were chasing one another around the water. I stayed at the edge of the square and watched. Nobody noticed the Glowkeeper. That\'s alright. The village doesn\'t need to know my name. It only needs its lights back.'},
-  {key:'bell-tower', pct:80, title:'Bell Tower',
+  {key:'bell-tower', pct:80, villageThreshold:400, title:'Bell Tower', // == VILLAGE1_MILESTONES m7 "West Row", exact threshold match
    text:'The bell rang tonight. I had forgotten its sound. People came outside. Doors opened. Windows filled with warm light. For a moment, everyone looked toward the same place. Up. Toward the stars.'},
-  {key:'dawn-chorus', pct:100, title:'Dawn Chorus',
+  {key:'dawn-chorus', pct:100, villageThreshold:500, title:'Dawn Chorus', // == VILLAGE1_MILESTONES m8 "Final Beacon" == VILLAGE1_COMPLETION_THRESHOLD, full completion
    text:'Tonight, every window is lit. The bakery is warm. The garden is glowing. Water runs through the fountain. The bell has rung. And somewhere beyond the rooftops, birds have begun to sing. I thought the village needed the light. Perhaps I was wrong. Perhaps it was only waiting for someone to remind it that it still had its own. The whole village burns gently until sunrise.'}
 ];
 // Post-100% teaser -- deliberately NOT a second story system (per direct
@@ -13387,14 +13493,48 @@ const OLD_GLOWKEEPER_FRAGMENTS=[
   'I asked the oldest villager about them. She wouldn\'t tell me their name. She only said: \'They knew where the fireflies went.\'',
   'I found an old photograph today. Someone is standing outside the workshop. Holding the same kind of jar I carry now.'
 ];
-function storyChapterUnlocked(ch){ return restorationPct(best)>=ch.pct; }
+// E37: one-time grandfather pass -- any chapter the OLD restorationPct(best)
+// gate had already unlocked is permanently preserved, so migrating onto the
+// new villageThreshold gate can never RE-LOCK content an existing player
+// already read. Declared/computed here (not up near storyMigrated's own
+// declaration) specifically because it needs STORY_CHAPTERS, which -- per
+// this file's own ordering-hazard rule -- doesn't exist yet at that early
+// point; called lazily instead (guarded by storyMigrated, same pattern
+// ensurePrestigeMigrated() already established), from storyChapterUnlocked()
+// itself, so it's guaranteed to run after STORY_CHAPTERS is real. Safe to
+// compute lazily rather than strictly at load time: `best` only ever
+// increases, so a slightly-later snapshot can only grandfather AT LEAST as
+// much as an exact load-time one would -- never less, never a regression.
+function ensureStoryMigrated(){
+  if(storyMigrated)return;
+  const legacyPct=restorationPct(best);
+  STORY_CHAPTERS.forEach(ch=>{ if(legacyPct>=ch.pct)storyLegacyUnlocked[ch.key]=true; });
+  storyMigrated=true;
+}
+// E37: migrated off restorationPct(best) (the legacy global best-SCORE
+// meter) onto Lumora's OWN real village progression -- reads
+// villages[lumora].bestNightDelivered against each chapter's new
+// villageThreshold (see STORY_CHAPTERS' own comment for the mapping).
+// Explicitly the 'lumora' entry BY ID, never currentVillageProgress() --
+// Moonfall grinding must never unlock Lumora's story, regardless of which
+// village is currently selected. The one-time grandfather set (permanent,
+// persisted) is checked first and short-circuits to true -- once true for
+// a chapter, always true, exactly like every other permanent-restoration
+// flag in this file.
+function storyChapterUnlocked(ch){
+  ensureStoryMigrated();
+  if(storyLegacyUnlocked[ch.key])return true;
+  const lumora=villageProgression.villages.find(v=>v.id==='lumora');
+  return !!lumora&&lumora.bestNightDelivered>=ch.villageThreshold;
+}
 function storyKeyUnlocked(key){
   if(key==='old-glowkeeper')return storyChapterUnlocked(STORY_CHAPTERS[STORY_CHAPTERS.length-1]);
   const ch=STORY_CHAPTERS.find(c=>c.key===key);
   return ch?storyChapterUnlocked(ch):false;
 }
-// Reads restorationPct(best) live, same as everything else here -- not a
-// snapshot, so a Capacity-Enforcement-style staleness bug can't happen.
+// Reads Lumora's live bestNightDelivered (via storyChapterUnlocked()), same
+// as everything else here -- not a snapshot, so a Capacity-Enforcement-style
+// staleness bug can't happen.
 function latestUnlockedChapterKey(){
   let latest=STORY_CHAPTERS[0].key;
   STORY_CHAPTERS.forEach(ch=>{ if(storyChapterUnlocked(ch))latest=ch.key; });
@@ -13573,7 +13713,21 @@ function drawSeasonJournal(){
 // requirement").
 function drawPrestigeJournal(){
   const maxed=prestigeLevel>=PRESTIGE_MAX;
-  const villageReady=villageLevel()===3;
+  // E37: this checklist line must measure the SAME thing prestigeEligible()
+  // actually gates on -- it independently recomputed villageLevel()===3
+  // (the legacy best/nightNumber meter) here even after prestigeEligible()
+  // itself was migrated to real Lumora+Moonfall completion, which would
+  // have shown an unchecked "○ Village fully restored" line while the
+  // PRESTIGE button below was already live for a grandfathered-eligible
+  // player -- a real display/logic mismatch, not a wording preference.
+  // Mirrors prestigeEligible()'s own village-completion check exactly
+  // (prestigeLegacyEligible short-circuits both the same way), never a
+  // second, competing definition of "ready."
+  const villageReady=prestigeLegacyEligible||(function(){
+    const lumora=villageProgression.villages.find(v=>v.id==='lumora');
+    const moonfall=villageProgression.villages.find(v=>v.id==='moonfall');
+    return !!lumora&&!!moonfall&&lumora.completed&&moonfall.completed;
+  })();
   const totalFireflies=Object.keys(TYPES).length, discoveredFireflies=getDiscoveredFireflyCount();
   const collectionReady=discoveredFireflies===totalFireflies;
   const eligible=prestigeEligible();
@@ -13590,7 +13744,7 @@ function drawPrestigeJournal(){
 
   ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.font='500 13px Georgia,serif';
   ctx.fillStyle=villageReady?LUM_GOLD:'rgba(174,184,203,0.6)';
-  ctx.fillText((villageReady?'✓ ':'○ ')+'Village fully restored (Level 3)',px+20,py+108);
+  ctx.fillText((villageReady?'✓ ':'○ ')+'Lumora and Moonfall restored',px+20,py+108);
   ctx.fillStyle=collectionReady?LUM_GOLD:'rgba(174,184,203,0.6)';
   ctx.fillText((collectionReady?'✓ ':'○ ')+'Full Firefly Collection ('+discoveredFireflies+'/'+totalFireflies+')',px+20,py+128);
 

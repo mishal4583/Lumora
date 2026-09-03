@@ -3549,32 +3549,37 @@ __check('the relocated Tracker toggle still works from the Journal screen\\'s Fi
 __fire(cv, 'pointerdown', __fakeEvent(JOURNAL_CLOSE_BTN.x, JOURNAL_CLOSE_BTN.y));
 __check('the Journal close button returns to the title screen (journalFrom was \\'title\\')', screen === 'title');
 
-// Glowkeeper Story pass: chapter unlock gating reuses restorationPct(best)
-// directly against the SAME pct thresholds VILLAGE_MILESTONES already
-// uses -- HEART_TIER_THRESH=[0,5,10,15,20,25] means restorationPct(best)
-// only ever lands on 0/20/40/60/80/100, so these exact "best" values are
-// the only way to hit each rung deterministically.
+// E37: chapter unlock gating migrated OFF restorationPct(best) onto real
+// Lumora village progress (villageThreshold, checked against
+// villages[lumora].bestNightDelivered) -- see STORY_CHAPTERS' own comment
+// for the pct*5 mapping. Forces best=0 and resets the migration flags
+// BEFORE the first storyChapterUnlocked() call of this block so the
+// one-shot grandfather snapshot (ensureStoryMigrated()) is taken at a
+// known, deterministic legacyPct (0) regardless of whatever best-score value
+// earlier tests in this same scenario left behind -- otherwise this block's own
+// checks below would depend on unrelated test ordering.
 (function(){
   reset(); screen = 'title';
-  best = 0;
-  __check('The First Night is unlocked at 0% restoration (always available)', storyKeyUnlocked('first-night') === true);
-  __check('Dawn Chorus is locked at 0% restoration', storyKeyUnlocked('dawn-chorus') === false);
+  best = 0; storyMigrated = false; storyLegacyUnlocked = {};
+  villageProgression.villages[0].bestNightDelivered = 0;
+  __check('The First Night is unlocked at 0 delivered (always available)', storyKeyUnlocked('first-night') === true);
+  __check('Dawn Chorus is locked at 0 delivered', storyKeyUnlocked('dawn-chorus') === false);
   __check('The Old Glowkeeper is locked before Dawn Chorus is reached', storyKeyUnlocked('old-glowkeeper') === false);
   __check('The Old Glowkeeper row does not even appear in the list before Dawn Chorus', storyRowRects().some(function(r){ return r.key === 'old-glowkeeper'; }) === false);
 
-  best = 10; // heartTier -> 3 -> restorationPct 40: First Window(10)/Bakery(25)/Lantern Garden(40) unlocked, Fountain(60)+ still locked
-  __check('First Window is unlocked once restoration reaches its milestone (40% >= 10%)', storyKeyUnlocked('first-window') === true);
-  __check('Lantern Garden is unlocked at exactly its own 40% threshold', storyKeyUnlocked('lantern-garden') === true);
-  __check('The Fountain (60%) stays locked at 40% restoration', storyKeyUnlocked('fountain') === false);
+  villageProgression.villages[0].bestNightDelivered = 200; // First Window(50)/Bakery(125)/Lantern Garden(200) unlocked, Fountain(300)+ still locked
+  __check('First Window is unlocked once Lumora delivery reaches its own threshold (200 >= 50)', storyKeyUnlocked('first-window') === true);
+  __check('Lantern Garden is unlocked at exactly its own 200 threshold', storyKeyUnlocked('lantern-garden') === true);
+  __check('The Fountain (300) stays locked at 200 delivered', storyKeyUnlocked('fountain') === false);
 
-  best = 25; // heartTier -> 6 -> restorationPct 100: everything unlocked, including the post-100% teaser
-  __check('Dawn Chorus is unlocked at 100% restoration', storyKeyUnlocked('dawn-chorus') === true);
+  villageProgression.villages[0].bestNightDelivered = 500; // full Lumora completion: everything unlocked, including the post-100% teaser
+  __check('Dawn Chorus is unlocked at full Lumora completion (500)', storyKeyUnlocked('dawn-chorus') === true);
   __check('The Old Glowkeeper unlocks the instant Dawn Chorus does', storyKeyUnlocked('old-glowkeeper') === true);
   __check('The Old Glowkeeper row appears in the list once Dawn Chorus is reached', storyRowRects().some(function(r){ return r.key === 'old-glowkeeper'; }) === true);
-  __check('latestUnlockedChapterKey() reports Dawn Chorus at 100%', latestUnlockedChapterKey() === 'dawn-chorus');
+  __check('latestUnlockedChapterKey() reports Dawn Chorus at full completion', latestUnlockedChapterKey() === 'dawn-chorus');
 
   // tapping a locked row does nothing; tapping an unlocked one opens it
-  best = 0; screen = 'journal'; journalTab = 'story'; journalReading = null; journalFrom = 'title';
+  villageProgression.villages[0].bestNightDelivered = 0; screen = 'journal'; journalTab = 'story'; journalReading = null; journalFrom = 'title';
   var dawnRow = storyRowRects().find(function(r){ return r.key === 'dawn-chorus'; });
   __fire(cv, 'pointerdown', __fakeEvent(dawnRow.x, dawnRow.y));
   __check('tapping a LOCKED chapter row does not open it', journalReading === null);
@@ -3588,6 +3593,7 @@ __check('the Journal close button returns to the title screen (journalFrom was \
   __check('closing from the reading view goes back to the chapter list first, not straight to title', journalReading === null && screen === 'journal');
   __fire(cv, 'pointerdown', __fakeEvent(JOURNAL_CLOSE_BTN.x, JOURNAL_CLOSE_BTN.y));
   __check('a second close from the list actually exits the Journal', screen === 'title');
+  villageProgression.villages[0].bestNightDelivered = 500; // restore full completion so later tests in this same scenario that assume Dawn Chorus/Old Glowkeeper are still reachable (e.g. via the grandfather set) aren't affected by this block's own probing
 
   // The Old Glowkeeper's 3 fragments render too, once unlocked
   best = 25; screen = 'journal'; journalTab = 'story'; journalReading = 'old-glowkeeper';
@@ -3834,7 +3840,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3914,7 +3920,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -4359,7 +4365,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','cachedNightEvent','cachedNightEventFor','cachedNightObjectives','cachedNightObjectivesFor','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastNightCompletionDay','lastPlayed','nightNumber','nightStreak','objectivesCompleted','prestigeLevel','quests','seasonId','seasonProgress','trackerOn','upgrades','variantJournal','villageProgression','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','cachedNightEvent','cachedNightEventFor','cachedNightObjectives','cachedNightObjectivesFor','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastNightCompletionDay','lastPlayed','nightNumber','nightStreak','objectivesCompleted','prestigeLegacyEligible','prestigeLevel','prestigeMigrated','quests','seasonId','seasonProgress','storyLegacyUnlocked','storyMigrated','trackerOn','upgrades','variantJournal','villageProgression','weekly','workshopTokens']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -6089,7 +6095,7 @@ return __tick(5).then(function(){
   best = 25; nightNumber = 10; // a village-level-2 state
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
   __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
 });
 `);
@@ -6219,7 +6225,7 @@ return __tick(5).then(function(){
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
   __check('Test 7: saveProgress() writes equippedTheme into the existing save payload -- no new save key/mechanism', payload.equippedTheme === 'default');
-  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
+  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
 });
 `);
 
@@ -6507,7 +6513,7 @@ return __tick(5).then(function(){
   upgrades.tutorialDone = true;
   saveProgress();
   var payload1 = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
+  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
 
   // ---- Test 20: Night Complete's existing layout is completely unaffected by Phase 8 monetization state (Mystery Chest/Lucky Firefly live OUTSIDE Night Complete entirely -- see this phase's own report for why) ----
   upgrades.tutorialDone = true;
@@ -6806,24 +6812,36 @@ __check('Test 1: a fresh player starts at Prestige 0', prestigeLevel === 0);
 
 upgrades.tutorialDone = true;
 reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+// E37: force a clean, deterministic migration snapshot (best/nightNumber=0,
+// so ensurePrestigeMigrated()'s own legacy-grandfather check can never
+// spuriously fire from whatever best/nightNumber this fresh scenario
+// happens to start with) -- same discipline the Story migration tests use.
+best = 0; nightNumber = 0; prestigeMigrated = false; prestigeLegacyEligible = false;
+villageProgression = defaultVillageProgression();
 
 // ---- Test 2: eligibility -- below the requirement cannot Prestige ----
-best = 5; nightNumber = 1;
 journal = { y: 1, b: 0, g: 0, e: 0, m: 0 };
-__check('Test 2 setup: village is not yet at its top tier', villageLevel() !== 3);
+__check('Test 2 setup: neither village is complete yet', !villageProgression.villages[0].completed && !villageProgression.villages[1].completed);
 __check('Test 2 setup: collection is not yet complete', getDiscoveredFireflyCount() !== Object.keys(TYPES).length);
 __check('Test 2: an under-qualified player is not Prestige-eligible', prestigeEligible() === false);
 var coinsBeforeBlocked = coins, statueBeforeBlocked = upgrades.statueOwned;
 __check('Test 2: activatePrestige() refuses and changes nothing for an ineligible player', activatePrestige() === false && prestigeLevel === 0 && coins === coinsBeforeBlocked && upgrades.statueOwned === statueBeforeBlocked);
 
-// ---- Test 3: eligibility reached -- the actual requirement (Village Level 3 AND full base Firefly Collection) ----
-best = 25; nightNumber = 20;
+// ---- Test 3: eligibility reached -- the actual E37 requirement (Lumora AND Moonfall both completed, AND full base Firefly Collection) ----
+// E37: migrated off villageLevel() (best/nightNumber) onto the real two-
+// village architecture -- both villages' own completed flag, exactly as
+// Village Details/Night Complete already read it, not a score/night proxy.
+villageProgression.villages[0].bestNightDelivered = 500; villageProgression.villages[0].completed = true;
+villageProgression.villages[1].bestNightDelivered = 1000; villageProgression.villages[1].completed = true;
 // E34: the base collection now has 6 types (Crimson Firefly added) -- 'r' must
 // be discovered too for "fully discovered" to genuinely be true any more.
 journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 };
-__check('Test 3 setup: villageLevel() is now the top tier', villageLevel() === 3);
+__check('Test 3 setup: both Lumora and Moonfall are now complete', villageProgression.villages[0].completed && villageProgression.villages[1].completed);
 __check('Test 3 setup: the base Firefly Collection is now fully discovered', getDiscoveredFireflyCount() === Object.keys(TYPES).length);
 __check('Test 3: Prestige is now available', prestigeEligible() === true);
+__check('Test 3 (b): Lumora alone (Moonfall incomplete) is NOT sufficient', (function(){ var savedMoonfall = villageProgression.villages[1].completed; villageProgression.villages[1].completed = false; var r = prestigeEligible(); villageProgression.villages[1].completed = savedMoonfall; return r === false; })());
+__check('Test 3 (c): Moonfall alone (Lumora incomplete) is NOT sufficient', (function(){ var savedLumora = villageProgression.villages[0].completed; villageProgression.villages[0].completed = false; var r = prestigeEligible(); villageProgression.villages[0].completed = savedLumora; return r === false; })());
+__check('Test 3 (d): Aurora remains completely irrelevant to eligibility -- still locked/null-threshold, never checked', villageProgression.villages[2].id === 'aurora' && villageProgression.villages[2].completionThreshold === null && prestigeEligible() === true);
 
 // ---- Test 4: confirmation -- opening then cancelling changes absolutely nothing ----
 upgrades.statueOwned = false; upgrades.statueEquipped = false;
@@ -6859,7 +6877,9 @@ __check('Test 6: the correct permanent reward (Master Glowkeeper Statue ownershi
 
 // ---- Test 6 (already-owned fallback): if the reward item was already owned (e.g. bought outright before ever reaching Prestige), the SAME real price is granted in coins instead -- never a wasted no-op, never a second copy of anything ----
 screen = 'play';
-best = 25; nightNumber = 20; journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 }; // E34: 'r' included, see Test 3's own comment
+villageProgression.villages[0].bestNightDelivered = 500; villageProgression.villages[0].completed = true;
+villageProgression.villages[1].bestNightDelivered = 1000; villageProgression.villages[1].completed = true;
+journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 }; // E34: 'r' included, see Test 3's own comment
 prestigeLevel = 0; upgrades.statueOwned = true; upgrades.statueEquipped = false; // simulate: player bought the statue themselves, long before reaching Prestige
 var coinsBeforeFallback = coins;
 __check('Test 6 (already-owned fallback) setup: still eligible', prestigeEligible() === true);
@@ -6873,6 +6893,8 @@ __check('Test 7 (b): a third call is equally inert', activatePrestige() === fals
 
 // ---- Test 8/12/13/14/15: permanent progression is completely preserved by a real Prestige activation ----
 best = 25; nightNumber = 20;
+villageProgression.villages[0].bestNightDelivered = 500; villageProgression.villages[0].completed = true;
+villageProgression.villages[1].bestNightDelivered = 1000; villageProgression.villages[1].completed = true;
 journal = { y: 7, b: 4, g: 2, e: 1, m: 1, r: 1 }; // E34: 'r' included, see Test 3's own comment
 upgrades.ownedJars = { simple: true, elder: true }; upgrades.equippedJar = 'elder'; upgrades.jarCapTiers.elder = 3;
 upgrades.ownedTrails = { none: true, gold: true }; upgrades.equippedTrail = 'gold';
@@ -6884,8 +6906,13 @@ var jarsBefore8 = JSON.stringify({ owned: upgrades.ownedJars, equipped: upgrades
 var trailsBefore8 = JSON.stringify({ owned: upgrades.ownedTrails, equipped: upgrades.equippedTrail });
 var themeBefore8 = equippedTheme, cosmeticsBefore8 = JSON.stringify(cosmeticsUnlocked);
 var bestBefore8 = best, nightBefore8 = nightNumber, restBefore8 = restorationPct(best), villageBefore8 = villageLevel();
+// E37: the actual new eligibility input -- villageProgression itself -- must
+// also be provably unchanged by a Prestige activation (Prestige is a pure
+// reader of village completion, never a writer of it).
+var villageProgressionBefore8 = JSON.stringify(villageProgression);
 __check('Test 8 setup: eligible', prestigeEligible() === true);
 activatePrestige();
+__check('Test 13 (b): villageProgression itself (the real E37 eligibility input) is byte-for-byte unchanged by Prestige', JSON.stringify(villageProgression) === villageProgressionBefore8);
 __check('Test 12: Firefly Journal is byte-for-byte unchanged by Prestige', JSON.stringify(journal) === journalBefore8);
 __check('Test 13: Village Restoration and Village Level are unchanged by Prestige', restorationPct(best) === restBefore8 && villageLevel() === villageBefore8 && best === bestBefore8 && nightNumber === nightBefore8);
 __check('Test 14: owned/equipped themes are unchanged by Prestige', equippedTheme === themeBefore8 && JSON.stringify(cosmeticsUnlocked) === cosmeticsBefore8);
@@ -7412,7 +7439,7 @@ return __tick(5).then(function(){
   __check('a successful Almost Affordable ad grants EXACTLY the shortfall (' + expectedShortfall + '), never the full cost and never a fixed amount', coins === coinsBeforeAd + expectedShortfall && coins === costForReward, 'coins=' + coins + ' cost=' + costForReward);
   __check('requestRewardedAd was called with the reserved WORKSHOP_SMALL_UPGRADE id, not a new one', rewardCalls[rewardCalls.length - 1] === 'lumora-workshop-small-upgrade');
   __check('the granted coins persist through the existing saveData mechanism -- no new save field', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLevel', 'quests', 'seasonId', 'seasonProgress', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
+  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
 
   // ---- one ad = one shortfall: purchasing immediately afterward drains the balance to exactly 0, no leftover ----
   var boughtOk = tryUpgradeJarCap('simple');
@@ -9692,6 +9719,266 @@ __check('TEST 10e: this round\\'s own live delivered count is exactly 1 for the 
 __check('TEST 10e (b): Moonfall\\'s bestNightDelivered is still exactly 1 (its seeded value, correctly un-lowered/un-corrupted) -- never the 200-coin value', currentVillageProgress().bestNightDelivered === 1, 'bestNightDelivered=' + currentVillageProgress().bestNightDelivered + ' villageBefore10=' + villageBefore10);
 `);
 
+// ===== E37: Collector objective fix -- prefer catch_playful for the forced 'catch' slot =====
+scenario('e37-collector-objective', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false;
+
+// ---- TEST 1/2: Collector, early tier -- catch objective must be Playful ----
+activeContract = 3; nightNumber = 1; cachedNightObjectivesFor = -1; cachedNightObjectives = null;
+generateNightObjectives(null);
+var catchObj1 = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+__check('TEST 1: Collector still forces a catch-category objective into tonight\\'s 3, same as before', !!catchObj1);
+__check('TEST 2: Collector\\'s catch objective is specifically Playful (catch_playful), early tier', !!catchObj1 && catchObj1.id === 'catch_playful' && catchObj1.fireflyType === 'b');
+__check('TEST 2 (b): early-tier target/reward are catch_playful\\'s own UNCHANGED early values (3/12)', catchObj1.target === 3 && catchObj1.reward === 12);
+
+// ---- TEST 3: Collector, later tier -- catch objective is still Playful, later-tier target/reward ----
+nightNumber = 10; cachedNightObjectivesFor = -1; cachedNightObjectives = null;
+generateNightObjectives(null);
+var catchObj2 = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+__check('TEST 3: Collector\\'s catch objective is Playful at later tier too', !!catchObj2 && catchObj2.id === 'catch_playful');
+__check('TEST 3 (b): later-tier target/reward are catch_playful\\'s own UNCHANGED later values (5/20)', catchObj2.target === 5 && catchObj2.reward === 20);
+
+// ---- variety safeguard: a repeat night still falls through to the SAME existing reroll, never a fabricated target/reward ----
+var prevWithPlayful = [{ id: 'catch_playful' }];
+var sawNonPlayful = false, sawFabricated = false;
+for (var vi = 0; vi < 40; vi++) {
+  generateNightObjectives(prevWithPlayful);
+  var co = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+  if (co.id !== 'catch_playful') sawNonPlayful = true;
+  var poolTmpl = OBJECTIVE_POOL.find(function(o){ return o.id === co.id; });
+  var expected = poolTmpl[nightObjectiveTier()];
+  if (co.target !== expected.target || co.reward !== expected.reward) sawFabricated = true;
+}
+__check('variety: when catch_playful was ALSO last night\\'s objective, Collector still lets the EXISTING anti-repeat reroll pick something else -- not silently stuck repeating past the safeguard', sawNonPlayful === true);
+__check('variety (no fabrication): whichever objective the reroll picks, its target/reward are always the real OBJECTIVE_POOL values, never invented', sawFabricated === false);
+
+// ---- TEST 4: non-Collector contracts are completely unaffected -- catch objective (when it happens to appear) stays uniform-random ----
+activeContract = 1; // Rush -- objCategory is 'score', not 'catch', so 'catch' only appears if the random shuffle happens to include it
+var sawCurious = false, sawOtherThanPlayful = false;
+for (var ni = 0; ni < 60; ni++) {
+  nightNumber = 10;
+  generateNightObjectives(null);
+  var c = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+  if (c && c.id !== 'catch_playful') sawOtherThanPlayful = true;
+}
+__check('TEST 4: with a non-Collector contract active, the catch objective (when chosen) is still uniform-random across the pool -- not biased toward Playful', sawOtherThanPlayful === true);
+
+// ---- TEST 4 (b): no contract at all -- also completely unaffected ----
+activeContract = -1;
+var sawOtherThanPlayful2 = false;
+for (var ni2 = 0; ni2 < 60; ni2++) {
+  nightNumber = 10;
+  generateNightObjectives(null);
+  var c2 = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+  if (c2 && c2.id !== 'catch_playful') sawOtherThanPlayful2 = true;
+}
+__check('TEST 4 (b): with no contract active, the catch objective is still uniform-random -- byte-identical to pre-E37 behavior', sawOtherThanPlayful2 === true);
+
+// ---- TEST 5: objective pool/targets/rewards themselves are completely untouched ----
+var poolPlayful = OBJECTIVE_POOL.find(function(o){ return o.id === 'catch_playful'; });
+__check('TEST 5: catch_playful\\'s own early/later target+reward are exactly as before -- E37 changed WHICH template gets picked, never the template\\'s own values', poolPlayful.early.target === 3 && poolPlayful.early.reward === 12 && poolPlayful.later.target === 5 && poolPlayful.later.reward === 20);
+__check('TEST 5 (b): OBJECTIVE_POOL itself still has exactly 9 templates -- none added, none removed', OBJECTIVE_POOL.length === 9);
+activeContract = -1;
+`);
+
+// ===== E37: Story migration -- off restorationPct(best), onto real Lumora village progression =====
+scenario('e37-story-migration', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+best = 0; nightNumber = 0; storyMigrated = false; storyLegacyUnlocked = {};
+villageProgression = defaultVillageProgression();
+
+// ---- TEST A: fresh save -- Story starts locked according to the new Lumora gate ----
+__check('TEST A: The First Night is unlocked at 0 delivered (always available)', storyKeyUnlocked('first-night') === true);
+__check('TEST A (b): every other chapter is locked on a genuinely fresh save', ['first-window','bakery','lantern-garden','fountain','bell-tower','dawn-chorus'].every(function(k){ return storyKeyUnlocked(k) === false; }));
+__check('TEST A (c): no chapter was grandfathered on a fresh save (nothing for the migration to preserve)', Object.keys(storyLegacyUnlocked).length === 0 || Object.keys(storyLegacyUnlocked).every(function(k){ return k === 'first-night'; }));
+
+// ---- TEST B: Lumora progression reaching each mapped threshold unlocks the corresponding chapter ----
+[['first-window',50],['bakery',125],['lantern-garden',200],['fountain',300],['bell-tower',400],['dawn-chorus',500]].forEach(function(pair){
+  villageProgression.villages[0].bestNightDelivered = pair[1] - 1;
+  __check('TEST B: ' + pair[0] + ' stays locked one delivery short of its own threshold (' + pair[1] + ')', storyKeyUnlocked(pair[0]) === false);
+  villageProgression.villages[0].bestNightDelivered = pair[1];
+  __check('TEST B: ' + pair[0] + ' unlocks at exactly its own mapped threshold (' + pair[1] + ')', storyKeyUnlocked(pair[0]) === true);
+});
+__check('TEST B (old-glowkeeper): unlocks the instant Dawn Chorus does, at full Lumora completion', storyKeyUnlocked('old-glowkeeper') === true);
+
+// ---- TEST C: Moonfall progress alone must never unlock Lumora Story ----
+villageProgression = defaultVillageProgression();
+storyMigrated = false; storyLegacyUnlocked = {}; best = 0;
+villageProgression.currentVillage = 'moonfall';
+villageProgression.villages[1].bestNightDelivered = 1000; villageProgression.villages[1].completed = true;
+__check('TEST C: Bell Tower stays locked despite FULL Moonfall completion (real Lumora progress is still 0)', storyKeyUnlocked('bell-tower') === false);
+__check('TEST C (b): Dawn Chorus stays locked for the same reason -- Moonfall grinding is never a substitute for Lumora progress', storyKeyUnlocked('dawn-chorus') === false);
+__check('TEST C (c): First Night still unlocked regardless (always available, independent of any village)', storyKeyUnlocked('first-night') === true);
+
+// ---- TEST G: a worse future night never relocks anything already reached ----
+// Story reads bestNightDelivered directly, and bestNightDelivered is ITSELF
+// already a permanent high-water mark (grantVillageProgress() only ever
+// raises it, never lowers it -- see the e28 suite's own "a worse night
+// never lowers the best" coverage) -- so this drives a REAL, much smaller
+// night through the actual delivery/grantVillageProgress() path rather than
+// hand-setting bestNightDelivered backward (an impossible state in real
+// play), proving Story correctly inherits that existing protection for free.
+villageProgression.currentVillage = 'lumora';
+villageProgression.villages[0].bestNightDelivered = 500; villageProgression.villages[0].completed = true;
+__check('TEST G setup: Dawn Chorus reached via real progress', storyKeyUnlocked('dawn-chorus') === true);
+reset(); screen = 'play';
+S.newNightT = 4.30; // dismiss the (unrelated) New Night reveal card, same as the Story/Prestige migration tests' own setup -- see their comments
+for (var gi = 0; gi < 10; gi++) S.carried.push({ type: 'y', ph: 0, sp: 1 }); // a genuine but much smaller night (10, not 500)
+S.jar.y = 999; S.jar.ty = 999;
+for (var gi2 = 0; gi2 < 300 && (S.sparks.length > 0 || S.carried.length > 0); gi2++) __stepFrame(16);
+__check('TEST G setup (b): this real night delivered far fewer than the existing best (10 vs 500)', S.nightDelivered === 10 && villageProgression.villages[0].bestNightDelivered === 500);
+__check('TEST G: Dawn Chorus stays unlocked after a genuinely worse night -- Story never regresses', storyKeyUnlocked('dawn-chorus') === true);
+`);
+
+// ===== E37: Story migration safety -- an existing legacy save (already-unlocked chapters under the OLD restorationPct(best) system) is grandfathered permanently =====
+scenario('e37-story-legacy-migration', null, `
+// seeded: gk2_best=15 (legacy restorationPct -> 60%, so the OLD system had
+// already unlocked First Night/First Window/Bakery/Lantern Garden/Fountain)
+// and a genuinely fresh Lumora village record (bestNightDelivered:0) -- so
+// every check below that passes MUST be coming from the grandfather, not
+// from real progress, which is deliberately absent.
+__check('TEST D setup: real Lumora bestNightDelivered is 0 (seeded) -- the NEW gate alone would lock everything past First Night', villageProgression.villages[0].bestNightDelivered === 0);
+__check('TEST D: First Window (old 10 percent chapter) remains unlocked via the grandfather, despite 0 real Lumora progress', storyKeyUnlocked('first-window') === true);
+__check('TEST D (b): The Bakery (old 25 percent) remains unlocked via the grandfather', storyKeyUnlocked('bakery') === true);
+__check('TEST D (c): Lantern Garden (old 40 percent) remains unlocked via the grandfather', storyKeyUnlocked('lantern-garden') === true);
+__check('TEST D (d): The Fountain (old 60 percent, the exact legacy ceiling at best=15) remains unlocked via the grandfather', storyKeyUnlocked('fountain') === true);
+__check('TEST D (e): Bell Tower (old 80 percent, past the legacy ceiling) correctly stays LOCKED -- the grandfather only preserves what was ALREADY unlocked, never more', storyKeyUnlocked('bell-tower') === false);
+__check('TEST D (f): Dawn Chorus (old 100 percent) correctly stays LOCKED for the same reason', storyKeyUnlocked('dawn-chorus') === false);
+
+// ---- TEST E: migration ran exactly once -- storyMigrated is now true, grandfather set matches the legacy snapshot exactly ----
+__check('TEST E: storyMigrated is now true after the first real access', storyMigrated === true);
+__check('TEST E (b): the grandfather set contains exactly the 5 chapters the OLD system had unlocked at best=15 (up through Fountain), no more, no less', JSON.stringify(Object.keys(storyLegacyUnlocked).sort()) === JSON.stringify(['bakery', 'first-night', 'first-window', 'fountain', 'lantern-garden']));
+
+// ---- TEST G: a worse/no-further-progress round never relocks anything the grandfather already covers ----
+__check('TEST G: First Window stays unlocked with zero further real Lumora progress -- Story never regresses', villageProgression.villages[0].bestNightDelivered === 0 && storyKeyUnlocked('first-window') === true);
+__check('TEST G (b): The Fountain stays unlocked for the same reason', storyKeyUnlocked('fountain') === true);
+
+// ---- TEST C: Moonfall progress alone must never unlock Lumora Story, even for a legacy save ----
+villageProgression.currentVillage = 'moonfall';
+villageProgression.villages[1].bestNightDelivered = 1000; villageProgression.villages[1].completed = true;
+__check('TEST C: Bell Tower (not grandfathered) stays locked despite FULL Moonfall completion', storyKeyUnlocked('bell-tower') === false);
+
+// ---- TEST B: real Lumora progress correctly unlocks the remaining, non-grandfathered chapters ----
+villageProgression.currentVillage = 'lumora';
+villageProgression.villages[0].bestNightDelivered = 400;
+__check('TEST B: Bell Tower (villageThreshold 400) unlocks once real Lumora delivery reaches it', storyKeyUnlocked('bell-tower') === true);
+__check('TEST B (b): Dawn Chorus (500) still correctly locked at 400', storyKeyUnlocked('dawn-chorus') === false);
+villageProgression.villages[0].bestNightDelivered = 500;
+__check('TEST B (c): Dawn Chorus unlocks at full Lumora completion (500)', storyKeyUnlocked('dawn-chorus') === true);
+__check('TEST B (d): The Old Glowkeeper unlocks the instant Dawn Chorus does', storyKeyUnlocked('old-glowkeeper') === true);
+`);
+
+// ===== E37: Story migration -- reload persistence (TEST F) =====
+scenario('e37-story-reload-persists', null, `
+// seeded: gk2_best=25 (would compute a LARGER grandfather set if
+// recomputed) but gk2_lumora2 already carries storyMigrated:true plus a
+// SMALLER, already-finalized grandfather set (first-night/first-window/
+// bakery only) -- proves the persisted flag is honored as-is, not silently
+// recomputed/expanded from the reloaded best on this later session.
+__check('TEST F: storyMigrated survived the reload as true (already migrated, not recomputed)', storyMigrated === true);
+__check('TEST F (b): the persisted grandfather set survived reload exactly as saved', JSON.stringify(Object.keys(storyLegacyUnlocked).sort()) === JSON.stringify(['bakery', 'first-night', 'first-window']));
+__check('TEST F (c): a grandfathered chapter reads unlocked immediately after reload, with zero real Lumora progress', villageProgression.villages[0].bestNightDelivered === 0 && storyKeyUnlocked('bakery') === true);
+__check('TEST F (d): migration did NOT silently re-run/expand using the reloaded best (25) -- Lantern Garden (pct 40, NOT in the persisted grandfather set) correctly stays locked, proving the already-migrated flag was honored rather than recomputed', storyKeyUnlocked('lantern-garden') === false);
+`);
+
+// ===== E37: Prestige migration -- eligibility matrix (Lumora AND Moonfall completed, not the legacy villageLevel()) =====
+scenario('e37-prestige-migration', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+best = 0; nightNumber = 0; prestigeMigrated = false; prestigeLegacyEligible = false;
+villageProgression = defaultVillageProgression();
+journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 }; // full 6/6 base collection throughout this matrix
+
+// ---- 1: neither village complete -> not eligible ----
+__check('1: neither village complete -> not eligible', prestigeEligible() === false);
+
+// ---- 2: Lumora complete only -> not eligible ----
+villageProgression.villages[0].bestNightDelivered = 500; villageProgression.villages[0].completed = true;
+__check('2: Lumora complete only -> not eligible', prestigeEligible() === false);
+
+// ---- 3: Moonfall complete only -> not eligible ----
+villageProgression.villages[0].completed = false;
+villageProgression.villages[1].bestNightDelivered = 1000; villageProgression.villages[1].completed = true;
+__check('3: Moonfall complete only -> not eligible', prestigeEligible() === false);
+
+// ---- 4: both complete but collection incomplete -> not eligible ----
+villageProgression.villages[0].completed = true;
+var journalBefore4 = journal; journal = { y: 3, b: 2, g: 1, e: 1, m: 0, r: 0 }; // Mystery+Crimson undiscovered
+__check('4: both villages complete but collection incomplete (4/6) -> not eligible', prestigeEligible() === false);
+
+// ---- 5: both complete + 6/6 collection -> eligible ----
+journal = journalBefore4;
+__check('5: both villages complete + 6/6 collection -> eligible', prestigeEligible() === true);
+
+// ---- 5 (b): the Prestige TAB's own checklist line reflects the SAME new
+// requirement prestigeEligible() actually gates on, not the legacy
+// villageLevel() -- a real display/logic mismatch was found and fixed here
+// (the checklist independently recomputed villageLevel()===3 even after
+// prestigeEligible() itself was migrated, which could show an unchecked
+// "village restored" line under an already-enabled PRESTIGE button).
+(function(){
+  screen = 'journal'; journalTab = 'prestige'; journalFrom = 'title';
+  var calls = [];
+  var orig = ctx.fillText;
+  ctx.fillText = function(text){ calls.push(text); };
+  try { drawPrestigeJournal(); } finally { ctx.fillText = orig; }
+  var villageLine = calls.find(function(t){ return typeof t === 'string' && t.indexOf('restored') !== -1; });
+  __check('5 (c): the checklist shows the village requirement as CHECKED (village architecture is actually satisfied, matching prestigeEligible()===true)', !!villageLine && villageLine.indexOf('✓') === 0);
+  screen = 'play';
+})();
+
+// ---- 6: Aurora remains irrelevant ----
+__check('6 (a): Aurora is still locked/hidden (null threshold, never unlocked)', villageProgression.villages[2].id === 'aurora' && villageProgression.villages[2].completionThreshold === null && villageProgression.villages[2].completed === false);
+__check('6 (b): eligibility is unaffected by Aurora\\'s own locked state either way', prestigeEligible() === true);
+
+// ---- 7: existing prestigeLevel=1 remains 1 forever ----
+activatePrestige();
+__check('7 setup: activation succeeded, prestigeLevel is now 1', prestigeLevel === 1);
+villageProgression.villages[0].completed = false; villageProgression.villages[1].completed = false; // even if village state later regressed somehow
+__check('7: prestigeLevel remains 1 regardless -- Prestige, once granted, is never revoked', prestigeLevel === 1);
+
+// ---- 9: double activation cannot duplicate the reward ----
+villageProgression.villages[0].completed = true; villageProgression.villages[1].completed = true; // restore eligibility conditions
+var coinsBefore9 = coins, statueBefore9 = upgrades.statueOwned;
+__check('9 setup: no longer eligible -- prestigeLevel is already at PRESTIGE_MAX', prestigeEligible() === false && prestigeLevel === PRESTIGE_MAX);
+__check('9: a second activatePrestige() call grants nothing further', activatePrestige() === false && prestigeLevel === PRESTIGE_MAX && coins === coinsBefore9 && upgrades.statueOwned === statueBefore9);
+`);
+
+// ===== E37: Prestige migration safety -- old legacy fields alone must NOT accidentally grant eligibility (TEST 10) =====
+scenario('e37-prestige-no-accidental-grant', null, `
+// seeded: gk2_best=5, nightNumber left at its default (low) -- does NOT
+// satisfy the OLD villageLevel()===3 gate either (best=5 -> restorationPct
+// well under 100%), and villageProgression is a genuinely fresh/incomplete
+// save. Proves old-looking fields alone, when they don't actually satisfy
+// EITHER the old or the new requirement, never accidentally grant eligibility.
+journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 }; // 6/6 collection -- the ONE condition that IS satisfied, deliberately, to isolate the village-completion check
+__check('TEST 10 setup: old villageLevel() gate is NOT satisfied by this save (best too low)', villageLevel() !== 3);
+__check('TEST 10 setup: neither village is actually complete', !villageProgression.villages[0].completed && !villageProgression.villages[1].completed);
+__check('TEST 10: old legacy fields (best/nightNumber) alone, satisfying neither the old nor the new gate, do NOT grant Prestige eligibility', prestigeEligible() === false);
+__check('TEST 10 (b): activatePrestige() correctly refuses too', activatePrestige() === false && prestigeLevel === 0);
+`);
+
+// ===== E37: Prestige migration safety -- an existing legacy-eligible-but-not-yet-activated save keeps ITS eligibility (the approved grandfather), without fabricating the reward =====
+scenario('e37-prestige-legacy-eligible', null, `
+// seeded: gk2_best=25, nightNumber=20 (genuinely satisfies the OLD
+// villageLevel()===3 gate), but villageProgression is a fresh/incomplete
+// save (neither village actually completed under the NEW gate) and
+// prestigeLevel is still 0 (never activated). journal isn't part of this
+// seed (it lives under its own gk2_journal key) so it's set directly here,
+// same as every other scenario in this suite -- full 6/6 collection is the
+// OTHER genuinely-required condition, unaffected by this migration.
+journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 };
+__check('TEST setup: the OLD villageLevel() gate IS genuinely satisfied by this legacy save', villageLevel() === 3);
+__check('TEST setup: neither village is actually complete under the NEW gate', !villageProgression.villages[0].completed && !villageProgression.villages[1].completed);
+__check('TEST setup: collection is genuinely full (the other real requirement, unaffected by this migration)', getDiscoveredFireflyCount() === Object.keys(TYPES).length);
+__check('grandfather: a player already eligible under the OLD system keeps ACCESS to Prestige (the button stays reachable) even though real village completion has not happened yet', prestigeEligible() === true);
+__check('grandfather does NOT fabricate the reward itself: prestigeLevel is still exactly 0 until the player actually activates it', prestigeLevel === 0);
+activatePrestige();
+__check('activating still works normally through the grandfather, granting the real, single, unchanged reward -- nothing invented', prestigeLevel === 1 && upgrades.statueOwned === true);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -9781,6 +10068,31 @@ async function main() {
       // already at 1200 (proves a prior +200 grant persisted normally,
       // without re-granting on load).
       : sc.name === 'e34-crimson-reload' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:1,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); localStorage.setItem('gk2_coins','1200'); }catch(e){}\n`
+      // E37 Story TEST D/E/G/C/B: a legacy save with best=15 (old
+      // restorationPct -> 60%, so the OLD system had already unlocked First
+      // Night/First Window/Bakery/Lantern Garden/Fountain) and a genuinely
+      // fresh Lumora village record (bestNightDelivered:0) -- proves the
+      // one-time grandfather, not real progress, is what keeps those
+      // chapters unlocked.
+      : sc.name === 'e37-story-legacy-migration' ? `try{ localStorage.setItem('gk2_best','15'); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E37 Story TEST F: a save that already completed the migration in a
+      // PRIOR session (storyMigrated:true, a smaller, already-finalized
+      // grandfather set) but whose best is NOW 25 (which would compute a
+      // LARGER set if recomputed) -- proves the persisted flag is honored
+      // as-is on this later reload, not silently recomputed/expanded.
+      : sc.name === 'e37-story-reload-persists' ? `try{ localStorage.setItem('gk2_best','25'); localStorage.setItem('gk2_lumora2', JSON.stringify({storyMigrated:true, storyLegacyUnlocked:{'first-night':true,'first-window':true,'bakery':true}})); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E37 Prestige TEST 10: best=5 (well under the old villageLevel() gate
+      // -- restorationPct(5)=25%, nightNumber stays at its default 1) and a
+      // genuinely fresh, incomplete villageProgression -- neither the OLD
+      // nor the NEW gate is satisfied, proving old-looking fields alone
+      // never accidentally grant eligibility.
+      : sc.name === 'e37-prestige-no-accidental-grant' ? `try{ localStorage.setItem('gk2_best','5'); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E37 Prestige grandfather test: best=25 + nightNumber=20 (genuinely
+      // satisfies the OLD villageLevel()===3 gate) but a fresh/incomplete
+      // villageProgression under the NEW gate, prestigeLevel still 0 --
+      // proves the approved grandfather preserves ELIGIBILITY (button stays
+      // reachable) without fabricating the reward itself.
+      : sc.name === 'e37-prestige-legacy-eligible' ? `try{ localStorage.setItem('gk2_best','25'); localStorage.setItem('gk2_lumora2', JSON.stringify({nightNumber:20})); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value
