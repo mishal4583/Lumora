@@ -981,7 +981,7 @@ upgrades.jarCapTiers.simple = 0; coins = 0; // reset for the tests below, which 
 
 // the shop must draw across every tab (Lumora UI port: 6 tabs now) without
 // throwing, across varied journal states
-upgrades.deco = false; journal = { y: 0, b: 3, g: 30, e: 150, m: 0 };
+upgrades.deco = false; journal = { y: 0, b: 3, g: 30, e: 150, m: 0, r: 0 };
 var shopDrawThrew = false;
 try {
   ['jars', 'capacity', 'range', 'light-value', 'magnet', 'decor'].forEach(function(tab){ shopTab = tab; screen = 'shop'; draw(); });
@@ -3747,7 +3747,7 @@ return __tick(5).then(function(){
   // existed (no 'm' key at all) -- journal.m correctly stays at its own
   // already-initialized default (0) rather than erroring, same defensive
   // per-field pattern as every other field extension in this project
-  __check('reopening restores the persisted per-type journal counts exactly (and defaults the not-yet-existing Mystery entry)', JSON.stringify(journal) === JSON.stringify({ y: 5, b: 2, g: 0, e: 0, m: 0 }), 'journal=' + JSON.stringify(journal));
+  __check('reopening restores the persisted per-type journal counts exactly (and defaults the not-yet-existing Mystery/Crimson entries)', JSON.stringify(journal) === JSON.stringify({ y: 5, b: 2, g: 0, e: 0, m: 0, r: 0 }), 'journal=' + JSON.stringify(journal));
   // the mock cloud payload above simulates a save from BEFORE Village Fountain
   // existed (no 'fountain' key) -- upgrades.fountain correctly defaults to its
   // own already-initialized value (false), same defensive pattern as journal.m earlier
@@ -3895,13 +3895,13 @@ return __tick(5).then(function(){
 // full extended schema from then on.
 // =====================================================================
 scenario('playables-old-format-save', { audioEnabled: true }, `
-__check('coins, journal (including Mystery), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
+__check('coins, journal (including Mystery/Crimson), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0, r: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
 __spy.loadResolve(JSON.stringify({ best: 12 })); // the exact shape the shipped build has always saved -- no coins, journal, upgrades, or trackerOn at all
 return __tick(5).then(function(){
   __check('an old-format {best}-only save loads without throwing', best === 12, 'best=' + best);
   __check('coins defaults sensibly (stays 0) when the old save has no coins field', coins === 0, 'coins=' + coins);
   __check('coinFraction defaults sensibly (stays 0) when the old save has no coinFraction field', coinFraction === 0, 'coinFraction=' + coinFraction);
-  __check('journal defaults sensibly (all-zero, including Mystery) when the old save has no journal field', JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0 }), 'journal=' + JSON.stringify(journal));
+  __check('journal defaults sensibly (all-zero, including Mystery/Crimson) when the old save has no journal field', JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0, r: 0 }), 'journal=' + JSON.stringify(journal));
   // E2 Shop Economy 2.0: migrateEconomyV2() runs unconditionally right
   // after the load callback's own d.upgrades merge block (even when
   // d.upgrades didn't exist at all, as here) -- a safe no-op against an
@@ -5890,7 +5890,9 @@ __check('Test 4 setup: catch Shy for real', realCatch('g') === true);
 __check('Test 4: Curious+Playful+Shy are all discovered (Curious from Tests 1-2 above)', isFireflyDiscovered('y') && isFireflyDiscovered('b') && isFireflyDiscovered('g'));
 __check('Test 4: exactly 3 of the 5 base types are discovered so far', getDiscoveredFireflyCount() === 3);
 __check('Test 4: Elder/Mystery remain undiscovered', isFireflyDiscovered('e') === false && isFireflyDiscovered('m') === false);
-__check('Test 4: getCollectionProgress() reports 3/5 base, 0/5 variants', JSON.stringify(getCollectionProgress()) === JSON.stringify({ base: { discovered: 3, total: 5 }, variants: { discovered: 0, total: 5 } }));
+// E34: base total is now 6 (Crimson Firefly added), not 5 -- getCollectionProgress()'s
+// own total is Object.keys(TYPES).length, generic by design, so this legitimately grew.
+__check('Test 4: getCollectionProgress() reports 3/6 base, 0/5 variants', JSON.stringify(getCollectionProgress()) === JSON.stringify({ base: { discovered: 3, total: 6 }, variants: { discovered: 0, total: 5 } }));
 
 // ---- Test 8: a night restart (reset()) must NOT roll back permanent discoveries -- journal is session-level, never touched by reset() ----
 var journalBeforeRestart = JSON.stringify(journal);
@@ -6816,7 +6818,9 @@ __check('Test 2: activatePrestige() refuses and changes nothing for an ineligibl
 
 // ---- Test 3: eligibility reached -- the actual requirement (Village Level 3 AND full base Firefly Collection) ----
 best = 25; nightNumber = 20;
-journal = { y: 3, b: 2, g: 1, e: 1, m: 1 };
+// E34: the base collection now has 6 types (Crimson Firefly added) -- 'r' must
+// be discovered too for "fully discovered" to genuinely be true any more.
+journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 };
 __check('Test 3 setup: villageLevel() is now the top tier', villageLevel() === 3);
 __check('Test 3 setup: the base Firefly Collection is now fully discovered', getDiscoveredFireflyCount() === Object.keys(TYPES).length);
 __check('Test 3: Prestige is now available', prestigeEligible() === true);
@@ -6855,7 +6859,7 @@ __check('Test 6: the correct permanent reward (Master Glowkeeper Statue ownershi
 
 // ---- Test 6 (already-owned fallback): if the reward item was already owned (e.g. bought outright before ever reaching Prestige), the SAME real price is granted in coins instead -- never a wasted no-op, never a second copy of anything ----
 screen = 'play';
-best = 25; nightNumber = 20; journal = { y: 3, b: 2, g: 1, e: 1, m: 1 };
+best = 25; nightNumber = 20; journal = { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 }; // E34: 'r' included, see Test 3's own comment
 prestigeLevel = 0; upgrades.statueOwned = true; upgrades.statueEquipped = false; // simulate: player bought the statue themselves, long before reaching Prestige
 var coinsBeforeFallback = coins;
 __check('Test 6 (already-owned fallback) setup: still eligible', prestigeEligible() === true);
@@ -6869,7 +6873,7 @@ __check('Test 7 (b): a third call is equally inert', activatePrestige() === fals
 
 // ---- Test 8/12/13/14/15: permanent progression is completely preserved by a real Prestige activation ----
 best = 25; nightNumber = 20;
-journal = { y: 7, b: 4, g: 2, e: 1, m: 1 };
+journal = { y: 7, b: 4, g: 2, e: 1, m: 1, r: 1 }; // E34: 'r' included, see Test 3's own comment
 upgrades.ownedJars = { simple: true, elder: true }; upgrades.equippedJar = 'elder'; upgrades.jarCapTiers.elder = 3;
 upgrades.ownedTrails = { none: true, gold: true }; upgrades.equippedTrail = 'gold';
 equippedTheme = 'default'; cosmeticsUnlocked = ['theme-winter'];
@@ -6968,7 +6972,7 @@ __check('Performance: prestigeEligible() is a pure function of already-existing 
 
 scenario('lumora2-phase12-persistence', { audioEnabled: true }, `
 // ---- Migration: a pre-Phase-12 save (no prestigeLevel field at all) loads without throwing, defaulting safely to 0 ----
-__spy.loadResolve(JSON.stringify({ best: 25, coins: 300, nightNumber: 20, journal: { y: 3, b: 2, g: 1, e: 1, m: 1 }, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, statueOwned: false, statueEquipped: false } }));
+__spy.loadResolve(JSON.stringify({ best: 25, coins: 300, nightNumber: 20, journal: { y: 3, b: 2, g: 1, e: 1, m: 1, r: 1 }, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, statueOwned: false, statueEquipped: false } }));
 return __tick(5).then(function(){
   __check('Migration: a pre-Phase-12 save loads without throwing', loadDone === true);
   __check('Migration: a pre-Phase-12 save defaults prestigeLevel to 0, not undefined/NaN', prestigeLevel === 0);
@@ -9549,6 +9553,145 @@ finalizeNight();
 __check('E33 reload: the first-milestone discovery card does not reappear after a reload that already had it marked seen', discoveryCard === null);
 `);
 
+// ===== E34: Moonfall-exclusive Crimson Firefly =====
+scenario('e34-crimson-firefly', null, `
+// ---- TEST 12: existing regression -- Mystery Firefly is completely untouched by this change ----
+__check('E34 regression: TYPES.m is untouched -- pts/coins/glow/core/rarity/name all exactly as before', TYPES.m.pts === 5 && TYPES.m.coins === 8.00 && TYPES.m.glow === GLOW_MYS && TYPES.m.core === '#f6e8ff' && TYPES.m.name === 'mystery' && TYPES.m.rarity === 'legendary');
+
+reset(); screen = 'play'; upgrades.tutorialDone = true;
+villageProgression = defaultVillageProgression();
+villageProgression.currentVillage = 'lumora';
+S.score = 25; S.mysteryT = 0.001;
+__stepFrame(16);
+__check('E34 regression: Mystery still spawns normally in Lumora, unaffected by the new Moonfall-only gate', S.flies.some(function(f){ return f.type === 'm'; }));
+S.flies = S.flies.filter(function(f){ return f.type !== 'm'; });
+villageProgression.currentVillage = 'moonfall';
+S.score = 25; S.mysteryT = 0.001;
+__stepFrame(16);
+__check('E34 regression: Mystery also still spawns normally in Moonfall -- it was never village-gated and still is not', S.flies.some(function(f){ return f.type === 'm'; }));
+
+// ---- TEST 1: Lumora isolation -- Crimson can NEVER spawn while Lumora is current, even with its own gate (score>=20) satisfied and its timer forced imminent ----
+reset(); screen = 'play'; upgrades.tutorialDone = true;
+// this is the first reset() in the script with tutorialDone already true, so
+// ensureNightObjectives() just armed the (unrelated) New Night reveal card,
+// which gates update() entirely for its own first ~4.3s -- not what this
+// test is about, so dismiss it exactly the way a real tap-dismiss does
+// (jumping straight to its own 4.30 keyframe) rather than stepping hundreds
+// of frames just to get past it.
+S.newNightT = 4.30;
+villageProgression = defaultVillageProgression();
+villageProgression.currentVillage = 'lumora';
+S.score = 25; S.crimsonT = 0.001;
+for (var t1 = 0; t1 < 10; t1++) __stepFrame(16);
+__check('TEST 1: Crimson never spawns in Lumora via its normal timer path, even with score>=20 and an imminent timer', !S.flies.some(function(f){ return f.type === 'r'; }));
+// even a directly-forced spawnFly('r') call (bypassing the village-gated timer entirely) must still be caught and stripped -- proves the defensive per-frame filter, not just the timer gate, keeps Lumora clean
+spawnFly('r');
+__check('TEST 1b: a forced/leaked spawnFly(\\'r\\') call does briefly create the fly (proving the filter below, not spawnFly itself, is what protects Lumora)', S.flies.some(function(f){ return f.type === 'r'; }));
+__stepFrame(16);
+__check('TEST 1c: the defensive per-frame filter strips any Crimson fly the instant Lumora is current, within one frame', !S.flies.some(function(f){ return f.type === 'r'; }));
+__check('TEST 1d: the existing Lumora special (Mystery) remains spawnable in this same state -- only Crimson is restricted', (function(){ S.mysteryT = 0.001; __stepFrame(16); return S.flies.some(function(f){ return f.type === 'm'; }); })());
+
+// ---- TEST 2: Moonfall availability -- Crimson becomes eligible once Moonfall is current and its own existing gate (score>=20, reused from Mystery) is met ----
+reset(); screen = 'play';
+villageProgression.currentVillage = 'moonfall';
+S.score = 19; S.crimsonT = 0.001;
+__stepFrame(16);
+__check('TEST 2a: Crimson does not spawn below its score gate (19 < 20) -- the same gate Mystery already uses, not a new value', !S.flies.some(function(f){ return f.type === 'r'; }));
+S.score = 20; S.crimsonT = 0.001;
+__stepFrame(16);
+var crimsonFly = S.flies.filter(function(f){ return f.type === 'r'; })[0];
+__check('TEST 2b: Crimson spawns in Moonfall once score>=20 and its timer elapses', !!crimsonFly);
+
+// ---- TEST 3: visual -- red/crimson, clearly distinguishable from normal fireflies and from the existing Mystery special ----
+__check('TEST 3a: TYPES.r.glow is the dedicated GLOW_CRIMSON red, distinct from Mystery\\'s violet', TYPES.r.glow === GLOW_CRIMSON && TYPES.r.glow !== TYPES.m.glow);
+__check('TEST 3b: Crimson\\'s glow is also distinct from every normal firefly color', TYPES.r.glow !== TYPES.y.glow && TYPES.r.glow !== TYPES.b.glow && TYPES.r.glow !== TYPES.g.glow && TYPES.r.glow !== TYPES.e.glow);
+__check('TEST 3c: Crimson carries every field a firefly type needs, same schema as every other type', typeof TYPES.r.name === 'string' && typeof TYPES.r.rarity === 'string' && typeof TYPES.r.desc === 'string' && typeof TYPES.r.pts === 'number' && typeof TYPES.r.coins === 'number' && typeof TYPES.r.glow === 'string' && typeof TYPES.r.core === 'string');
+__check('TEST 3d: Crimson is flagged legendary rarity, the same tier as Mystery -- unmistakably a special/high-value firefly', TYPES.r.rarity === 'legendary');
+var __threwDrawFlyE34 = false;
+if (crimsonFly) { crimsonFly.alpha = 1; try { drawFly(crimsonFly); } catch (e) { __threwDrawFlyE34 = true; } }
+__check('TEST 3e: drawFly() renders a Crimson fly without throwing', __threwDrawFlyE34 === false);
+
+// ---- TEST 4 / 5: reward -- exactly +200 coins, exactly once, on a successful delivery ----
+reset(); upgrades.tutorialDone = true;
+villageProgression.currentVillage = 'moonfall';
+var coinsBefore4 = coins;
+var deliveredBefore4 = S.deliveredN;
+var villageBefore4 = currentVillageProgress().bestNightDelivered;
+S.carried.push({ type: 'r', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i4 = 0; i4 < 300 && (S.sparks.length > 0 || S.carried.length > 0); i4++) __stepFrame(16);
+__check('TEST 4: catching/delivering one Crimson Firefly grants EXACTLY +200 coins', coins === coinsBefore4 + 200, 'coins delta=' + (coins - coinsBefore4));
+var coinsAfter4 = coins;
+for (var i4b = 0; i4b < 120; i4b++) __stepFrame(16); // idle well past delivery -- nothing left in flight
+__check('TEST 5: no duplicate reward -- coins stay exactly the same afterward, nothing re-grants', coins === coinsAfter4);
+
+// ---- TEST 6: delivered count increases by exactly 1 ----
+__check('TEST 6: S.deliveredN increased by exactly 1 for the one Crimson delivery', S.deliveredN === deliveredBefore4 + 1, 'deliveredN=' + S.deliveredN);
+
+// ---- TEST 7: village progression increases by exactly 1, never by 200 ----
+__check('TEST 7: Moonfall\\'s bestNightDelivered/S.nightDelivered increased by exactly 1, NOT by the 200-coin reward value', currentVillageProgress().bestNightDelivered === villageBefore4 + 1 && S.nightDelivered === 1, 'bestNightDelivered=' + currentVillageProgress().bestNightDelivered + ' nightDelivered=' + S.nightDelivered);
+
+// ---- TEST 8: Night Complete shows the real SCORE and LIGHT DELIVERED after a Crimson delivery, matching underlying state exactly ----
+screen = 'play'; paused = false;
+S.over = true; S.overT = 1; S.objectiveActive = []; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins;
+function __renderRowsE34(){
+  var calls = [];
+  var orig = ctx.fillText;
+  ctx.fillText = function(text){ calls.push(text); };
+  try { drawOver(); } finally { ctx.fillText = orig; }
+  return calls;
+}
+var calls8 = __renderRowsE34();
+var scoreIdx8 = calls8.indexOf('SCORE');
+var lightIdx8 = calls8.indexOf('LIGHT DELIVERED');
+__check('TEST 8a: SCORE row shows the real S.score, untouched by the flat coin reward', calls8[scoreIdx8 + 1] === '' + S.score, 'shown=' + calls8[scoreIdx8 + 1] + ' S.score=' + S.score);
+__check('TEST 8b: LIGHT DELIVERED shows the real delivered COUNT, never the 200-coin value', calls8[lightIdx8 + 1] === '' + S.deliveredN, 'shown=' + calls8[lightIdx8 + 1] + ' S.deliveredN=' + S.deliveredN);
+
+// ---- TEST 9: restarting must not preserve an uncaught Crimson, and must not grant anything for it ----
+reset(); screen = 'play';
+villageProgression.currentVillage = 'moonfall';
+S.score = 25; S.crimsonT = 0.001;
+__stepFrame(16);
+__check('TEST 9 setup: a Crimson is on screen, uncaught', S.flies.some(function(f){ return f.type === 'r'; }));
+var coinsBefore9 = coins;
+reset(); // Restart Night
+__check('TEST 9: reset() (Restart Night) wipes the uncaught Crimson -- a fresh S has no flies at all', S.flies.length === 0);
+__check('TEST 9: no coins were granted for a Crimson that was never actually caught/delivered', coins === coinsBefore9);
+
+// ---- TEST 11: village switching -- Crimson never leaks from Moonfall into Lumora ----
+reset(); screen = 'play';
+villageProgression.currentVillage = 'moonfall';
+S.score = 25; S.crimsonT = 0.001;
+__stepFrame(16);
+__check('TEST 11 setup: Crimson present while Moonfall is current', S.flies.some(function(f){ return f.type === 'r'; }));
+villageProgression.currentVillage = 'lumora'; // simulate switching back to Lumora
+__stepFrame(16);
+__check('TEST 11: switching to Lumora strips any Crimson fly within one frame -- it never appears in Lumora', !S.flies.some(function(f){ return f.type === 'r'; }));
+`);
+
+// ---- TEST 10: reload/persistence -- a genuine fresh script load after a prior Crimson delivery, seeded via localStorage exactly like every other reload-preserves scenario in this file ----
+scenario('e34-crimson-reload', null, `
+__check('TEST 10a: coins survive a genuine reload exactly as saved -- no re-grant just from loading', coins === 1200, 'coins=' + coins);
+__check('TEST 10b: Moonfall bestNightDelivered survives reload exactly as saved (1, not 200 -- the reward never leaked into village progress)', villageProgression.villages[1].bestNightDelivered === 1);
+__check('TEST 10c: currentVillage itself was restored to moonfall on reload', villageProgression.currentVillage === 'moonfall');
+reset(); screen = 'play';
+var coinsBefore10 = coins;
+var villageBefore10 = currentVillageProgress().bestNightDelivered;
+S.carried.push({ type: 'r', ph: 0, sp: 1 });
+S.jar.y = 999; S.jar.ty = 999;
+for (var i10 = 0; i10 < 300 && (S.sparks.length > 0 || S.carried.length > 0); i10++) __stepFrame(16);
+__check('TEST 10d: a genuine NEW Crimson delivery after reload still grants exactly +200, additively on top of the reloaded balance', coins === coinsBefore10 + 200, 'coins=' + coins);
+// bestNightDelivered is a best-SINGLE-NIGHT high-water mark, not cumulative --
+// this fresh post-reload round delivers exactly 1 Crimson, tying (not
+// beating) the seeded best of 1, so bestNightDelivered correctly stays at 1
+// rather than incrementing (matching the existing "a night that ties the
+// best changes nothing" rule already covered elsewhere in this suite). The
+// meaningful, unambiguous check is THIS round's own live count, which must
+// be exactly 1 -- and the stored best must still read 1, never 200.
+__check('TEST 10e: this round\\'s own live delivered count is exactly 1 for the one post-reload Crimson delivery', S.nightDelivered === 1, 'nightDelivered=' + S.nightDelivered);
+__check('TEST 10e (b): Moonfall\\'s bestNightDelivered is still exactly 1 (its seeded value, correctly un-lowered/un-corrupted) -- never the 200-coin value', currentVillageProgress().bestNightDelivered === 1, 'bestNightDelivered=' + currentVillageProgress().bestNightDelivered + ' villageBefore10=' + villageBefore10);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -9631,6 +9774,13 @@ async function main() {
       // what a genuinely unlocked-but-never-played Moonfall save looks
       // like for a real player. Must load at 0, not inherit anything.
       : sc.name === 'lumora-village-e24-moonfall-never-played' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E34 TEST 10: a real reload after an earlier Crimson delivery already
+      // happened -- Moonfall current, Lumora complete, Moonfall's
+      // bestNightDelivered already at 1 (one real prior delivery, NOT 200 --
+      // proves the reward never got baked into village progress) and coins
+      // already at 1200 (proves a prior +200 grant persisted normally,
+      // without re-granting on load).
+      : sc.name === 'e34-crimson-reload' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:1,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); localStorage.setItem('gk2_coins','1200'); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value

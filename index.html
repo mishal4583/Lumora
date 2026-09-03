@@ -133,6 +133,11 @@ function glowSprite(color,r){
   glowCache[key]=s; return s;
 }
 const GLOW_Y='rgba(255,214,110,1)', GLOW_B='rgba(140,190,255,1)', GLOW_G='rgba(170,235,170,1)', GLOW_W='rgba(255,244,214,1)', GLOW_M='rgba(210,200,225,1)', GLOW_P='rgba(255,170,150,1)', GLOW_MYS='rgba(210,150,255,1)'; // Mystery Firefly — a distinct violet, not reused from any existing type/effect color
+// E34: Crimson Firefly (Moonfall-exclusive). A true red/crimson, deliberately
+// distinct from both GLOW_MYS (violet, Mystery) and GLOW_P (a warm coral
+// used only for decorative fireworks particles, not a firefly color) — so it
+// reads unmistakably as its own species, not a recolor of Mystery.
+const GLOW_CRIMSON='rgba(224,42,48,1)';
 // Base Stats Pass Part 1: starting/floor capacity dropped 8->5.
 // Remove In-Run Capacity Growth (final): JAR_MAX -- the old shared ceiling
 // for gainCap()'s in-run growth AND the Elder-spawn gate -- is retired
@@ -193,7 +198,23 @@ const TYPES={
   // the save/load defensive parsing) reads f.type / iterates journal's own keys
   // generically, so this "just works" with no infrastructure changes, per the
   // kickoff's own ask to verify that before building anything separate.
-  m:{pts:5, coins:8.00, glow:GLOW_MYS, core:'#f6e8ff', name:'mystery', rarity:'legendary', desc:'Nobody knows where these lights come from.'}
+  m:{pts:5, coins:8.00, glow:GLOW_MYS, core:'#f6e8ff', name:'mystery', rarity:'legendary', desc:'Nobody knows where these lights come from.'},
+  // E34: Crimson Firefly -- Moonfall-EXCLUSIVE counterpart to Mystery ('m'
+  // above), not a Lumora-wide addition. pts/rarity are Mystery's own existing
+  // values, reused verbatim (byte-for-byte) per direct instruction not to
+  // invent a new score value or rarity tier -- this is deliberately the SAME
+  // number as TYPES.m.pts, not a coincidence (object literals can't
+  // self-reference TYPES.m here, so it's written out, not computed).
+  // `coins` is 200 per direct/approved instruction, but is NOT read through
+  // the normal delivery multiplier chain the way every other type's coins
+  // field is (see the grantDeliveryCoins() call site) -- that reward is
+  // specified as an exact, unconditional +200, independent of equipped
+  // jar/Light Value/Coin Value upgrades, so this field exists for schema
+  // consistency/display only; the actual grant reads it directly and stops
+  // there. Spawn eligibility (Moonfall-only, S.score>=20, dedicated timer) is
+  // NOT stored here -- it lives at the one spawnFly('r') call site, same
+  // convention as Mystery's own S.score>=20 gate.
+  r:{pts:5, coins:200, glow:GLOW_CRIMSON, core:'#ffe3dd', name:'crimson', rarity:'legendary', desc:"A deep red light that only stirs in Moonfall's hush."}
 };
 // Lumora 2.0 Phase 5 (Firefly Journal / Collection): variant data foundation.
 // A variant is a distinct, independently-discoverable collectible layered on
@@ -1323,7 +1344,7 @@ function recordNightEconomy(){
 // console.table if available (real browsers/devtools); falls back to
 // console.log so this never throws in an environment without table support
 function dumpEconomyLog(){ if(typeof console!=='undefined'){ if(console.table)console.table(economyLog); else if(console.log)console.log(economyLog); } return economyLog; }
-let journal={y:0,b:0,g:0,e:0,m:0}; // lifetime catch count per firefly type — session-level, like best/coins, not reset by reset(). 'm' (Mystery) added in Stage 3 Part A; the save/load code below iterates this object's OWN keys, so no other change was needed for it to persist correctly.
+let journal={y:0,b:0,g:0,e:0,m:0,r:0}; // lifetime catch count per firefly type — session-level, like best/coins, not reset by reset(). 'm' (Mystery) added in Stage 3 Part A; 'r' (Crimson, E34) added the same way; the save/load code below iterates this object's OWN keys, so no other change was needed for it to persist correctly.
 if(!YT){ try{ const j=JSON.parse(localStorage.getItem('gk2_journal')||'{}'); Object.keys(journal).forEach(k=>{ if(typeof j[k]==='number'&&j[k]>journal[k])journal[k]=j[k]; }); }catch(e){} }
 // Phase 5: variant lifetime catch counts, one key per VARIANT_POOL id --
 // exact same shape/pattern as `journal` above (a count IS the discovery
@@ -3777,7 +3798,7 @@ function isRareType(type){ const r=TYPES[type].rarity; return r!=='common'&&r!==
 // exist anywhere else in this file -- the handoff's own CONFIRM section
 // flagged this exact question and recommended this fix.
 function rarestCarriedType(){
-  const rank={g:1,e:2,m:3}; let best=null,bestRank=0; // bestRank floors at 0, not -1 -- a common/uncommon entry (rank 0) must never win "best"
+  const rank={g:1,e:2,m:3,r:3}; let best=null,bestRank=0; // bestRank floors at 0, not -1 -- a common/uncommon entry (rank 0) must never win "best" -- E34: Crimson ('r') shares Mystery's rank 3, matching its own identical 'legendary' rarity tier
   for(const c of S.carried){ const rk=rank[c.type]||0; if(rk>bestRank){ bestRank=rk; best=c.type; } }
   return best;
 }
@@ -4878,7 +4899,14 @@ function reset(){
     catA:0, millA:0, finaleActive:false, finaleT:0,
     // Stage 3 Part A: weather + Mystery Firefly, both round-scoped like the rest
     // of spawning — nothing here is persisted or read by saveProgress()
-    weather:'clear', weatherT:rand(18,30), weatherBannerT:0, weatherMsg:'', mysteryT:rand(45,70)
+    weather:'clear', weatherT:rand(18,30), weatherBannerT:0, weatherMsg:'', mysteryT:rand(45,70),
+    // E34: Crimson Firefly's own timer, same rand(45,70) starting cadence as
+    // Mystery's mysteryT above (reused verbatim). Round-scoped, not
+    // persisted, wiped by every reset() exactly like mysteryT -- and it only
+    // ever ticks down while Moonfall is the current village (see update()),
+    // so entering Moonfall always starts a fresh wait rather than an
+    // instantly-primed timer carried over from time spent in Lumora.
+    crimsonT:rand(45,70)
   };
   LIGHTS.forEach((L,i)=>S.lightAnim[i]=0);
   LUMORA_LANDMARK_GROUPS.forEach((g,i)=>S.landmarkAnim[i]=0);
@@ -5075,10 +5103,14 @@ function spawnFly(forceType){
   if(type==='g'&&!S.seenShy){ S.seenShy=true; S.shyHint=4.5; }
   if(type==='e'){ S.capMsg='an elder firefly…'; S.capMsgT=3; }
   if(type==='m'){ S.capMsg='something rare glimmers…'; S.capMsgT=3; }
+  if(type==='r'){ S.capMsg='a crimson light stirs in the dark…'; S.capMsgT=3; } // E34
   S.flies.push({
     x: side<0? -20 : W+20, y: rand(H*0.16,H*0.6),
     ang: side<0? rand(-0.4,0.4) : Math.PI+rand(-0.4,0.4),
-    spd: d.speed*(type==='b'?1.2:type==='g'?0.9:type==='e'?0.45:type==='m'?0.7:1),
+    // E34: Crimson ('r') reuses Mystery's exact 0.7 speed multiplier -- OR'd
+    // into the same branch rather than given its own, so this is visibly the
+    // same existing value, not a new one.
+    spd: d.speed*(type==='b'?1.2:type==='g'?0.9:type==='e'?0.45:(type==='m'||type==='r')?0.7:1),
     type, patience:d.patience, maxP:d.patience,
     state:'drift', lockT:0, orbitT:0, wob:rand(0,6.28), wobF:rand(0.8,1.6),
     pause:0, alpha:0, flick:rand(0,6.28), scatter:0, rest:0, animT:0, animA:0, animR:0
@@ -6690,6 +6722,19 @@ function update(dt){
     S.mysteryT-=dt*Math.max(S.eventActive==='moonlight'?1.6:1, contractRareMult());
     if(S.mysteryT<=0&&!S.flies.some(f=>f.type==='m')){ spawnFly('m'); S.mysteryT=rand(60,90); }
   }
+  // E34: Crimson Firefly -- Moonfall-EXCLUSIVE counterpart to Mystery,
+  // directly above. Identical architecture, reused verbatim: same S.score>=20
+  // gate, same dt*Math.max(moonlight boost, contractRareMult()) countdown,
+  // same rand(45,70)->rand(60,90) cadence. The ONLY new condition is
+  // villageProgression.currentVillage==='moonfall' -- checked first, so the
+  // timer doesn't even tick down while in Lumora (a fresh wait always starts
+  // on entering Moonfall, nothing carries over) and spawnFly('r') can
+  // structurally never be reached outside Moonfall. No new spawn-frequency
+  // or rarity value was introduced.
+  if(villageProgression.currentVillage==='moonfall'&&S.score>=20){
+    S.crimsonT-=dt*Math.max(S.eventActive==='moonlight'?1.6:1, contractRareMult());
+    if(S.crimsonT<=0&&!S.flies.some(f=>f.type==='r')){ spawnFly('r'); S.crimsonT=rand(60,90); }
+  }
   // firefly bloom event
   if(S.score+S.carried.length>=8){
     S.bloomT-=dt;
@@ -6761,6 +6806,13 @@ function update(dt){
     }
   }
 
+  // E34: defensive cleanup -- a Crimson ('r') fly should never exist while
+  // Moonfall isn't the current village (spawnFly('r') is only ever reached
+  // from the Moonfall-gated timer above), but this follows the same
+  // "re-verify at the point that matters, don't just trust an earlier gate"
+  // discipline jarCanAcceptCatch() already established, so a Crimson fly can
+  // never render/update/be catchable in Lumora under any circumstance.
+  if(villageProgression.currentVillage!=='moonfall'&&S.flies.some(f=>f.type==='r'))S.flies=S.flies.filter(f=>f.type!=='r');
   // fireflies
   for(let i=S.flies.length-1;i>=0;i--){
     const f=S.flies[i];
@@ -7014,7 +7066,16 @@ function update(dt){
       // how this whole call site already runs once per s (spark), not once
       // per batch -- Elder's bonus correctly applies only to the rare
       // firefly itself within a mixed-type jar, never the whole delivery.
-      grantDeliveryCoins(TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun()*nightEventCoinMult()*contractCoinMult()*jarIdentityCoinMult(s.type));
+      // E34: Crimson ('r') is the ONE deliberate exception to the multiplier
+      // chain above -- its reward is specified as an exact, unconditional
+      // +200 coins per successful delivery (not a base value meant to stack
+      // with jar Light Value / Coin Value / event / contract / jar-identity
+      // bonuses the way every other type's coins field does), so it's
+      // granted directly here rather than run through jarCurrentStat(...)
+      // etc. Still the exact same single call site, same s.t>=1 gate, same
+      // "fires exactly once per spark" guarantee as every other type --
+      // no second reward path exists.
+      grantDeliveryCoins(s.type==='r'?TYPES.r.coins:TYPES[s.type].coins*jarCurrentStat('lightValue',currentJar())*coinMultiplierForRun()*nightEventCoinMult()*contractCoinMult()*jarIdentityCoinMult(s.type));
       questProgress('deliver',s.type); // any type counts toward "deliver 20 fireflies" — same delivery moment as coins/score above
       // Lumora 2.0 Phase 1: same authoritative delivery-success moment, not
       // catch time -- "deliver X" must count actual successful deliveries,
@@ -8819,7 +8880,7 @@ function drawFly(f){
   let fade=f.state==='drift'?(0.45+0.55*clamp(f.patience/f.maxP,0,1)):1;
   if(f.rest>0)fade=0.75+0.25*Math.sin(S.t*12);
   ctx.globalAlpha=f.alpha*flick*fade;
-  const gr=f.type==='y'?18:f.type==='e'?26:f.type==='m'?24:20;
+  const gr=f.type==='y'?18:f.type==='e'?26:(f.type==='m'||f.type==='r')?24:20; // E34: Crimson ('r') reuses Mystery's exact 24px size, not a new value
   ctx.drawImage(glowSprite(T.glow,gr),f.x-gr,f.y-gr,gr*2,gr*2);
   ctx.fillStyle=T.core;
   ctx.beginPath(); ctx.arc(f.x,f.y,3,0,6.28); ctx.fill();
