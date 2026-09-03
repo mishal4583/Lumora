@@ -9362,6 +9362,100 @@ var lastEntry = economyLog[economyLog.length - 1];
 __check('E31: economyLog\\'s "lightDelivered" field holds the actual delivered COUNT (4), not the weighted score (9)', lastEntry.lightDelivered === 4, 'lightDelivered=' + lastEntry.lightDelivered);
 `);
 
+// ---- E32: Moonfall sky parity (shooting stars + constellations ported from Lumora's own drawVillage(), duplicate second moon removed) ----
+scenario('e32-moonfall-sky-parity', null, `
+reset(); screen = 'play'; paused = false;
+S.shots = [{ x: 200, y: 150, vx: -200, vy: 100, life: 0.5 }, { x: 300, y: 100, vx: -180, vy: 90, life: 0.4 }];
+S.constA = 1;
+
+function __spyArcs(){
+  var calls = [];
+  var orig = ctx.arc;
+  ctx.arc = function(x, y, r, a0, a1){ calls.push({ x: x, y: y, r: r }); return orig.apply(ctx, arguments); };
+  return { calls: calls, restore: function(){ ctx.arc = orig; } };
+}
+function __spyStrokes(){
+  var strokes = [];
+  var orig = ctx.stroke;
+  ctx.stroke = function(){ strokes.push(ctx.strokeStyle); return orig.apply(ctx, arguments); };
+  return { strokes: strokes, restore: function(){ ctx.stroke = orig; } };
+}
+function __countShootingStarStrokes(list){ return list.filter(function(s){ return s === '#fff6e0'; }).length; }
+
+// ---- TEST 1: Lumora has shooting-star functionality ----
+villageProgression.currentVillage = 'lumora';
+var sp1 = __spyStrokes();
+draw();
+sp1.restore();
+__check('TEST 1: Lumora renders a shooting-star stroke for each entry in S.shots', __countShootingStarStrokes(sp1.strokes) === S.shots.length, 'strokes=' + JSON.stringify(sp1.strokes));
+
+// ---- TEST 2: Lumora has constellation functionality ----
+var sp2 = __spyArcs();
+draw();
+sp2.restore();
+__check('TEST 2: Lumora renders constellation star dots at CONST\\'s own coordinates (r=2)', sp2.calls.some(function(c){ return c.r === 2 && c.x === CONST[0][0][0] && c.y === CONST[0][0][1]; }));
+
+// ---- TEST 3: Moonfall has shooting-star functionality (same S.shots, same stroke signature) ----
+villageProgression.currentVillage = 'moonfall';
+var sp3 = __spyStrokes();
+draw();
+sp3.restore();
+__check('TEST 3: Moonfall renders the exact same shooting-star stroke Lumora does, once per S.shots entry', __countShootingStarStrokes(sp3.strokes) === S.shots.length, 'strokes=' + JSON.stringify(sp3.strokes));
+
+// ---- TEST 4: Moonfall has constellation functionality (same CONST, same coordinates) ----
+var sp4 = __spyArcs();
+draw();
+sp4.restore();
+__check('TEST 4: Moonfall renders the exact same constellation star dots Lumora does, at the identical coordinates', sp4.calls.some(function(c){ return c.r === 2 && c.x === CONST[0][0][0] && c.y === CONST[0][0][1]; }));
+
+// ---- TEST 5: Moonfall renders exactly one moon -- the shared primary drawMoon() (270,52,r17), never the old duplicate (270,182,r25/r46) ----
+var sp5 = __spyArcs();
+draw();
+sp5.restore();
+var oldDuplicateCrescent = sp5.calls.filter(function(c){ return c.x === 270 && c.y === 182 && c.r === 25; });
+var oldDuplicateBloom = sp5.calls.filter(function(c){ return c.x === 270 && c.y === 182 && c.r === 46; });
+var sharedPrimaryMoon = sp5.calls.filter(function(c){ return c.x === 270 && c.y === 52 && c.r === 17; });
+__check('TEST 5a: the old duplicate crescent-moon arc (270,182,r25) never renders in Moonfall any more', oldDuplicateCrescent.length === 0);
+__check('TEST 5b: the old duplicate moon-glow arc (270,182,r46) never renders in Moonfall any more', oldDuplicateBloom.length === 0);
+__check('TEST 5c: the one shared primary moon (drawMoon(), 270,52,r17) still renders in Moonfall exactly as it does everywhere else', sharedPrimaryMoon.length > 0);
+
+// ---- TEST 6: switching Lumora -> Moonfall -> Lumora -> Moonfall does not duplicate sky effects ----
+villageProgression.currentVillage = 'lumora'; draw();
+villageProgression.currentVillage = 'moonfall'; draw();
+villageProgression.currentVillage = 'lumora'; draw();
+villageProgression.currentVillage = 'moonfall';
+var sp6 = __spyStrokes();
+draw();
+sp6.restore();
+__check('TEST 6: after repeated village switching, Moonfall still renders exactly S.shots.length shooting-star strokes -- no duplication, no leakage', __countShootingStarStrokes(sp6.strokes) === S.shots.length, 'strokes=' + JSON.stringify(sp6.strokes));
+
+// ---- TEST 7: restarting Moonfall (reset()) does not leave stale/duplicate sky state ----
+reset();
+__check('TEST 7: a fresh reset() clears S.shots back to empty (no stale shooting stars survive Restart Night)', S.shots.length === 0);
+__check('TEST 7b: a fresh reset() clears S.constA back to 0 (no stale constellation reveal survives Restart Night)', S.constA === 0);
+
+// ---- TEST 8: pause/resume does not duplicate sky effects ----
+S.shots = [{ x: 200, y: 150, vx: -200, vy: 100, life: 0.5 }];
+S.constA = 1;
+paused = true;
+var sp8a = __spyStrokes();
+draw();
+sp8a.restore();
+paused = false;
+var sp8b = __spyStrokes();
+draw();
+sp8b.restore();
+__check('TEST 8: pausing does not duplicate the shooting-star array or its render count', __countShootingStarStrokes(sp8a.strokes) === S.shots.length);
+__check('TEST 8b: resuming still renders exactly the same S.shots.length -- no duplication introduced by the pause/resume cycle', __countShootingStarStrokes(sp8b.strokes) === S.shots.length && S.shots.length === 1);
+`);
+
+// ---- E32 TEST 9: a genuinely fresh page load (not just an in-memory reset()) starts with no leaked/duplicated sky state, for either village ----
+scenario('e32-moonfall-sky-parity-reload', null, `
+__check('TEST 9: a fresh script load starts with S.shots empty (no leaked shooting stars from a prior session)', S.shots.length === 0);
+__check('TEST 9b: a fresh script load starts with S.constA at 0 (no leaked constellation reveal from a prior session)', S.constA === 0);
+__check('TEST 9c: the reloaded save correctly restored Moonfall as the current village', villageProgression.currentVillage === 'moonfall');
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -9384,6 +9478,13 @@ async function main() {
       // straight off the persisted village record on a fresh load, never
       // re-derived from score or any current-night variable.
       : sc.name === 'e28-village-delivery-count-reload' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:87,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E32 TEST 9: seeds a real fresh load with Moonfall as the current
+      // village, to prove S.shots/S.constA -- neither of which is ever
+      // persisted (S itself is always rebuilt by the top-level reset()
+      // call at script bootstrap) -- start genuinely empty/zero, not
+      // leaked or duplicated from whatever a prior session happened to
+      // leave in memory.
+      : sc.name === 'e32-moonfall-sky-parity-reload' ? `try{ localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'moonfall',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:500,completionThreshold:500,milestones:[],completed:true},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false}]})); }catch(e){}\n`
       : sc.name === 'lumora-village-lumora-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
       // PERMANENT-VILLAGE-RESTORATION pass: a save written with the OLD field
       // name (restorationProgress, pre-pivot) -- proves the one-time

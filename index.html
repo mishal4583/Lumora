@@ -8360,8 +8360,42 @@ const drawMoonfallVillage = (function(){
     vStars(3,254,470,1);
     vStars(9,26,430,1.35);
     vClouds(1);
-    bloom(270,182,46,'206,224,255',.11);
-    crescent(270,182,25,'#eef4ff','rgba(13,17,60,1)');
+    // E32 TASK 1 fix: this used to also draw bloom(270,182,46,...) +
+    // crescent(270,182,25,...) right here -- a second, unintended moon low
+    // in Moonfall's own sky, on top of the shared, primary drawMoon() every
+    // screen already renders (drawVillage()'s own comment: drawMoon() is
+    // "SHARED background/village/moon rendering," called once per frame
+    // before any screen content, Moonfall included -- see loop()/draw()).
+    // Removed at the source, not covered up: Moonfall now renders exactly
+    // the one shared primary moon, same as every other screen.
+    // E32 TASK 2: shooting stars + constellations, ported byte-for-byte
+    // from Lumora's own drawVillage() (the `for(const s of S.shots)` /
+    // `if(S.constA>0)` blocks there) -- same S.shots/CONST state, same
+    // S.shootT/S.constA timing and fade (both already update()'d
+    // unconditionally every frame regardless of which village is
+    // selected, see update()'s own "sky evolution" section -- Moonfall's
+    // render path simply never drew them before this fix). Placed here,
+    // in the open sky right after the ambient stars/clouds and before the
+    // opaque mountain ridges below, so they read as sky content and are
+    // never covered by them. No new state, no new timer, no new random
+    // system -- this is the exact same code, just now also reachable from
+    // Moonfall's own render path.
+    for(const s of S.shots){
+      g.globalAlpha=Math.min(1,s.life*2);
+      g.strokeStyle='#fff6e0'; g.lineWidth=1.6; g.lineCap='round';
+      g.beginPath(); g.moveTo(s.x,s.y); g.lineTo(s.x-s.vx*0.14,s.y-s.vy*0.14); g.stroke();
+    }
+    g.globalAlpha=1;
+    if(S.constA>0){
+      g.globalAlpha=S.constA*0.5;
+      g.strokeStyle='#aeb8e6'; g.lineWidth=1;
+      for(const c of CONST){
+        g.beginPath(); c.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.stroke();
+        g.fillStyle='#e8ecff';
+        for(const [x,y] of c){ g.beginPath(); g.arc(x,y,2,0,6.28); g.fill(); }
+      }
+      g.globalAlpha=1;
+    }
     vRidge(300,198,'rgba(72,92,152,1)',7,0,{haze:.34,dip:.30,shade:.05,fq:.82});
     vRidge(330,176,'rgba(52,72,132,1)',12,0,{haze:.26,dip:.26,shade:.07,fq:.95});
     vRidge(362,146,'rgba(35,53,108,1)',21,0,{haze:.18,dip:.22,shade:.09,fq:1.1});
