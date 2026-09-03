@@ -12796,8 +12796,14 @@ function drawVillageScreen(){
 // not repeating it here since this row's own right-aligned "View Details"
 // link would otherwise sit outside its tappable zone entirely, which is
 // exactly the bug a live coordinate-based test caught during this pass.)
+// E31: card height grown from 110 to 170 -- purely to fit a properly
+// sized "View Details" button (see journeyViewDetailsRect() below)
+// underneath the progress bar without overlapping it or crowding the
+// card's bottom edge. gap (14, the space BETWEEN the two cards) and
+// everything else about this formula is unchanged, so the two rows still
+// stack automatically off this one shared h with zero extra bookkeeping.
 function journeyRowRects(){
-  const top=210, h=110, gap=14;
+  const top=210, h=170, gap=14;
   return villageProgression.villages
     .filter(v=>v.id==='lumora'||v.id==='moonfall')
     .map((v,i)=>({key:v.id,x:W/2,y:top+h/2+i*(h+gap),w:W-40,h}));
@@ -12808,10 +12814,19 @@ function journeyRowRects(){
 // the village (symmetric with Moonfall's row), so this is the one place
 // that older, more detailed screen is still reachable from. Also
 // center-based, for the same inRect() reason as journeyRowRects() above.
+// E31: reported live as "too small, too low-contrast, too close to the
+// card edge -- easy to overlook, sometimes hard to tap." Grown from a
+// bare 112x24 text hit-box to a real 148x44 button (same height as the
+// existing "Visit the Workshop" secondary pill elsewhere in this file,
+// for visual/tap-target consistency), and moved to sit 18px clear of the
+// card's bottom edge with a real gap below the progress bar -- see
+// drawJourneyScreen()'s own lumButton() call, which now draws an actual
+// glass-panel pill here instead of bare text. This ONE rect still drives
+// both the draw call and the pointerdown hit-test below, unchanged.
 function journeyViewDetailsRect(rect){
   const right=rect.x+rect.w/2, bottom=rect.y+rect.h/2;
-  const w=112, h=24;
-  return {x:right-20-w/2, y:bottom-14-h/2, w, h};
+  const w=148, h=44;
+  return {x:right-20-w/2, y:bottom-40, w, h};
 }
 function drawJourneyScreen(){
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
@@ -12872,9 +12887,19 @@ function drawJourneyScreen(){
     // OLD milestones/quest/journal hub, screen='village', is a separate,
     // still-untouched legacy screen -- see its own small link at the
     // bottom of the new Details screen.)
+    // E31: a real secondary button (existing 'glass' lumButton variant --
+    // same subtle antique-gold outline/text already used for the
+    // Workshop's own card buttons) instead of bare low-contrast text, so
+    // the card visibly reads as "tap here for more" at a glance. Identical
+    // treatment for Lumora and Moonfall (unlocked or not), matching the
+    // existing behavior that View Details already opens for a locked
+    // Moonfall too -- only the card state around it differs, never this
+    // button. Deliberately the 'glass' variant, not 'primary': antique
+    // gold (WS_GOLD_PRICE), not the brighter LUM_GOLD the SELECTED badge
+    // above already uses, so this never reads as a second selection
+    // indicator.
     const dr=journeyViewDetailsRect(rect);
-    ctx.textAlign='right'; ctx.fillStyle='rgba(251,210,107,0.8)'; ctx.font='italic 12px Georgia,serif'; ctx.textBaseline='alphabetic';
-    ctx.fillText('View Details →',dr.x+dr.w/2,dr.y+dr.h/2+4);
+    lumButton({x:dr.x,y:dr.y,w:dr.w,h:dr.h,fontSize:12},'View Details →','glass');
   });
   ctx.textAlign='center'; ctx.textBaseline='top';
 }

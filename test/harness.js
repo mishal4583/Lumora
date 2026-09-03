@@ -9299,6 +9299,56 @@ __check('E30: S.deliveredN is untouched', S.deliveredN === 74);
 __check('E30: the real villageProgression bestNightDelivered value is untouched by merely rendering this screen', villageProgression.villages[0].bestNightDelivered === 174);
 `);
 
+// ---- E31 (user's own ticket title: "E29 -- Improve Village Details Accessibility"; renumbered E31 here since E29/E30 above already exist in this file for unrelated fixes): the Village Selection screen's "View Details" affordance -- was a bare 112x24 text hit-box, now a real 148x44 secondary button ----
+scenario('e31-village-details-button-accessibility', null, `
+screen = 'title';
+var villageNavBtn = titleNavRects().find(function(b){ return b.key === 'village'; });
+__fire(cv, 'pointerdown', __fakeEvent(villageNavBtn.x, villageNavBtn.y));
+__check('setup: village nav opens Village Selection', screen === 'journey');
+
+var lumoraRow = journeyRowRects().find(function(r){ return r.key === 'lumora'; });
+var moonfallRow = journeyRowRects().find(function(r){ return r.key === 'moonfall'; });
+var lumoraBtn = journeyViewDetailsRect(lumoraRow);
+var moonfallBtn = journeyViewDetailsRect(moonfallRow);
+
+// ---- hit-target size: comfortably within the requested 120-150 x 40-48 range ----
+__check('E31: the View Details hit target is 148x44 -- inside the requested 120-150 x 40-48 range (was a bare 112x24 text box before)', lumoraBtn.w === 148 && lumoraBtn.h === 44);
+__check('E31: Lumora and Moonfall share the exact same button geometry -- only the surrounding card state differs', moonfallBtn.w === lumoraBtn.w && moonfallBtn.h === lumoraBtn.h);
+
+// ---- clear separation from the card's own edges (never flush against the boundary) ----
+var lumoraCardRight = lumoraRow.x + lumoraRow.w / 2, lumoraCardBottom = lumoraRow.y + lumoraRow.h / 2;
+__check('E31: the button sits comfortably inside the card, not flush against its right edge', (lumoraCardRight - (lumoraBtn.x + lumoraBtn.w / 2)) >= 15, 'gap=' + (lumoraCardRight - (lumoraBtn.x + lumoraBtn.w / 2)));
+__check('E31: the button sits comfortably inside the card, not flush against its bottom edge', (lumoraCardBottom - (lumoraBtn.y + lumoraBtn.h / 2)) >= 15, 'gap=' + (lumoraCardBottom - (lumoraBtn.y + lumoraBtn.h / 2)));
+
+// ---- no overlap with the progress bar (drawn at cardTop+86, 6px tall -- see drawJourneyScreen()'s own lumBar() call) ----
+var lumoraCardTop = lumoraRow.y - lumoraRow.h / 2;
+var barBottom = lumoraCardTop + 86 + 6;
+var buttonTop = lumoraBtn.y - lumoraBtn.h / 2;
+__check('E31: the button never overlaps the progress bar above it', buttonTop > barBottom, 'barBottom=' + barBottom + ' buttonTop=' + buttonTop);
+
+// ---- functional test (spec section 13): tapping anywhere inside the visible button -- center, left edge, right edge, top padding, bottom padding -- opens Details, every time, for Lumora ----
+['center', 'left edge', 'right edge', 'top padding', 'bottom padding'].forEach(function(label){
+  var spot = label === 'center' ? { x: lumoraBtn.x, y: lumoraBtn.y }
+    : label === 'left edge' ? { x: lumoraBtn.x - lumoraBtn.w / 2 + 2, y: lumoraBtn.y }
+    : label === 'right edge' ? { x: lumoraBtn.x + lumoraBtn.w / 2 - 2, y: lumoraBtn.y }
+    : label === 'top padding' ? { x: lumoraBtn.x, y: lumoraBtn.y - lumoraBtn.h / 2 + 2 }
+    : { x: lumoraBtn.x, y: lumoraBtn.y + lumoraBtn.h / 2 - 2 };
+  screen = 'journey';
+  __fire(cv, 'pointerdown', __fakeEvent(spot.x, spot.y));
+  __check('E31: tapping the ' + label + ' of Lumora\\'s View Details button opens Village Details', screen === 'villageDetails' && villageDetailsFor === 'lumora', 'screen=' + screen);
+});
+
+// ---- same button, same behavior, on a still-locked Moonfall -- this is EXISTING behavior (View Details already opened for a locked village before this fix), not something invented here ----
+screen = 'journey';
+__fire(cv, 'pointerdown', __fakeEvent(moonfallBtn.x, moonfallBtn.y));
+__check('E31: tapping Moonfall\\'s View Details button (still locked) opens Village Details showing Moonfall -- existing behavior, unchanged', screen === 'villageDetails' && villageDetailsFor === 'moonfall');
+
+// ---- tapping elsewhere on the card (not the button) keeps the existing row-select behavior, not Details -- unaffected by this fix ----
+screen = 'journey';
+__fire(cv, 'pointerdown', __fakeEvent(lumoraRow.x - lumoraRow.w / 2 + 10, lumoraRow.y - lumoraRow.h / 2 + 10));
+__check('E31: tapping elsewhere on the card does not open Details (existing row-select behavior instead)', screen !== 'villageDetails');
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
