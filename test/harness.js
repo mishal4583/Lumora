@@ -5781,33 +5781,33 @@ var r;
 r = nightCompleteTailRows(true, false, false, false);
 __check('nothing present: no rows at all', r.length === 0);
 r = nightCompleteTailRows(true, true, false, false);
-__check('contract alone (objectives present): lands at the historical py+306 anchor', r.length === 1 && r[0].kind === 'contract' && r[0].b === 306);
+__check('contract alone (objectives present): lands at the E30 py+350 anchor (was py+306 before the Score row added +44)', r.length === 1 && r[0].kind === 'contract' && r[0].b === 350);
 r = nightCompleteTailRows(true, true, true, false);
-__check('contract+event: event stacks exactly +26 after contract (py+332)', r.length === 2 && r[1].kind === 'event' && r[1].b === 332);
+__check('contract+event: event stacks exactly +26 after contract (py+376)', r.length === 2 && r[1].kind === 'event' && r[1].b === 376);
 r = nightCompleteTailRows(true, true, true, true);
-__check('all three present: bonus stacks +26 after event (py+358), matching the handoff\\'s own worked example exactly', r.length === 3 && r[2].kind === 'bonus' && r[2].b === 358);
+__check('all three present: bonus stacks +26 after event (py+402), matching the handoff\\'s own worked example exactly (shifted +44 by E30\\'s Score row)', r.length === 3 && r[2].kind === 'bonus' && r[2].b === 402);
 r = nightCompleteTailRows(true, false, true, true);
-__check('contract ABSENT: event moves up into the FIRST slot (py+306), not left at py+332 -- an absent row costs nothing', r.length === 2 && r[0].kind === 'event' && r[0].b === 306 && r[1].kind === 'bonus' && r[1].b === 332);
+__check('contract ABSENT: event moves up into the FIRST slot (py+350), not left at py+376 -- an absent row costs nothing', r.length === 2 && r[0].kind === 'event' && r[0].b === 350 && r[1].kind === 'bonus' && r[1].b === 376);
 r = nightCompleteTailRows(false, false, false, true);
-__check('no-objectives night: the tail keeps its own cheaper anchor (py+164), independent of the with-objectives case', r.length === 1 && r[0].kind === 'bonus' && r[0].b === 164);
+__check('no-objectives night: the tail keeps its own cheaper anchor (py+208, was py+164 before E30\\'s Score row), independent of the with-objectives case', r.length === 1 && r[0].kind === 'bonus' && r[0].b === 208);
 
 // ---- the new panelBottom-derived footer formula reproduces every OLD shipped button position exactly ----
 // (playBtn.y = panelBottom+35, SHOP_BTN_OVER.y = playBtn.y+55 -- verified
 // here against the four real worked cases the D5 handoff itself lists.)
 function __ncButtons(hasObjectives, hasContract, hasEvent, hasBonus) {
   var tailRows = nightCompleteTailRows(hasObjectives, hasContract, hasEvent, hasBonus);
-  var panelH = tailRows.length ? (tailRows[tailRows.length - 1].b + 20) : (hasObjectives ? 280 : 150);
+  var panelH = tailRows.length ? (tailRows[tailRows.length - 1].b + 20) : (hasObjectives ? 324 : 194); // E30: +44 each, matching drawOver()'s own panelH baselines
   var panelBottom = H * 0.34 + panelH;
   return { play: panelBottom + 35, shop: panelBottom + 35 + 55 };
 }
 var bb = __ncButtons(false, false, false, false);
-__check('no objectives, no tail: playBtn/SHOP reproduce the old shipped 512/567', Math.abs(bb.play - 511.4) < 0.1 && Math.abs(bb.shop - 566.4) < 0.1, 'play=' + bb.play + ' shop=' + bb.shop);
+__check('no objectives, no tail: playBtn/SHOP reproduce the E30 555/610 (was the old shipped 512/567 before the Score row added +44)', Math.abs(bb.play - 555.4) < 0.1 && Math.abs(bb.shop - 610.4) < 0.1, 'play=' + bb.play + ' shop=' + bb.shop);
 bb = __ncButtons(true, false, false, false);
-__check('objectives, no tail: reproduce the old shipped 642/697', Math.abs(bb.play - 641.4) < 0.1 && Math.abs(bb.shop - 696.4) < 0.1, 'play=' + bb.play + ' shop=' + bb.shop);
+__check('objectives, no tail: reproduce the E30 685/740 (was the old shipped 642/697)', Math.abs(bb.play - 685.4) < 0.1 && Math.abs(bb.shop - 740.4) < 0.1, 'play=' + bb.play + ' shop=' + bb.shop);
 bb = __ncButtons(true, true, false, false);
-__check('objectives + contract (today\\'s old worst case): reproduce the old shipped 688/743', Math.abs(bb.play - 687.4) < 0.1 && Math.abs(bb.shop - 742.4) < 0.1, 'play=' + bb.play + ' shop=' + bb.shop);
+__check('objectives + contract (today\\'s worst case): reproduce the E30 731/786 (was the old shipped 688/743)', Math.abs(bb.play - 731.4) < 0.1 && Math.abs(bb.shop - 786.4) < 0.1, 'play=' + bb.play + ' shop=' + bb.shop);
 bb = __ncButtons(true, true, true, true);
-__check('objectives + contract + event + bonus (the new worst case): panel bottom lands at py+378 = 704.4 per the handoff\\'s own table', Math.abs((bb.play - 35) - 704.4) < 0.1);
+__check('objectives + contract + event + bonus (the new worst case): panel bottom lands at py+422 = 748.4 per the handoff\\'s own table, shifted +44 by E30\\'s Score row', Math.abs((bb.play - 35) - 748.4) < 0.1);
 
 // ---- drawOver() and the three tail-row draw functions never throw, across a matrix of real states ----
 reset(); screen = 'play'; paused = false;
@@ -9239,6 +9239,64 @@ __check('E29 setup: the Night Complete panel actually rendered a LIGHT DELIVERED
 __check('E29: "Light Delivered" displays the actual delivered COUNT (74), not the weighted score (104)', __fillTextCalls[lightDeliveredLabelIdx + 1] === '74', 'value shown=' + __fillTextCalls[lightDeliveredLabelIdx + 1]);
 __check('E29: S.score itself is completely untouched by this fix -- still the real weighted score (104)', S.score === 104);
 __check('E29: S.deliveredN is completely untouched by this fix -- still 74', S.deliveredN === 74);
+`);
+
+// ---- E30: a dedicated "Score" row above "Light Delivered", and "Village Restored" reflecting real per-village restoration progress instead of the old score-based meter ----
+scenario('e30-night-complete-score-and-village-restored', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false;
+best = 0; bestAtRoundStart = 0; nightNumber = 1;
+S.over = true; S.overT = 1; S.objectiveActive = []; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins;
+S.deliveredN = 74; S.score = 104; // the exact live-reported case: 74 real deliveries, 104 weighted points
+
+function __renderRows(){
+  var calls = [];
+  var orig = ctx.fillText;
+  ctx.fillText = function(text){ calls.push(text); };
+  try { drawOver(); } finally { ctx.fillText = orig; }
+  return calls;
+}
+
+// ---- part 1: a dedicated SCORE row now exists, directly above LIGHT DELIVERED ----
+var calls1 = __renderRows();
+var scoreIdx = calls1.indexOf('SCORE');
+var lightIdx = calls1.indexOf('LIGHT DELIVERED');
+__check('E30: a SCORE row is rendered', scoreIdx !== -1);
+__check('E30: SCORE shows the real weighted score (104), not the delivered count', calls1[scoreIdx + 1] === '104', 'value=' + calls1[scoreIdx + 1]);
+__check('E30: SCORE renders directly above LIGHT DELIVERED (back-to-back label/value pairs)', scoreIdx !== -1 && lightIdx !== -1 && lightIdx === scoreIdx + 2);
+__check('E30: LIGHT DELIVERED itself is unaffected by this addition -- still the real count (74)', calls1[lightIdx + 1] === '74');
+
+// ---- part 2: VILLAGE RESTORED reflects real per-village restoration progress, not the old score-based meter ----
+// A fresh Lumora save's first night: score (104) is already well past the OLD
+// legacy system's 25-point saturation, so the OLD code showed a misleading
+// "+100%" here from score alone, regardless of actual village progress.
+// bestNightDelivered=74 against a 500 threshold is genuinely only ~15%.
+villageProgression = defaultVillageProgression();
+villageBestAtRoundStart = 0;
+villageProgression.villages[0].bestNightDelivered = 74;
+var calls2 = __renderRows();
+var villageIdx2 = calls2.indexOf('VILLAGE RESTORED');
+__check('E30: VILLAGE RESTORED no longer shows the old misleading +100% for a fresh save\\'s first night', calls2[villageIdx2 + 1] !== '+100%', 'value=' + calls2[villageIdx2 + 1]);
+__check('E30: VILLAGE RESTORED instead shows the real delta against the actual village threshold (74/500=14.8% rounds to 15%)', calls2[villageIdx2 + 1] === '+15%', 'value=' + calls2[villageIdx2 + 1]);
+
+// ---- part 3: a night that adds no NEW village progress (ties the existing best) shows +0%, not a phantom gain ----
+villageBestAtRoundStart = 74;
+villageProgression.villages[0].bestNightDelivered = 74; // tied, no new record
+var calls3 = __renderRows();
+var villageIdx3 = calls3.indexOf('VILLAGE RESTORED');
+__check('E30: a night with no new village progress shows +0%', calls3[villageIdx3 + 1] === '+0%', 'value=' + calls3[villageIdx3 + 1]);
+
+// ---- part 4: a night that DOES raise the village's best shows the correct incremental delta ----
+villageBestAtRoundStart = 74;
+villageProgression.villages[0].bestNightDelivered = 174; // new personal best: 74/500=15% -> 174/500=35%, so +20%
+var calls4 = __renderRows();
+var villageIdx4 = calls4.indexOf('VILLAGE RESTORED');
+__check('E30: a genuinely better night shows its real incremental delta (+20%)', calls4[villageIdx4 + 1] === '+20%', 'value=' + calls4[villageIdx4 + 1]);
+
+// ---- nothing here touches S.score, S.deliveredN, or the real village progression fields themselves ----
+__check('E30: S.score is untouched', S.score === 104);
+__check('E30: S.deliveredN is untouched', S.deliveredN === 74);
+__check('E30: the real villageProgression bestNightDelivered value is untouched by merely rendering this screen', villageProgression.villages[0].bestNightDelivered === 174);
 `);
 
 // ---------- runner ----------

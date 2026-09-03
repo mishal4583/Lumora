@@ -860,6 +860,23 @@ let best=0; if(!YT){ try{ best=parseInt(localStorage.getItem('gk2_best')||'0',10
 // for that one run. Declared above reset()'s first top-level call (same
 // ordering-hazard reasoning as KEYS) and reassigned inside reset() itself.
 let bestAtRoundStart=best;
+// E30: snapshot of the CURRENT village's own permanent bestNightDelivered
+// at the moment THIS round started -- same pattern as bestAtRoundStart
+// just above, so the Night Complete screen's "Village Restored" row can
+// show how much THIS specific night's completion advanced that village's
+// real building-restoration progress (the same bestNightDelivered/
+// completionThreshold metric Village Details shows), not the old,
+// unrelated score-based restorationPct(best) meter (see restorationPct()
+// below -- that one saturates at just 25 total weighted points, so it
+// showed a misleading "+100%" on essentially every single night, and is
+// left completely untouched here since Village Heart/season art, story
+// chapter unlocks, and the Master Glowkeeper Statue still correctly rely
+// on it as its own separate system). Declared above reset()'s first
+// top-level call (same ordering-hazard reasoning as bestAtRoundStart);
+// its real value is only ever read after reset() has run at least once
+// (i.e. inside drawOver(), which only runs once a round is actually
+// over), by which point villageProgression already exists.
+let villageBestAtRoundStart=0;
 // Stage 2 Part A: the save schema's first extension since the shipped build.
 // coins and journal get their OWN localStorage keys (not folded into gk2_best)
 // so the already-verified best fallback path stays completely untouched.
@@ -4651,6 +4668,7 @@ function reset(){
   stopPad();
   bestAtRoundStart=best; // Depth Pass Part 1: snapshot for the game-over restoration-% delta, taken fresh each round
   coinsAtRoundStart=coins; // Lumora UI port: same idea, for the RunSummary's "Coins Earned" delta
+  villageBestAtRoundStart=currentVillageProgress().bestNightDelivered; // E30: same idea, for the RunSummary's "Village Restored" delta -- see its declaration above
   S={
     score:0, misses:0, caughtN:0, deliveredN:0,
     // PERMANENT-VILLAGE-RESTORATION pass: the TEMPORARY, round-scoped
@@ -10053,7 +10071,7 @@ function drawContractChip(){
 // rows is completely unaffected when this one isn't present (the ordinary
 // case for the overwhelming majority of nights).
 function nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasStreak,hasVillageCompleted){
-  let base=hasObjectives?306:164;
+  let base=hasObjectives?350:208; // E30: +44 for the new Score row on the Night Complete panel, see drawOver()'s panelH comment
   const rows=[];
   if(hasContract){ rows.push({kind:'contract',b:base}); base+=26; }
   if(hasEvent){ rows.push({kind:'event',b:base}); base+=26; }
@@ -10410,17 +10428,35 @@ function drawOver(){
     ctx.fillText(S.carried.length+' fireflies never made it home',W/2,H*0.22+66);
   }
 
-  const restBefore=restorationPct(bestAtRoundStart), restAfter=restorationPct(best), restDelta=restAfter-restBefore;
+  // E30 fix: "Village Restored" must track how much THIS night's
+  // completion advanced the CURRENT village's own building-restoration
+  // progress (bestNightDelivered/completionThreshold -- the exact metric
+  // Village Details shows), not the old, separate score-based Village
+  // Heart/season meter (restorationPct(best)). That old meter saturates
+  // at just 25 total weighted points -- trivially crossed by almost any
+  // single night -- so it showed a misleading "+100%" on essentially
+  // every night ever played (0%->100% the moment `best` first passes 25,
+  // then stuck at +0% forever after). restorationPct(best) itself, and
+  // every OTHER place it's used (Village Heart season art, story chapter
+  // unlocks, the Master Glowkeeper Statue), is a genuinely separate,
+  // still-correct system and is left completely untouched.
+  const villageCur=currentVillageProgress(), villageThresh=villageCur.completionThreshold;
+  const restBefore=villageThresh!=null?Math.round(100*clamp(villageBestAtRoundStart/villageThresh,0,1)):0;
+  const restAfter=villageThresh!=null?Math.round(100*clamp(villageCur.bestNightDelivered/villageThresh,0,1)):0;
+  const restDelta=restAfter-restBefore;
   const coinsEarned=coins-coinsAtRoundStart;
-  // E29 fix: this row is labeled "Light Delivered" -- it must show the
-  // actual delivered firefly COUNT (S.deliveredN), matching Village
-  // Details and every other "delivered" figure in the game, not the
-  // weighted score (S.score). Reported live: village correctly showed 74
-  // while this row showed 104, because it was reading S.score (weighted
-  // points, 1-5 per firefly type) under a label that reads as a count.
-  // S.score itself, its calculation, and every other row here are
-  // untouched.
-  const rows=[['Light Delivered',S.deliveredN+''],['Coins Earned','+'+coinsEarned],['Village Restored','+'+Math.max(0,restDelta)+'%']];
+  // E29 fix: "Light Delivered" must show the actual delivered firefly
+  // COUNT (S.deliveredN), matching Village Details and every other
+  // "delivered" figure in the game, not the weighted score (S.score).
+  // Reported live: village correctly showed 74 while this row showed
+  // 104, because it was reading S.score (weighted points, 1-5 per
+  // firefly type) under a label that reads as a count. S.score itself,
+  // its calculation, and every other row here are untouched.
+  // E30: added a dedicated "Score" row above it so the weighted score
+  // (previously only ever shown on the HUD/title screen as "best score")
+  // is still visible on this screen too, now that "Light Delivered" no
+  // longer doubles as its display.
+  const rows=[['Score',S.score+''],['Light Delivered',S.deliveredN+''],['Coins Earned','+'+coinsEarned],['Village Restored','+'+Math.max(0,restDelta)+'%']];
   // Lumora 2.0 Phase 1: hasObjectives is false for the tutorial night (its
   // own S.objectiveActive is always []), so the ENTIRE block below --
   // taller panel, the objectives sub-section, and the resulting shift to
@@ -10467,7 +10503,13 @@ function drawOver(){
   // just decides whether tonight's screen shows the row for it.
   const hasVillageCompleted=!!S.villageCompletedThisNight;
   const tailRows=nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasStreak,hasVillageCompleted);
-  const panelH=tailRows.length?(tailRows[tailRows.length-1].b+20):(hasObjectives?280:150);
+  // E30: +44 to both baselines (150->194, 280->324) to make room for the
+  // new "Score" stat row above -- every downstream anchor that assumed
+  // exactly 3 stat rows (divY, the OBJECTIVES label, each objective row,
+  // and nightCompleteTailRows()'s own base) is shifted by the same +44,
+  // so nothing overlaps and nothing besides this new row's own vertical
+  // space changes.
+  const panelH=tailRows.length?(tailRows[tailRows.length-1].b+20):(hasObjectives?324:194);
   const panelR={x:W/2-160,y:H*0.34,w:320,h:panelH};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
   rows.forEach((row,i)=>{
@@ -10491,7 +10533,7 @@ function drawOver(){
   // granted exactly once, at completion time, by objectiveProgress();
   // re-rendering this screen any number of times cannot re-grant anything.
   if(hasObjectives){
-    const divY=panelR.y+140;
+    const divY=panelR.y+184; // E30: +44 for the new Score row, see panelH's own comment above
     // D1: a "slightly stronger" divider (haze .20 vs the existing stat-row
     // hairlines' .15) -- the only signal that a new kind of content starts,
     // per direct spec. The stat-row hairlines above (rows.forEach, .15) are
@@ -10500,7 +10542,7 @@ function drawOver(){
     ctx.beginPath(); ctx.moveTo(panelR.x+20,divY); ctx.lineTo(panelR.x+panelR.w-20,divY); ctx.stroke();
     ctx.textAlign='left'; ctx.textBaseline='middle';
     ctx.fillStyle='rgba(174,184,203,0.8)'; ctx.font='600 11px Georgia,serif';
-    ctx.fillText('OBJECTIVES',panelR.x+20,panelR.y+158);
+    ctx.fillText('OBJECTIVES',panelR.x+20,panelR.y+202); // E30: +44, see panelH's own comment above
     let bonus=0;
     S.objectiveActive.forEach((o,i)=>{
       if(o.done)bonus+=o.reward;
@@ -10510,7 +10552,7 @@ function drawOver(){
       // whole language," per direct spec. showTrack=false: no progress bar
       // here, the night is over; a done row shows its own "+reward" instead
       // of a fraction, a failed row shows an em dash (nothing is deducted).
-      drawObjectiveRow(o,panelR.x,panelR.y+180+i*28,28,panelR.x+38,panelR.w-20+panelR.x,false);
+      drawObjectiveRow(o,panelR.x,panelR.y+224+i*28,28,panelR.x+38,panelR.w-20+panelR.x,false); // E30: +44, see panelH's own comment above
     });
     // E8: on a night all 3 objectives are done, this EXACT existing line
     // relabels to "OBJECTIVES COMPLETE" and shows the fixed completion
@@ -10524,13 +10566,13 @@ function drawOver(){
     // round, in objectiveProgress() above.
     const allObjectivesDone=S.objectiveActive.length===3&&S.objectiveActive.every(o=>o.done);
     if(allObjectivesDone){
-      const boy=panelR.y+180+S.objectiveActive.length*28+10;
+      const boy=panelR.y+224+S.objectiveActive.length*28+10; // E30: +44, see panelH's own comment above
       ctx.textAlign='left'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.85)';
       ctx.fillText('OBJECTIVES COMPLETE',panelR.x+20,boy);
       ctx.textAlign='right'; ctx.fillStyle=WS_GOLD_PRICE; ctx.font='600 13px Georgia,serif';
       ctx.fillText('+'+OBJECTIVE_COMPLETION_BONUS,panelR.x+panelR.w-20,boy);
     } else if(bonus>0){
-      const boy=panelR.y+180+S.objectiveActive.length*28+10;
+      const boy=panelR.y+224+S.objectiveActive.length*28+10; // E30: +44, see panelH's own comment above
       ctx.textAlign='left'; ctx.font='600 11px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.85)';
       ctx.fillText('OBJECTIVE BONUS',panelR.x+20,boy);
       ctx.textAlign='right'; ctx.fillStyle=WS_GOLD_PRICE; ctx.font='600 13px Georgia,serif';
@@ -10585,7 +10627,7 @@ function drawOver(){
   // night, and ceilinged at H-40 so it can never run off the bottom of a
   // 960-tall frame even in that extreme case.
   HOME_BTN_OVER.y=SHOP_BTN_OVER.y+56;
-  DOUBLE_COINS_BTN.y=hasObjectives?Math.min(H-40,Math.max(910,HOME_BTN_OVER.y+66)):(830+(panelH-150));
+  DOUBLE_COINS_BTN.y=hasObjectives?Math.min(H-40,Math.max(910,HOME_BTN_OVER.y+66)):(830+(panelH-194)); // E30: -194, was -150 -- the no-objectives baseline panelH grew by 44 for the new Score row, so this keeps the same relative gap
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
