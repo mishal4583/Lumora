@@ -1029,79 +1029,101 @@ function finalizeNight(){
   // S.over===false (only finalizeNight() itself ever sets it true), so
   // nothing about the real ending sequence changes.
   if(S.over)return;
-  // Frozen once, right here -- the one authoritative "gameplay earned this
-  // night" figure Double the Glow reads (see requestDoubleNightCoins()).
-  // Taken before S.over flips true, so nothing reachable from the Night
-  // Complete screen (the Glowkeeper's Favor ad reward, a stray double-claim)
-  // can ever contaminate it after the fact.
+  // Recomputed on every real call, not just the first -- if the E42
+  // rewarded-ad continuation is claimed and the player earns/delivers more
+  // before the SECOND real ending, this must reflect the FULL night's
+  // earnings by then, not freeze at whatever was true at the interrupted
+  // first ending. Idempotent either way (a pure coins-coinsAtRoundStart
+  // recompute), so running it again on a continuation's own final call is
+  // always safe.
   S.coinsEarnedThisNight=coins-coinsAtRoundStart;
-  // Miss-category objectives no longer need anything evaluated here -- they
-  // were redefined to be live-scored (checked at the same delivery-success
-  // moment reach_score already uses, see objectiveProgress()) after the
-  // original "evaluate at night's end" design turned out to be permanently
-  // unwinnable (see the comment where evaluateMissObjectives() used to be
-  // defined, just above the D3 section header).
-  // D3: record which contract ran, once, at this exact authoritative moment
-  // -- same "the night has genuinely ended" site nightNumber/
-  // nightsCompletedThisSession update at (in continueFromOver()). The coin
-  // multiplier reward already landed continuously all night via
-  // grantDeliveryCoins() (see contractPayoutCoins() for the display-only
-  // re-derivation).
-  // E38: Collector's Workshop Token reward was granted here (once, at this
-  // same authoritative moment) before being removed entirely -- Collector
-  // itself, its Playful spawn multiplier, its objective-selection fix, and
-  // contractsCompleted tracking below are all untouched. Collector
-  // currently grants no reward at all; that's intentional, not a bug.
-  if(activeContract>=0){
-    contractsCompleted.push(CONTRACTS[activeContract].id);
+  // E42: everything below this point must happen exactly ONCE per night,
+  // even though finalizeNight() itself can now legitimately be called a
+  // second, genuine time (once the rewarded-ad continuation's own +2-miss
+  // budget also runs out -- see the trigger site and requestExtraLife()).
+  // S.nightFinalized (separate from S.over, which the continuation
+  // explicitly flips back to false to resume live play) is the one flag
+  // that actually tracks "has the one-time bookkeeping below already run
+  // for this night."
+  if(!S.nightFinalized){
+    S.nightFinalized=true;
+    // Miss-category objectives no longer need anything evaluated here --
+    // they were redefined to be live-scored (checked at the same delivery-
+    // success moment reach_score already uses, see objectiveProgress())
+    // after the original "evaluate at night's end" design turned out to be
+    // permanently unwinnable (see the comment where
+    // evaluateMissObjectives() used to be defined, just above the D3
+    // section header).
+    // D3: record which contract ran, once, at this exact authoritative
+    // moment -- same "the night has genuinely ended" site nightNumber/
+    // nightsCompletedThisSession update at (in continueFromOver()). The
+    // coin multiplier reward already landed continuously all night via
+    // grantDeliveryCoins() (see contractPayoutCoins() for the display-only
+    // re-derivation).
+    // E38: Collector's Workshop Token reward was granted here (once, at
+    // this same authoritative moment) before being removed entirely --
+    // Collector itself, its Playful spawn multiplier, its objective-
+    // selection fix, and contractsCompleted tracking below are all
+    // untouched. Collector currently grants no reward at all; that's
+    // intentional, not a bug.
+    if(activeContract>=0){
+      contractsCompleted.push(CONTRACTS[activeContract].id);
+    }
+    recordNightEconomy();
+    // E33 (New Player Discovery): the "best-night" discovery card, shown
+    // exactly once ever, the instant a player's genuinely first-ever
+    // building restoration reaches Night Complete. upgrades.seenFirst
+    // MilestoneDiscovery is set true HERE (the moment it's actually about
+    // to be shown), not back in grantVillageProgress() where the milestone
+    // itself was earned -- so a missed/never-reached Night Complete (closed
+    // tab, crash) never silently counts as "seen." Pure UI: does not touch
+    // S.nightDelivered/bestNightDelivered/milestones/persistVillageLocal(),
+    // all of which already committed unconditionally earlier this round.
+    if(S.firstMilestoneDiscoveryPending&&!upgrades.seenFirstMilestoneDiscovery){
+      upgrades.seenFirstMilestoneDiscovery=true;
+      persistUpgradesLocal(); saveProgress();
+      openDiscoveryCard('✨ The Village Is Waking',S.firstMilestoneDiscoveryPending+' restored.','Your best single night of delivered fireflies restores the village — not the total across every night. Beat your record to light the next landmark.');
+    } else if(!upgrades.seenFirstNightCompleteDiscovery){
+      // E39 (Beginner Onboarding): the single most important onboarding
+      // moment -- a genuinely first-ever completed night reaching Night
+      // Complete. `else` on purpose: on the rare night this ALSO happens to
+      // be a player's first-ever milestone restoration, that card (rarer,
+      // more exciting, and already E33-approved) wins the one shared
+      // discoveryCard slot outright rather than the two clobbering each
+      // other -- this card simply shows on whichever later Night Complete
+      // is next instead, which still satisfies "early in the player's
+      // first few nights" without inventing a second on-screen slot. Points
+      // at the EXISTING "Visit the Workshop" button (SHOP_BTN_OVER) already
+      // drawn on this exact screen -- no new button, no forced navigation,
+      // per direct instruction ("guided, not trapped").
+      upgrades.seenFirstNightCompleteDiscovery=true;
+      persistUpgradesLocal(); saveProgress();
+      openDiscoveryCard('✨ Ready for Your Next Hunt?','Visit the Shop','Unlock new jars and upgrade your equipment to catch more fireflies. You can visit any time between hunts.');
+    }
+    // Night Complete tips: picked once, right here, rather than re-rolled
+    // every drawOver() frame -- same "pick once at the moment of the event"
+    // discipline as S.batchPerfect elsewhere.
+    S.tip=NIGHT_TIPS[Math.floor(Math.random()*NIGHT_TIPS.length)];
+    // send the all-time best, not this round's score — must match what's in the cloud save
+    if(YT&&YT.engagement&&YT.engagement.sendScore){ try{ YT.engagement.sendScore({value:best}); }catch(e){} }
   }
-  S.over=true; S.overT=0; sOver(); saveProgress(); recordNightEconomy();
-  // E33 (New Player Discovery): the "best-night" discovery card, shown
-  // exactly once ever, the instant a player's genuinely first-ever
-  // building restoration reaches Night Complete. upgrades.seenFirst
-  // MilestoneDiscovery is set true HERE (the moment it's actually about
-  // to be shown), not back in grantVillageProgress() where the milestone
-  // itself was earned -- so a missed/never-reached Night Complete (closed
-  // tab, crash) never silently counts as "seen." Pure UI: does not touch
-  // S.nightDelivered/bestNightDelivered/milestones/persistVillageLocal(),
-  // all of which already committed unconditionally earlier this round.
-  if(S.firstMilestoneDiscoveryPending&&!upgrades.seenFirstMilestoneDiscovery){
-    upgrades.seenFirstMilestoneDiscovery=true;
-    persistUpgradesLocal(); saveProgress();
-    openDiscoveryCard('✨ The Village Is Waking',S.firstMilestoneDiscoveryPending+' restored.','Your best single night of delivered fireflies restores the village — not the total across every night. Beat your record to light the next landmark.');
-  } else if(!upgrades.seenFirstNightCompleteDiscovery){
-    // E39 (Beginner Onboarding): the single most important onboarding
-    // moment -- a genuinely first-ever completed night reaching Night
-    // Complete. `else` on purpose: on the rare night this ALSO happens to
-    // be a player's first-ever milestone restoration, that card (rarer,
-    // more exciting, and already E33-approved) wins the one shared
-    // discoveryCard slot outright rather than the two clobbering each
-    // other -- this card simply shows on whichever later Night Complete
-    // is next instead, which still satisfies "early in the player's
-    // first few nights" without inventing a second on-screen slot. Points
-    // at the EXISTING "Visit the Workshop" button (SHOP_BTN_OVER) already
-    // drawn on this exact screen -- no new button, no forced navigation,
-    // per direct instruction ("guided, not trapped").
-    upgrades.seenFirstNightCompleteDiscovery=true;
-    persistUpgradesLocal(); saveProgress();
-    openDiscoveryCard('✨ Ready for Your Next Hunt?','Visit the Shop','Unlock new jars and upgrade your equipment to catch more fireflies. You can visit any time between hunts.');
-  }
-  // Night Complete tips: picked once, right here, rather than re-rolled
-  // every drawOver() frame -- same "pick once at the moment of the event"
-  // discipline as S.batchPerfect elsewhere.
-  S.tip=NIGHT_TIPS[Math.floor(Math.random()*NIGHT_TIPS.length)];
-  // send the all-time best, not this round's score — must match what's in the cloud save
-  if(YT&&YT.engagement&&YT.engagement.sendScore){ try{ YT.engagement.sendScore({value:best}); }catch(e){} }
+  S.over=true; S.overT=0; sOver(); saveProgress();
   if(humGain)humGain.gain.setTargetAtTime(0.0001,AC.currentTime,0.3);
   S.flies.forEach(o=>{ if(o.state==='drift'){o.state='leaving';o.vy=-30;} });
 }
-// Declining the offer (explicit "End Night" tap, a false/rejected/thrown ad
-// result, or SDK unavailability all route here) closes the overlay and
-// finalizes the night exactly as if Extra Life had never been offered.
+// E42: declining the rewarded-ad continuation (explicit "End Night" tap, a
+// false/rejected/thrown ad result, or SDK unavailability all route here)
+// simply closes the overlay -- it does NOT call finalizeNight() any more,
+// because the night has ALREADY genuinely ended for real before this offer
+// ever opened (see its new trigger site in update()); Night Complete is
+// already showing underneath. S.extraLifeUsed is set true here too (not
+// just on a successful claim) so the one-per-round offer can never reopen
+// from a stray later miss, if simulation happens to keep ticking behind
+// the now-showing Night Complete screen.
 function declineExtraLife(){
   if(!S.extraLifeOfferOpen)return;
   S.extraLifeOfferOpen=false;
-  finalizeNight();
+  S.extraLifeUsed=true;
 }
 function requestExtraLife(){
   if(!S.extraLifeOfferOpen||S.extraLifePending||S.extraLifeUsed)return;
@@ -1115,10 +1137,19 @@ function requestExtraLife(){
     if(roundS!==S)return; // round already moved on -- discard
     roundS.extraLifePending=false;
     if(res===true){
-      // grants zero coins, on purpose -- purely one additional miss before the night ends
+      // grants zero coins, on purpose -- purely +2 additional misses (E42; plus Peaceful's own relocated bonus if active, see currentMissLimit()) before the night ends for real
       roundS.extraLifeAvailable=true;
       roundS.extraLifeUsed=true;
       roundS.extraLifeOfferOpen=false; // closes the overlay; loop()'s update() gate un-freezes next frame
+      // E42: the night had ALREADY genuinely ended (finalizeNight() ran for
+      // real before this offer ever opened, S.over is currently true, Night
+      // Complete is showing underneath the offer) -- claiming the ad
+      // explicitly un-ends it, resuming live simulation for the
+      // continuation. finalizeNight()'s own S.nightFinalized guard is what
+      // keeps a later, second, genuinely-real finalizeNight() call (once
+      // this new budget also runs out) from redoing any one-time
+      // bookkeeping.
+      roundS.over=false; roundS.overT=0;
     } else if(roundS===S){
       declineExtraLife();
     }
@@ -3762,9 +3793,19 @@ function objectiveProgress(kind,type){
 // names none, so it stays exactly as randomly-categorized as before this
 // phase).
 const CONTRACTS=[
+  // E42: mod text updated from "Two extra misses" -- that read as an
+  // immediate, guaranteed benefit of THIS night, which is no longer true:
+  // the approved design requires every contract's pre-Night-Complete
+  // ceiling to be a flat 5, so missBonus (still 2, still Peaceful's own,
+  // still additive -- see currentMissLimit()'s own comment) now only ever
+  // applies during the rewarded-ad continuation, stacking on top of the
+  // ad's own +2. Leaving the old wording would have been actively
+  // misleading (promising something the initial hunt no longer delivers),
+  // so only the copy changed here -- speedMult/coinMult/objCategory below
+  // are byte-for-byte untouched.
   { id:'peaceful', name:'PEACEFUL', full:'PEACEFUL NIGHT', glyph:'moon',
     desc:'A slower sky. Room to breathe.',
-    mods:['Firefly speed −25%','Two extra misses'], rewardLabel:'+20% coins', risk:1,
+    mods:['Firefly speed −25%','+2 misses on ad continuation'], rewardLabel:'+20% coins', risk:1,
     line:'Slower fireflies · +20% coins',
     speedMult:0.75, missBonus:2, coinMult:1.20, objCategory:'delivery' },
   { id:'rush', name:'RUSH', full:'RUSH NIGHT', glyph:'ember',
@@ -3803,13 +3844,37 @@ function contractMissBonus(){ return activeContract>=0?(CONTRACTS[activeContract
 // E41 (Life/Miss HUD clarity): the ONE place the real, dynamic miss
 // ceiling is computed -- shared by the actual ending check (in update(),
 // where S.misses>=missLimit finalizes the night) and the HUD's own dot
-// row/label, so the two can never drift out of sync. Byte-identical to
-// the formula update() already used inline: base 5 (6 once Extra Life is
-// claimed) plus whatever the active contract's own missBonus grants
-// (Peaceful: +2; every other contract: +0 via contractMissBonus()'s own
-// ||0 default). Read-only -- never mutates S.misses/S.extraLifeAvailable/
-// anything else; purely a derived value for display and comparison.
-function currentMissLimit(){ return (S.extraLifeAvailable?6:5)+contractMissBonus(); }
+// row/label, so the two can never drift out of sync. Read-only -- never
+// mutates S.misses/S.extraLifeAvailable/anything else; purely a derived
+// value for display and comparison.
+//
+// E42 (Miss Limit + Extra Miss Continuation): redefined. The approved
+// design is explicit -- every night, every contract, starts at EXACTLY 5;
+// there is no "start the night with 6 or 7" case any more. The normal
+// (pre-Night-Complete) ceiling is a flat 5, full stop -- contractMissBonus()
+// no longer feeds into it at all, closing the exact bug the E41 report
+// flagged (Peaceful silently starting a night at 7). Only once the
+// rewarded-ad continuation has actually been claimed (S.extraLifeAvailable)
+// does the ceiling become the already-used 5, plus the ad's own flat +2,
+// plus -- see the CONTRACTS/Peaceful comment below for why -- Peaceful's
+// own pre-existing missBonus, relocated here rather than removed: it was
+// always an ADDITIVE headroom grant stacked on top of whatever else
+// extended the miss budget (originally Extra Life's own +1), never a
+// competing or overriding system, and moving where it stacks is not
+// "inventing another bonus" -- it's the same field, doing the same kind of
+// thing, at the one point in the flow where extending the budget still
+// makes sense under the new design.
+function currentMissLimit(){ return S.extraLifeAvailable ? (5+2+contractMissBonus()) : 5; }
+// E42: the HUD's dot row shows the CURRENT PHASE's own budget, not the
+// lifetime cumulative ceiling above -- 5 dots pre-Night-Complete, then
+// (per direct spec) exactly 2 dots (plus Peaceful's own relocated bonus,
+// if active) once the continuation begins, never a 7-dot row with 5
+// already dim. currentMissLimit()-S.misses (the existing "misses left"
+// figure) already comes out correctly phase-relative for free -- the
+// ceiling jumps by exactly this same phase's own budget the instant the
+// continuation starts, so no separate "misses used this phase" counter is
+// needed, only a separate DOT-COUNT source.
+function currentMissPhaseBudget(){ return S.extraLifeAvailable ? (2+contractMissBonus()) : 5; }
 function contractCoinMult(){ return activeContract>=0?(CONTRACTS[activeContract].coinMult||1):1; }
 function contractSpawnMult(){ return activeContract>=0?(CONTRACTS[activeContract].spawnMult||1):1; }
 // Moonfall's own modest firefly-opportunity bump (MOONFALL_SPAWN_RATE_BONUS,
@@ -4960,6 +5025,15 @@ function reset(){
     // like streakCommitted right above, cleared the same way.
     continueHandled:false,
     extraLifeOfferOpen:false, extraLifePending:false, extraLifeAvailable:false, extraLifeUsed:false,
+    // E42: one-shot guard around finalizeNight()'s own one-time bookkeeping
+    // (contractsCompleted push, recordNightEconomy, discovery cards, tip
+    // pick, sendScore) -- separate from S.over itself, because the +2-
+    // extra-misses continuation legitimately calls finalizeNight() a SECOND
+    // real time (once the continuation's own budget is exhausted), and that
+    // second call must still flip S.over back to true and replay the Night
+    // Complete visuals, just without redoing the parts that must only ever
+    // happen once per night.
+    nightFinalized:false,
     // Phase 8: Lucky Firefly -- an independent overlay object (NOT part of
     // TYPES/S.flies/spawnFly(), see spawnLuckyFirefly()'s own comment), at
     // most ONE per round (luckySpawnedThisRound never re-arms once true).
@@ -7053,16 +7127,12 @@ function update(dt){
         f.state='leaving'; f.vy=-30;
         S.misses++; sMiss(); puff(f.x,f.y,GLOW_M,5,26,0.9);
         breakChain(); // Lumora 2.0 Phase 2: missing is the ONLY thing that breaks a Glow Chain
-        // Extra Life ("One More Chance"): missLimit is 5 normally, 6 once
-        // Extra Life has been successfully claimed this round
-        // (S.extraLifeAvailable) -- S.misses itself is NEVER touched/reset,
-        // only the ending threshold moves. The offer is shown, instead of
-        // finalizing the night immediately, exactly once per round
-        // (guarded by !S.extraLifeUsed, which also becomes true the moment
-        // the offer is claimed) -- see requestExtraLife()/declineExtraLife().
-        // D3: Peaceful's "Two extra misses" folds in here, on top of Extra
-        // Life's own +1 -- both are additive headroom grants, not competing
-        // systems, so they simply add rather than one overriding the other.
+        // E42 (Miss Limit + Extra Miss Continuation): missLimit is a flat 5
+        // pre-continuation, for every contract -- S.misses itself is NEVER
+        // touched/reset, only the ending threshold moves, once
+        // S.extraLifeAvailable flips true (see currentMissLimit()'s own
+        // comment for the full formula and the Peaceful relocation
+        // reasoning).
         const missLimit=currentMissLimit();
         // E41 (Life/Miss HUD clarity): the small "Missed -- N left" toast --
         // every miss, not gated to "first ever" (unlike the OLD static
@@ -7085,10 +7155,23 @@ function update(dt){
           S.missHintT=2.2; S.missHintExplain=false;
         }
         if(S.misses>=missLimit){
+          // E42: the night ends for real, unconditionally, the instant the
+          // current phase's miss ceiling is reached -- Night Complete
+          // (drawOver()) is genuinely showing from this point on, never
+          // pre-empted by the ad offer any more. The rewarded-ad "+2 extra
+          // misses" continuation, if eligible, is then offered LAYERED ON
+          // TOP of that already-visible Night Complete screen (see the draw
+          // order: drawOver() then drawExtraLifeOffer(), unchanged) --
+          // exactly once per round, only when ads are actually available,
+          // same three conditions as before. Claiming it (requestExtraLife())
+          // explicitly sets S.over back to false to resume live play for the
+          // continuation; finalizeNight() itself is safe to call a second,
+          // genuine time once THAT budget also runs out (see its own
+          // S.nightFinalized guard) -- this is not the same re-entrancy case
+          // the E15 guard at the top of finalizeNight() protects against.
+          finalizeNight();
           if(!S.extraLifeUsed&&upgrades.tutorialDone&&rewardedAdsAvailable()){
-            S.extraLifeOfferOpen=true; // pauses simulation (see loop()'s update() gate); drawExtraLifeOffer() takes over the screen instead of drawOver()
-          } else {
-            finalizeNight();
+            S.extraLifeOfferOpen=true;
           }
         }
       }
@@ -9763,24 +9846,27 @@ function drawHUD(){
   ctx.fillText('✦ '+S.score,22,26);
   // E41 (Life/Miss HUD clarity): previously an unexplained, unlabeled row
   // of exactly 5 dots -- real player confusion (misses vs lives vs some
-  // other mechanic was never stated), and genuinely WRONG once a contract
-  // granted extra misses (Peaceful's own +2): the old `i<5` loop and its
-  // `i<S.misses` fill test both silently assumed a hardcoded ceiling of 5,
-  // so a Peaceful night already at 5 misses (2 of Peaceful's 7 remaining)
-  // showed every dot lit as if the night were about to end. Fixed on both
-  // counts: currentMissLimit() (shared with the real ending check in
-  // update(), so this can never drift out of sync with it) drives how many
-  // dots are drawn, and a dot's fill now means "still available" -- lit =
-  // one miss left, dim = already used -- matching the explicit label above
-  // it and the plain-English reading "MISSES LEFT: these dots are what you
-  // have left," not an unexplained tally of mistakes made.
-  const missLimit=currentMissLimit(), missesLeft=Math.max(0,missLimit-S.misses);
+  // other mechanic was never stated). Fixed: a dot's fill means "still
+  // available" -- lit = one miss left, dim = already used -- matching the
+  // explicit label above it and the plain-English reading "MISSES LEFT:
+  // these dots are what you have left," not an unexplained tally of
+  // mistakes made.
+  // E42: the dot COUNT is currentMissPhaseBudget() -- the CURRENT PHASE's
+  // own budget (5 pre-Night-Complete, or exactly 2, plus Peaceful's own
+  // relocated bonus if active, once the rewarded-ad continuation is
+  // claimed) -- never currentMissLimit()'s cumulative lifetime ceiling,
+  // per direct spec: the continuation shows "2 dots", not "7 dots, 5
+  // already dim". currentMissLimit()-S.misses (missesLeft) already comes
+  // out correctly phase-relative for free -- see currentMissPhaseBudget()'s
+  // own comment for why no separate "misses used this phase" counter is
+  // needed.
+  const phaseBudget=currentMissPhaseBudget(), missesLeft=Math.max(0,currentMissLimit()-S.misses);
   ctx.font='600 9px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.textAlign='left';
   try{ ctx.letterSpacing='1.1px'; }catch(e){}
   ctx.fillText('MISSES LEFT',22,66);
   try{ ctx.letterSpacing='0px'; }catch(e){}
   const dotsX=112; // clear of "MISSES LEFT" at 9px bold + letter-spacing (measured live, verified in the browser); fixed like every other dot/icon offset in this file rather than measured post-reset
-  for(let i=0;i<missLimit;i++){
+  for(let i=0;i<phaseBudget;i++){
     const has=i<missesLeft;
     ctx.globalAlpha=has?0.85:0.22;
     ctx.fillStyle=has?'#b98ec9':'#7b83a8';
@@ -11200,9 +11286,16 @@ function drawExtraLifeOffer(){
   ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   lumGlow('One More Chance',W/2,y+62,20,'center');
   ctx.fillStyle='rgba(174,184,203,0.9)'; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='top';
-  wrapText('The moths scattered your glow. Watch a short ad to keep this night going with one extra life.',W/2,y+86,w-56,18,'center');
+  // E42: reworded so the actual reward is stated in plain terms -- was "one
+  // extra life" (a vague, life-count-sounding phrase) when the real,
+  // current mechanic is exactly +2 additional misses before the night
+  // ends for real. Also no longer claims the moths "just" scattered your
+  // glow -- this now appears AFTER Night Complete has genuinely shown, not
+  // instead of it, so the copy describes what tapping the button actually
+  // does rather than narrating a moment that already passed.
+  wrapText('Watch a short ad for 2 extra misses and keep this night going.',W/2,y+86,w-56,18,'center');
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  lumButton(EXTRA_LIFE_AD_BTN,S.extraLifePending?'Watching…':'Watch Ad · Extra Life','primary',S.extraLifePending);
+  lumButton(EXTRA_LIFE_AD_BTN,S.extraLifePending?'Watching…':'Watch Ad · +2 Extra Misses','primary',S.extraLifePending);
   lumButton(EXTRA_LIFE_END_BTN,'End Night','quiet');
   ctx.textBaseline='top';
 }

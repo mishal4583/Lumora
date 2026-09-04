@@ -4207,7 +4207,13 @@ __spy.loadResolve(JSON.stringify({ best: 0, coins: 10, upgrades: { tutorialDone:
 return __tick(5).then(function(){
   __check('reward ID is static and reused, matching REWARDED_AD_IDS.EXTRA_LIFE', REWARDED_AD_IDS.EXTRA_LIFE === 'lumora-extra-life');
 
-  function forceMisses(n){ for (var i = 0; i < n; i++) { S.misses++; if (S.misses >= (S.extraLifeAvailable ? 6 : 5)) { if (!S.extraLifeUsed && upgrades.tutorialDone && rewardedAdsAvailable()) { S.extraLifeOfferOpen = true; } else { finalizeNight(); } } } }
+  // E42 (Miss Limit + Extra Miss Continuation): mirrors the real production
+  // trigger site exactly -- finalizeNight() now runs UNCONDITIONALLY the
+  // instant the current phase's miss ceiling is reached (Night Complete is
+  // genuinely showing from that point on), and the rewarded-ad continuation
+  // offer, if eligible, is then layered ON TOP of it -- never shown INSTEAD
+  // of Night Complete any more.
+  function forceMisses(n){ for (var i = 0; i < n; i++) { S.misses++; if (S.misses >= currentMissLimit()) { finalizeNight(); if (!S.extraLifeUsed && upgrades.tutorialDone && rewardedAdsAvailable()) { S.extraLifeOfferOpen = true; } } } }
 
   // ---- normally, 5 misses ends the night (no ads installed yet -- SDK unavailable) ----
   reset(); screen = 'play'; paused = false;
@@ -4227,16 +4233,22 @@ return __tick(5).then(function(){
     requestInterstitialAd: function(){ return Promise.resolve(); }
   };
 
-  // ---- the 5th miss now opens the offer instead of ending the night ----
+  // ---- the 5th miss ends the night for real AND opens the offer, layered on top ----
   reset(); screen = 'play'; paused = false;
   forceMisses(5);
-  __check('the 5th miss opens the One More Chance offer instead of ending the night', S.extraLifeOfferOpen === true && S.over === false);
+  __check('E42: the 5th miss ends the night for real -- Night Complete is genuinely showing, not pre-empted', S.over === true);
+  __check('the One More Chance offer opens layered on top of the now-visible Night Complete', S.extraLifeOfferOpen === true);
   __check('simulation is frozen while the offer is open (update() gated, mirrored by the loop() condition)', true); // gating itself is exercised via the real loop() condition at the call site above
 
-  // ---- declining ("End Night") ends the night normally, grants nothing ----
+  // ---- declining ("End Night") just closes the offer -- the night ALREADY ended for real, finalizeNight() is not (and must not be) called again ----
   var coinsBeforeDecline = coins;
   __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_END_BTN.x, EXTRA_LIFE_END_BTN.y));
-  __check('declining Extra Life closes the offer and finalizes the night normally', S.extraLifeOfferOpen === false && S.over === true && S.extraLifeUsed === false);
+  __check('declining Extra Life closes the offer; Night Complete was already showing and simply stays showing', S.extraLifeOfferOpen === false && S.over === true);
+  // E42: declining now marks the offer used too (not just a successful
+  // claim) -- closes a real gap the restructuring opened: if simulation
+  // keeps ticking behind the now-showing Night Complete screen and a stray
+  // organic miss occurs, the offer must never reopen a second time.
+  __check('E42: declining also marks the offer used, so a stray later miss can never reopen it', S.extraLifeUsed === true);
   __check('declining Extra Life grants zero coins', coins === coinsBeforeDecline);
 
   // ---- touch target: END_BTN is drawn at 36px tall, hitRectH() must pad its HIT-TEST to the 48dp minimum ----
@@ -4246,20 +4258,20 @@ return __tick(5).then(function(){
   __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_END_BTN.x, EXTRA_LIFE_END_BTN.y + 20)); // 20px below center: outside the drawn 36px-tall button (half=18), inside the padded 48dp hit target (half=24)
   __check('a tap just outside the drawn End Night button but inside its padded 48dp hit target still registers', S.extraLifeOfferOpen === false && S.over === true);
 
-  // ---- false result: no revive, falls through to normal Night Complete ----
+  // ---- false result: no revive, falls through to the already-showing normal Night Complete ----
   reset(); screen = 'play'; paused = false;
   forceMisses(5);
   rewardBehavior = 'false';
   __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_AD_BTN.x, EXTRA_LIFE_AD_BTN.y));
   __check('button is marked pending immediately on tap', S.extraLifePending === true);
   // deep-check: End Night must also be inert while the ad request is in
-  // flight -- a tap here must NOT finalize the night early out from under
-  // the still-pending request.
+  // flight -- a tap here must NOT re-decline out from under the still-
+  // pending request.
   var sWhilePending = S;
   __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_END_BTN.x, EXTRA_LIFE_END_BTN.y));
-  __check('tapping End Night while the ad request is pending is swallowed, not treated as a decline', S.over === false && S.extraLifeOfferOpen === true && S === sWhilePending);
+  __check('tapping End Night while the ad request is pending is swallowed, not treated as a decline', S.over === true && S.extraLifeOfferOpen === true && S === sWhilePending);
   return __tick(5).then(function(){
-    __check('a false result does not revive the player -- falls through to the normal Night Complete flow', S.over === true && S.extraLifeOfferOpen === false && S.extraLifeUsed === false && S.extraLifePending === false);
+    __check('a false result does not revive the player -- falls through to the normal Night Complete flow, already showing', S.over === true && S.extraLifeOfferOpen === false && S.extraLifeUsed === true && S.extraLifePending === false);
 
     // ---- rejected request: no revive ----
     reset(); screen = 'play'; paused = false;
@@ -4278,7 +4290,7 @@ return __tick(5).then(function(){
       __check('a synchronous throw does not propagate out of requestExtraLife()', !threw);
       __check('a thrown ad request does not revive the player -- normal Night Complete flow', S.over === true && S.extraLifeOfferOpen === false);
 
-      // ---- success: resumes the SAME night, grants exactly one extra miss, zero coins ----
+      // ---- success: resumes the SAME night, grants exactly +2 additional misses, zero coins ----
       reset(); screen = 'play'; paused = false;
       forceMisses(5);
       rewardBehavior = 'success';
@@ -4288,23 +4300,28 @@ return __tick(5).then(function(){
       requestExtraLife();
       __check('requestRewardedAd is called with the exact static reward id', rewardCalls[rewardCalls.length - 1] === 'lumora-extra-life' && rewardCalls.length === callsBefore + 1);
       return __tick(5).then(function(){
-        __check('a successful claim resumes the SAME night (S itself is unchanged, not a fresh round)', S === sBeforeClaim && S.over === false && S.extraLifeOfferOpen === false);
+        __check('a successful claim resumes the SAME night (S itself is unchanged, not a fresh round)', S === sBeforeClaim);
+        __check('E42: the night is explicitly un-ended to resume live play for the continuation', S.over === false && S.extraLifeOfferOpen === false);
         __check('Extra Life is granted and marked used (cannot be claimed twice)', S.extraLifeAvailable === true && S.extraLifeUsed === true);
         __check('Extra Life grants exactly zero coins', coins === coinsBeforeClaim);
+        __check('E42: the continuation grants exactly +2 additional misses -- currentMissLimit() is now 7, not the old 6', currentMissLimit() === 7);
 
-        // a 6th miss now (not a 7th) must end the night -- exactly one additional mistake
+        // a 6th miss must NOT end the night -- only 1 of the 2 continuation misses used so far
         S.misses++;
-        var missLimit = S.extraLifeAvailable ? 6 : 5;
-        __check('S.misses reached exactly 6, the one-extra-miss allowance boundary', S.misses === 6 && missLimit === 6);
-        if (S.misses >= missLimit) { if (!S.extraLifeUsed && upgrades.tutorialDone && rewardedAdsAvailable()) { S.extraLifeOfferOpen = true; } else { finalizeNight(); } }
-        __check('the next miss after Extra Life ends the night directly -- no second offer (extraLifeUsed already true)', S.over === true && S.extraLifeOfferOpen === false);
+        __check('S.misses reached 6 -- only 1 of the 2 continuation misses used, night correctly stays open', S.misses === 6 && S.misses < currentMissLimit() && S.over === false);
+
+        // the 7th miss (both continuation misses now used) ends the night for real
+        S.misses++;
+        if (S.misses >= currentMissLimit()) { finalizeNight(); if (!S.extraLifeUsed && upgrades.tutorialDone && rewardedAdsAvailable()) { S.extraLifeOfferOpen = true; } }
+        __check('the 7th miss (both continuation misses consumed) ends the night for real -- no second offer (extraLifeUsed already true)', S.over === true && S.extraLifeOfferOpen === false);
         __check('Extra Life cannot be claimed twice in the same round', S.extraLifeUsed === true);
 
         // ---- Extra Life state resets when a new night begins ----
         reset();
-        __check('extraLifeAvailable/extraLifeUsed/extraLifeOfferOpen/extraLifePending all reset to false on a fresh round -- not permanent progression, never saved', S.extraLifeAvailable === false && S.extraLifeUsed === false && S.extraLifeOfferOpen === false && S.extraLifePending === false);
+        __check('extraLifeAvailable/extraLifeUsed/extraLifeOfferOpen/extraLifePending/nightFinalized all reset to false on a fresh round -- not permanent progression, never saved', S.extraLifeAvailable === false && S.extraLifeUsed === false && S.extraLifeOfferOpen === false && S.extraLifePending === false && S.nightFinalized === false);
+        __check('E42: the +2 does not become permanent -- a fresh round is back to the flat 5-miss ceiling', currentMissLimit() === 5);
         var lastSave = __spy.saveDataCalls.length ? JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]) : {};
-        __check('no persistent save field for Extra Life exists in the saved payload', !('extraLifeUsed' in lastSave) && !('extraLifeAvailable' in lastSave));
+        __check('no persistent save field for Extra Life exists in the saved payload', !('extraLifeUsed' in lastSave) && !('extraLifeAvailable' in lastSave) && !('nightFinalized' in lastSave));
       });
     });
   });
@@ -10341,15 +10358,19 @@ reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 99
 __check('4: a fresh reset() brings S.misses back to 0', S.misses === 0);
 __check('4 (b): misses-left is back to 5', (currentMissLimit() - S.misses) === 5);
 
-// ---- 5: Peaceful's existing +2 extra misses is represented correctly (not hardcoded to 5) ----
-activeContract = 0; // peaceful, missBonus: 2
+// ---- 5: Peaceful's pre-Night-Complete miss limit -- SUPERSEDED by E42 ----
+// E41 originally folded Peaceful's missBonus straight into the pre-Night-
+// Complete ceiling (7 total). E42's approved design requires the normal
+// (pre-Night-Complete) ceiling to be a flat 5 for EVERY contract, no
+// exceptions -- Peaceful's own +2 is relocated to the rewarded-ad
+// continuation instead (see the dedicated e42-miss-limit-extra-continuation
+// scenario below for that). This block now documents the NEW behavior,
+// not a regression of the old one.
+activeContract = 0; // peaceful, missBonus: 2 (now continuation-only, see currentMissLimit())
 reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
-__check('5: under Peaceful, currentMissLimit() is 7 (5 base + Peaceful\\'s own +2), not hardcoded to 5', currentMissLimit() === 7);
+__check('5: under Peaceful, currentMissLimit() is exactly 5 pre-Night-Complete (E42) -- missBonus no longer affects the initial hunt', currentMissLimit() === 5);
 forceMiss('y'); forceMiss('y'); forceMiss('y'); forceMiss('y'); forceMiss('y');
-__check('5 (b): 5 misses under Peaceful does NOT end the night -- Peaceful\\'s real +2 headroom is genuinely usable, matching the fixed HUD', S.misses === 5 && S.over === false);
-__check('5 (c): misses-left correctly reflects 2 remaining under Peaceful, not 0', (currentMissLimit() - S.misses) === 2);
-forceMiss('y'); forceMiss('y');
-__check('5 (d): the night ends only once the REAL Peaceful-adjusted limit (7) is reached', S.misses === 7 && S.over === true);
+__check('5 (b): 5 misses under Peaceful DOES end the night now (E42) -- the pre-Night-Complete ceiling is uniform across every contract, matching the approved design', S.misses === 5 && S.over === true);
 activeContract = -1;
 
 // ---- 6: other contracts do not incorrectly alter the display (none of them has a missBonus field) ----
@@ -10393,6 +10414,120 @@ f.patience = 0.01; f.rest = 0; f.pause = 0;
 // the time it's actually spliced out of S.flies).
 __stepFrame(16);
 __check('14: a miss after reload (explainer already seen) shows the short toast only, not the fuller explainer again', S.misses === 1 && S.missHintExplain === false && S.missHintT > 0);
+`);
+
+// ===== E42: Miss Limit + Extra Miss Continuation =====
+// End-to-end coverage of the approved flow: 5 misses (every contract, no
+// exceptions) -> Night Complete -> optional rewarded-ad "+2 extra misses"
+// continuation -> those 2 consumed -> permanent end -> next night is back
+// to a flat 5. ads-extra-life (see above) already covers the ad-flow
+// mechanics (decline/false/reject/throw/success, touch targets, reset) in
+// depth; this scenario focuses on the parts specific to E42's own approved
+// design: the HUD's phase-relative dot count, Peaceful's relocated bonus
+// actually stacking during the continuation, the finalizeNight()
+// one-time-bookkeeping guard not double-firing, and the full real-flow
+// walkthrough via forceMiss() (the real patience-expiry path, not a
+// hand-set S.misses++).
+scenario('e42-miss-limit-extra-continuation', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  var rewardCalls = [];
+  ytgame.ads = {
+    requestRewardedAd: function(id){ rewardCalls.push(id); return Promise.resolve(true); },
+    requestInterstitialAd: function(){ return Promise.resolve(); }
+  };
+
+  function forceMiss(type){
+    spawnFly(type || 'y');
+    var f = S.flies[S.flies.length - 1];
+    f.patience = 0.01; f.rest = 0; f.pause = 0;
+    __stepFrame(16);
+  }
+
+  // ---- 1/2/4: a new normal night starts with exactly 5 misses, not 6 or 7 ----
+  activeContract = -1;
+  reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+  __check('1: a new normal night starts with exactly 5 misses available', currentMissLimit() === 5 && S.misses === 0);
+  __check('2: the HUD dot count at night start is exactly 5, never 6 or 7', currentMissPhaseBudget() === 5);
+  __check('4: the player does not start a normal night with 7 misses (even with no contract active)', currentMissLimit() !== 7 && currentMissLimit() !== 6);
+
+  // ---- 3/5: reaching miss #5 ends the normal night; Night Complete appears ----
+  var contractsCompletedBefore = contractsCompleted.length;
+  forceMiss(); forceMiss(); forceMiss(); forceMiss(); forceMiss();
+  __check('3: reaching miss #5 ends the normal night', S.misses === 5 && S.over === true);
+  __check('5: Night Complete appears after the normal 5-miss limit (S.over true, drawOver() will render)', S.over === true);
+  __check('contractsCompleted recorded the night exactly once so far', contractsCompleted.length === contractsCompletedBefore); // no contract active in this block
+
+  // ---- 6: the rewarded-ad option remains available per the existing ad rules ----
+  __check('6: the rewarded-ad continuation is offered, layered on top of the already-visible Night Complete', S.extraLifeOfferOpen === true);
+
+  // ---- 7/8: claiming the rewarded ad grants exactly +2 additional misses ----
+  var callsBefore = rewardCalls.length;
+  requestExtraLife();
+  return __tick(5).then(function(){
+    __check('the ad was requested with the correct static reward id', rewardCalls[rewardCalls.length - 1] === 'lumora-extra-life' && rewardCalls.length === callsBefore + 1);
+    __check('7: claiming the rewarded ad grants exactly +2 additional misses -- currentMissLimit() is now 7 (5 + 2)', currentMissLimit() === 7);
+    __check('7 (b): the continuation resumes live play -- Night Complete is no longer showing', S.over === false && S.extraLifeOfferOpen === false);
+    __check('8: the continued hunt has exactly those 2 additional misses available', (currentMissLimit() - S.misses) === 2);
+
+    // ---- 9: the HUD accurately displays the 2 extra misses -- exactly 2 dots, not 7 ----
+    __check('9: the HUD dot count during the continuation is exactly 2, not 7 (5 dim + 2 lit)', currentMissPhaseBudget() === 2);
+
+    // ---- 10: consuming the 2 extra misses ends the continuation correctly ----
+    forceMiss();
+    __check('one continuation miss consumed: 1 remains, night still open', S.misses === 6 && (currentMissLimit() - S.misses) === 1 && S.over === false);
+    forceMiss();
+    __check('10: the second continuation miss ends the continuation correctly -- the night ends for real, permanently', S.misses === 7 && S.over === true && S.extraLifeOfferOpen === false);
+    __check('10 (b): no second ad offer -- extraLifeUsed already true', S.extraLifeUsed === true);
+    __check('contractsCompleted was still only ever recorded once for this whole night (finalizeNight()\\'s one-time bookkeeping did not double-fire on the second real call)', contractsCompleted.length === contractsCompletedBefore);
+
+    // ---- 11/12: a new night starts with exactly 5 misses again; the +2 is not permanent ----
+    reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+    __check('11: a new night starts with exactly 5 misses again', currentMissLimit() === 5 && S.misses === 0);
+    __check('12: the +2 does not become permanent -- a fresh round has no memory of the previous continuation', S.extraLifeAvailable === false && S.extraLifeUsed === false);
+
+    // ---- 15/16/17/18/19/20/21: unrelated systems remain untouched ----
+    __check('15: Peaceful\\'s other mechanics (speed/coins) are unchanged', CONTRACTS[0].speedMult === 0.75 && CONTRACTS[0].coinMult === 1.20);
+    __check('16: Rush is unchanged', CONTRACTS[1].spawnMult === 1.60 && CONTRACTS[1].rareMult === 1.50 && CONTRACTS[1].coinMult === 1.40 && CONTRACTS[1].risk === 3);
+    __check('17: Moth is unchanged', CONTRACTS[2].mothMult === 3 && CONTRACTS[2].rareMult === 2 && CONTRACTS[2].coinMult === 1.65 && CONTRACTS[2].risk === 3);
+    __check('18: Collector is unchanged', CONTRACTS[3].playfulMult === 2 && CONTRACTS[3].risk === 2);
+    __check('19: workshopTokens is still not a defined variable anywhere in scope', typeof workshopTokens === 'undefined');
+    __check('20 (b): Collector still has no tokenReward field', !('tokenReward' in CONTRACTS[3]));
+    __check('21: CONTRACT_BACK_BTN (E40) is still defined with real geometry', typeof CONTRACT_BACK_BTN === 'object' && typeof CONTRACT_BACK_BTN.x === 'number');
+
+    activeContract = 3; nightNumber = 1; cachedNightObjectivesFor = -1; cachedNightObjectives = null;
+    generateNightObjectives(null);
+    var catchObj = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+    __check('19 (b): Collector still prefers catch_playful for its forced catch objective (E37)', !!catchObj && catchObj.id === 'catch_playful');
+    activeContract = -1;
+
+    // ---- Peaceful's relocated bonus: applies ONLY during the continuation, stacking on top of the ad's own +2 ----
+    activeContract = 0; // peaceful, missBonus: 2
+    reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+    __check('14 (b): Peaceful still starts the night at exactly 5, same as every other contract', currentMissLimit() === 5);
+    forceMiss(); forceMiss(); forceMiss(); forceMiss(); forceMiss();
+    __check('Peaceful: 5 misses ends the normal night, same as every other contract', S.misses === 5 && S.over === true);
+    requestExtraLife();
+    return __tick(5).then(function(){
+      __check('Peaceful\\'s own +2 stacks with the ad\\'s +2 during the continuation -- currentMissLimit() is 9 (5 + 2 + 2), not 7', currentMissLimit() === 9);
+      __check('the continuation HUD for Peaceful shows 4 dots (2 ad + 2 Peaceful), not 2 and not 9', currentMissPhaseBudget() === 4);
+      activeContract = -1;
+    });
+  });
+});
+`);
+
+// ===== E42 TEST 13: reload does not accidentally create extra permanent misses =====
+// The whole Extra Life continuation lives entirely on S (extraLifeAvailable/
+// extraLifeUsed/nightFinalized), which is wholesale-replaced by reset() and
+// was never part of the save payload to begin with (confirmed directly
+// against a genuine reload here, not just inferred) -- so there is no
+// dedicated persistence work for E42 to get right, only to verify.
+scenario('e42-reload-no-permanent-extra', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999; activeContract = -1;
+__check('13: after a genuine reload, a fresh night still starts at exactly 5 misses -- no permanent extra misses were created', currentMissLimit() === 5 && S.misses === 0);
+__check('13 (b): the Extra Life continuation state itself is not defined as a persisted field -- it lives only on S, discarded every reset()', S.extraLifeAvailable === false && S.extraLifeUsed === false);
 `);
 
 // ---------- runner ----------
