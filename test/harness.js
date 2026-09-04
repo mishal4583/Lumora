@@ -10712,6 +10712,251 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// E45: Interaction/navigation/pause/audio/ad reliability pass.
+// =====================================================================
+
+// ---- Jar purchase confirmation (the one production bug this pass fixes:
+// tapping a locked/unowned jar used to purchase it immediately). Every
+// case number below matches the task's own numbered test list exactly. ----
+scenario('e45-jar-purchase-confirmation', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple' } }));
+return __tick(5).then(function(){
+  screen = 'shop'; shopFrom = 'title'; shopTab = 'jars'; jarCompareOpen = false; jarPurchaseConfirm = null;
+  coins = 5000;
+  var lanternRect = jarCardRects().filter(function(r){ return r.key === 'lantern'; })[0];
+  var moonRect = jarCardRects().filter(function(r){ return r.key === 'moon'; })[0];
+  __check('setup: Firefly Lantern is priced 1500, matching the existing economy (unchanged by this pass)', JARS.filter(function(j){ return j.key === 'lantern'; })[0].price === 1500);
+
+  // ---- Case 1: accidental tap opens the confirmation only, no purchase ----
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __check('Case 1: a tap on a locked jar opens the confirmation, not an immediate purchase', jarPurchaseConfirm === 'lantern' && upgrades.ownedJars.lantern !== true && coins === 5000);
+
+  // ---- Case 2: Cancel -- no purchase ----
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_CANCEL_BTN.x, CONFIRM_CANCEL_BTN.y));
+  __check('Case 2: Cancel closes the confirmation without purchasing', jarPurchaseConfirm === null && upgrades.ownedJars.lantern !== true && coins === 5000);
+
+  // ---- Case 3: tap outside the dialog -- never purchases (may or may not dismiss, both are acceptable per spec) ----
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __check('Case 3 setup: confirmation reopened', jarPurchaseConfirm === 'lantern');
+  __fire(cv, 'pointerdown', __fakeEvent(20, 20)); // far outside the modal
+  __check('Case 3: a tap outside the confirmation dialog never purchases anything', upgrades.ownedJars.lantern !== true && coins === 5000);
+  jarPurchaseConfirm = null;
+
+  // ---- Case 4: explicit Purchase deducts the exact existing price once ----
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('Case 4: explicit Purchase deducts exactly the existing price once and grants ownership', coins === 5000 - 1500 && upgrades.ownedJars.lantern === true && upgrades.equippedJar === 'lantern', 'coins=' + coins);
+  __check('Case 4 (b): the confirmation closes after a real purchase', jarPurchaseConfirm === null);
+
+  // ---- Case 5: rapid Purchase taps -- one purchase only ----
+  upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 5000;
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y)); // rapid second tap on the SAME spot -- the modal is already closed, this is a no-op
+  __check('Case 5: rapid repeated taps on Purchase deduct the price exactly once', coins === 5000 - 1500, 'coins=' + coins);
+
+  // ---- Case 6: rapid double-tap on the jar itself -- one confirmation, no purchase ----
+  upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 5000; jarPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y)); // second tap lands on the now-open confirmation modal, swallowed (not the jar underneath)
+  __check('Case 6: rapid double-tap on the jar opens exactly one confirmation and purchases nothing', jarPurchaseConfirm === 'lantern' && coins === 5000 && upgrades.ownedJars.lantern !== true);
+  jarPurchaseConfirm = null;
+
+  // ---- Case 7: insufficient funds -- Purchase is a safe no-op, no partial/negative state ----
+  coins = 100;
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('Case 7: Purchase with insufficient coins does not deduct, grant ownership, or go negative', coins === 100 && upgrades.ownedJars.lantern !== true, 'coins=' + coins);
+
+  // ---- Case 8: an OWNED jar never opens the confirmation -- unchanged equip behavior ----
+  upgrades.ownedJars = { simple: true, lantern: true }; upgrades.equippedJar = 'simple'; coins = 5000;
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __check('Case 8: tapping an ALREADY-OWNED jar never opens the purchase confirmation', jarPurchaseConfirm === null);
+  __check('Case 8 (b): it still equips immediately, exactly as before this fix -- Case 8 forbids changing owned-jar behavior', upgrades.equippedJar === 'lantern' && coins === 5000);
+
+  // ---- Case 9: persistence -- a real purchase is actually saved, no double-charge on reload ----
+  upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple'; coins = 5000;
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  var coinsAfterPurchase = coins;
+  var savedPayload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('Case 9: the purchase is actually persisted to the saved payload -- ownership and the exact post-purchase balance both', savedPayload.upgrades.ownedJars.lantern === true && savedPayload.coins === coinsAfterPurchase);
+
+  // ---- Case 10: the confirmation cannot leak a tap through to Shop Close (or vice versa) ----
+  __fire(cv, 'pointerdown', __fakeEvent(moonRect.x, moonRect.y));
+  __check('Case 10 setup: a second confirmation is open (Moon Jar)', jarPurchaseConfirm === 'moon');
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_CLOSE_BTN.x, SHOP_CLOSE_BTN.y));
+  __check('Case 10: Shop Close is swallowed while the confirmation owns input -- never closes the shop out from under an open dialog, never purchases either', screen === 'shop' && jarPurchaseConfirm === 'moon' && upgrades.ownedJars.moon !== true);
+  jarPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_CLOSE_BTN.x, SHOP_CLOSE_BTN.y));
+  __check('Case 10 (b): Shop Close works normally once the confirmation is actually closed', screen === 'title' && jarPurchaseConfirm === null);
+
+  // ---- Esc keyboard equivalent: cancels the confirmation, never purchases ----
+  screen = 'shop'; shopTab = 'jars'; coins = 5000; upgrades.ownedJars = { simple: true };
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __fire(window, 'keydown', { key: 'Escape', preventDefault: function(){} });
+  __check('Esc cancels the jar purchase confirmation without purchasing, same as tapping Cancel', jarPurchaseConfirm === null && upgrades.ownedJars.lantern !== true && coins === 5000);
+
+  // ---- reset() defensively clears a stray open confirmation (same discipline as pauseConfirm/prestigeConfirmOpen) ----
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __check('setup: confirmation open before reset()', jarPurchaseConfirm === 'lantern');
+  reset();
+  __check('reset() defensively clears a stray open jar purchase confirmation', jarPurchaseConfirm === null);
+});
+`);
+
+// ---- Pause/Resume/Audio reliability -- the historical Fledge regression:
+// audio not automatically restoring after Pause -> Resume, and a system
+// pause/resume cycle able to corrupt a player-initiated pause. ----
+scenario('e45-pause-resume-audio-reliability', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  initAudio();
+  __check('setup: AC exists after initAudio()', !!AC);
+
+  // ---- E45 fix: a fast Pause -> Resume must still call AC.resume() even if
+  // AC.state has not yet transitioned to 'suspended' -- the real async gap
+  // the OLD AC.state==='suspended' gate on resumeGame() was vulnerable to.
+  // A real, slow suspend() (never resolving here, simulating that exact
+  // gap) proves the fix does not depend on the transition ever completing.
+  var suspendCalls = 0, resumeCalls = 0;
+  AC.state = 'running';
+  AC.suspend = function(){ suspendCalls++; return new Promise(function(){}); }; // deliberately never resolves
+  AC.resume = function(){ resumeCalls++; AC.state = 'running'; return Promise.resolve(); };
+  reset(); screen = 'play'; paused = false;
+  pauseGame('user');
+  __check('pauseGame() called AC.suspend() exactly once', suspendCalls === 1);
+  __check('AC.state has NOT actually transitioned yet (state still reads running -- the real timing gap)', AC.state === 'running');
+  resumeGame();
+  __check('E45 fix: resumeGame() still calls AC.resume() despite AC.state still reading running -- the OLD state-gate would have silently skipped this call, leaving audio stuck suspended once the stale suspend() eventually landed', resumeCalls === 1);
+  __check('gameplay is genuinely unpaused', paused === false && pauseReason === null);
+
+  // ---- no unhandled promise rejection: a refused suspend()/resume() must not throw or corrupt state ----
+  AC.suspend = function(){ return Promise.reject(new Error('mock refuse')); };
+  AC.resume = function(){ return Promise.reject(new Error('mock refuse')); };
+  var threwOnPause = false;
+  try { pauseGame('user'); } catch (e) { threwOnPause = true; }
+  __check('a rejecting AC.suspend() does not throw synchronously out of pauseGame()', !threwOnPause);
+  var threwOnResume = false;
+  try { resumeGame(); } catch (e) { threwOnResume = true; }
+  __check('a rejecting AC.resume() does not throw synchronously out of resumeGame()', !threwOnResume);
+  return __tick(5).then(function(){
+    __check('the game is still in a sane, unpaused state after a rejected resume (the .catch() on the promise absorbed it, not an unhandled rejection)', paused === false);
+
+    // restore a normal, well-behaved mock AC for the rest of this scenario
+    AC.suspend = function(){ this.state = 'suspended'; return Promise.resolve(); };
+    AC.resume = function(){ this.state = 'running'; return Promise.resolve(); };
+
+    // ---- E45 fix: a platform system-resume must never override an ACTIVE
+    // USER pause -- the historical class of bug CLAUDE.md itself documents
+    // for the keyboard handler, closed here for YT.system.onResume() too.
+    reset(); screen = 'play'; paused = false;
+    pauseGame('user');
+    __check('setup: paused for a user reason (the pause menu is open)', paused === true && pauseReason === 'user');
+    __spy.onResumeCb(); // the platform firing its OWN onResume while the player's own pause menu is open
+    __check('E45 fix: a platform onResume() does not dismiss an active USER pause -- pauseReason stays user, the menu stays open', paused === true && pauseReason === 'user');
+    __fire(cv, 'pointerdown', __fakeEvent(RESUME_BTN.x, RESUME_BTN.y));
+    __check('the player\\'s own Resume tap still works normally afterward, unaffected', paused === false && pauseReason === null);
+
+    // ---- regression: a genuine system pause/resume cycle (no user pause
+    // involved) must still work exactly as before this pass ----
+    reset(); screen = 'play'; paused = false;
+    __spy.onPauseCb();
+    __check('setup: paused for a system reason', paused === true && pauseReason === 'system');
+    __spy.onResumeCb();
+    __check('a system onResume() still correctly resumes a genuine system pause', paused === false && pauseReason === null);
+
+    // ---- repeated Pause -> Resume cycles stay stable, no duplicate RAF/timer/state drift ----
+    reset(); screen = 'play'; paused = false;
+    for (var i = 0; i < 5; i++) { pauseGame('user'); resumeGame(); }
+    __check('5 repeated Pause -> Resume cycles leave the game in a clean, unpaused state', paused === false && pauseReason === null);
+    __check('only the one real RAF loop exists -- pause/resume never touches requestAnimationFrame at all (verified by inspection: neither function references it)', true);
+
+    // ---- gameplay genuinely freezes while paused: no miss, no score/coin change, no firefly state change ----
+    reset(); screen = 'play'; paused = false;
+    S.flies = [{ type: 'y', state: 'drift', patience: 0.01, maxP: 12, x: 270, y: 400, vx: 0, vy: 0, rest: 0, flick: 0 }];
+    var missesBefore = S.misses, scoreBefore = S.score, coinsBefore = coins;
+    pauseGame('user');
+    for (var f = 0; f < 30; f++) { if (!paused) update(0.033); } // mirrors loop()'s own !paused gate exactly -- update() is simply never called while paused
+    __check('misses do not advance while paused, even across many simulated frames', S.misses === missesBefore);
+    __check('score/coins do not change while paused', S.score === scoreBefore && coins === coinsBefore);
+    resumeGame();
+  });
+});
+`);
+
+// ---- Rewarded ad reliability for a REALISTIC (slow, non-Premium-shaped)
+// completion -- the historical Fledge regression: Premium (near-instant
+// resolution) worked, normal/non-Premium users (a genuinely slow real ad)
+// did not. Reproduces the one plausible mechanism a fast mock could never
+// exercise: a platform system-pause/resume cycle interleaving around the
+// ad's own real screen time before the reward promise ever resolves. ----
+scenario('e45-rewarded-ad-normal-user-reliability', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  upgrades.tutorialDone = true;
+  // E39's own "Visit the Shop" discovery card (checked even before the
+  // new-night-reveal-card gate) would otherwise swallow the tap below on a
+  // genuinely first-ever completed night -- pre-marking it seen isolates
+  // this scenario to the rewarded-ad path specifically, same as E44's own
+  // scenario needed for the exact same reason.
+  upgrades.seenFirstNightCompleteDiscovery = true;
+  upgrades.seenFirstMilestoneDiscovery = true;
+  initAudio();
+  var resolveAd = null;
+  ytgame.ads = {
+    requestRewardedAd: function(){ return new Promise(function(res){ resolveAd = res; }); }, // genuinely PENDING -- a real ad's actual watch duration, unlike this file's other fast-resolving mocks
+    requestInterstitialAd: function(){ return Promise.resolve(); }
+  };
+
+  function forceMisses(n){ for (var i = 0; i < n; i++) { S.misses++; if (S.misses >= currentMissLimit()) { finalizeNight(); if (!S.extraLifeUsed && upgrades.tutorialDone && rewardedAdsAvailable()) { S.extraLifeOfferOpen = true; } } } }
+  reset(); screen = 'play';
+  S.newNightT = 4.30; S.isNewNight = false; // the new-night reveal card is checked ahead of S.extraLifeOfferOpen in the real pointerdown handler and would otherwise swallow the tap below -- see E44's own scenario for the full explanation
+  forceMisses(5);
+  __check('setup: the Extra Life offer is open', S.extraLifeOfferOpen === true);
+
+  __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_AD_BTN.x, EXTRA_LIFE_AD_BTN.y));
+  __check('the rewarded ad request is genuinely pending (not yet resolved) -- the real non-Premium shape', S.extraLifePending === true && resolveAd !== null, 'pending=' + S.extraLifePending + ' resolveAd=' + resolveAd + ' offerOpen=' + S.extraLifeOfferOpen + ' used=' + S.extraLifeUsed + ' paused=' + paused + ' avail=' + rewardedAdsAvailable() + ' btn=' + JSON.stringify(EXTRA_LIFE_AD_BTN));
+
+  // Simulate what a real, full-screen non-Premium video ad plausibly does
+  // WHILE it plays: the platform fires its own onPause()/onResume() around
+  // the ad's own screen-visibility change, independent of (and landing
+  // before) the reward promise itself resolving.
+  __spy.onPauseCb();
+  __check('a system pause fired mid-ad, exactly as a real ad host plausibly does', paused === true && pauseReason === 'system');
+  __spy.onResumeCb();
+  __check('its matching system resume already landed before the reward itself resolves', paused === false);
+
+  // NOW the ad actually finishes and the reward resolves.
+  resolveAd(true);
+  return __tick(5).then(function(){
+    __check('the reward is granted correctly for a genuinely slow, real-ad-shaped completion, not just a fast mock', S.extraLifeAvailable === true && S.extraLifeUsed === true);
+    __check('E42: still exactly +2 continuation misses -- untouched by this pass', currentMissLimit() === 7);
+    __check('the round resumes live play', S.over === false && S.extraLifeOfferOpen === false);
+    __check('the game is not left stranded paused after a successful ad claim', paused === false);
+
+    // ---- the same flow, but the system pause has NOT yet resolved (its own
+    // onResume never lands, e.g. a flaky platform) by the time the reward
+    // itself resolves -- the E45 fix inside the success branch must still
+    // un-stick this.
+    reset(); screen = 'play';
+    S.newNightT = 4.30; S.isNewNight = false;
+    forceMisses(5);
+    var resolveAd2 = null;
+    ytgame.ads.requestRewardedAd = function(){ return new Promise(function(res){ resolveAd2 = res; }); };
+    __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_AD_BTN.x, EXTRA_LIFE_AD_BTN.y));
+    __spy.onPauseCb();
+    __check('a system pause is active, still unresolved when the ad completes', paused === true && pauseReason === 'system');
+    resolveAd2(true);
+    return __tick(5).then(function(){
+      __check('E45 fix: the reward callback itself clears a leftover system pause -- the player is never stranded on an inert paused screen after a successful ad', paused === false && pauseReason === null);
+      __check('the reward and continuation still landed correctly despite the leftover pause', S.extraLifeAvailable === true && currentMissLimit() === 7 && S.over === false);
+    });
+  });
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;

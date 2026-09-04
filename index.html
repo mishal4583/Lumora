@@ -72,13 +72,30 @@ function pauseGame(reason){
   paused=true; pauseReason=reason;
   pointer.down=false;
   saveProgress();
-  try{ if(typeof AC!=='undefined'&&AC&&AC.state==='running')AC.suspend(); }catch(e){}
+  // E45: suspend()/resume() on an AudioContext that's already in the target
+  // state are harmless no-ops per spec (resolve immediately, no audio
+  // glitch) -- so the old `AC.state==='running'` gate here bought nothing
+  // and, on the RESUME side (see resumeGame() below), was actively harmful:
+  // a fast Pause->Resume can call resumeGame() before suspend()'s own async
+  // state transition has actually landed, so `AC.state` still reads
+  // 'running' at that exact instant -- the old gate then skipped resume()
+  // entirely, and once the stale suspend() finally DID land afterward, the
+  // AudioContext was left stuck suspended with nothing left to un-stick it
+  // until the player's next unrelated tap (see the generic initAudio()+
+  // resume() fallback elsewhere in this file). Dropping both gates removes
+  // this race outright. .catch(()=>{}) on both prevents an unhandled
+  // promise rejection reaching the console on the rare host where either
+  // call is refused (e.g. no AudioContext ever unlocked yet).
+  try{ if(typeof AC!=='undefined'&&AC)AC.suspend().catch(()=>{}); }catch(e){}
 }
 function resumeGame(){
   if(!paused)return;
   paused=false; pauseReason=null;
   lastT=performance.now();
-  try{ if(typeof AC!=='undefined'&&AC&&audioEnabled&&AC.state==='suspended')AC.resume(); }catch(e){}
+  // E45: see pauseGame()'s own comment above for why the old
+  // `AC.state==='suspended'` gate was removed -- always safe to call, never
+  // restarts/glitches audio that's already playing.
+  try{ if(typeof AC!=='undefined'&&AC&&audioEnabled)AC.resume().catch(()=>{}); }catch(e){}
 }
 // LUMORA clarifications pass: abandons the active run and returns to the
 // title/home screen. Deliberately does NOT call reset() here — the round's
@@ -94,13 +111,33 @@ function goHome(){
 if(YT){
   try{
     YT.system.onPause(()=>pauseGame('system'));
-    YT.system.onResume(()=>resumeGame());
+    // E45: a platform-driven resume must never dismiss a PLAYER-initiated
+    // pause out from under them. Before this, onResume() called
+    // resumeGame() unconditionally, regardless of pauseReason -- so if the
+    // player opened the pause menu themselves (pauseReason==='user') and the
+    // platform then ALSO fired its own onPause/onResume cycle around them
+    // (e.g. a visibility change while their menu was already open;
+    // pauseGame()'s own `if(paused)return` guard means that onPause() call
+    // was a no-op and pauseReason stayed 'user'), the eventual onResume()
+    // would silently flip paused=false and close their menu without them
+    // ever tapping Resume -- and would attempt AC.resume() from a callback
+    // that is NOT a direct user gesture, exactly the kind of call a
+    // browser's autoplay policy can silently refuse. Gating on
+    // pauseReason==='system' means a system resume only ever un-does a
+    // system pause; a user pause is only ever cleared by the player's own
+    // Resume tap (or Restart/Go Home), which always runs inside a real
+    // pointerdown/keydown handler.
+    YT.system.onResume(()=>{ if(pauseReason==='system')resumeGame(); });
     if(YT.system.isAudioEnabled)audioEnabled=!!YT.system.isAudioEnabled();
     if(YT.system.onAudioEnabledChange)YT.system.onAudioEnabledChange(en=>{
       audioEnabled=!!en;
       try{
         if(typeof master!=='undefined'&&master)master.gain.value=audioEnabled?0.6:0;
-        if(typeof AC!=='undefined'&&AC){ if(!audioEnabled&&AC.state==='running')AC.suspend(); else if(audioEnabled&&!paused&&AC.state==='suspended')AC.resume(); }
+        // E45: same "no state-gate, no unhandled rejection" fix as
+        // pauseGame()/resumeGame() above -- suspend()/resume() are safe
+        // no-ops in their own already-there state, and .catch(()=>{})
+        // keeps a refused call from surfacing as a console error.
+        if(typeof AC!=='undefined'&&AC){ if(!audioEnabled)AC.suspend().catch(()=>{}); else if(!paused)AC.resume().catch(()=>{}); }
       }catch(e){}
     });
   }catch(e){}
@@ -998,6 +1035,7 @@ function requestDoubleNightCoins(){
       coins+=earned; // exactly the night's earnings, duplicated once -- never the running balance
       if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
       saveProgress();
+      resumeGame(); // E45: same defensive un-stick as requestExtraLife()'s own success branch -- a real ad's genuine duration can let a system pause/resume cycle interleave around it; a no-op if not actually paused
     }
   },()=>{ if(roundS===S)roundS.rewardedDoubleCoinsPending=false; });
 }
@@ -1150,6 +1188,26 @@ function requestExtraLife(){
       // this new budget also runs out) from redoing any one-time
       // bookkeeping.
       roundS.over=false; roundS.overT=0;
+      // E45: a REAL rewarded ad (unlike this file's own fast-resolving
+      // mocks) can take a genuine 15-30+ real seconds to play for a
+      // non-Premium viewer, and on many hosts that full-screen ad
+      // experience triggers the platform's own onPause()/onResume() around
+      // it (a SYSTEM pause -- the offer's own input-swallowing means the
+      // player themselves can't have triggered a USER pause during this
+      // exact window, see requestExtraLife()'s own reachability). If that
+      // system pause's matching onResume() callback lands before this
+      // promise resolves, or never lands cleanly at all, `paused` could
+      // still read true right here even though the reward just succeeded
+      // and the round is meant to resume live -- and pauseReason==='system'
+      // renders NO interactive Resume control at all, stranding the player
+      // on an inert paused screen after they did everything right. This is
+      // the most likely shape of the historical "Premium worked, normal
+      // users failed after actually completing the ad" report: Premium's
+      // near-instant resolution rarely gives a real system pause/resume
+      // cycle time to even begin, while a real ad's genuine duration does.
+      // resumeGame() itself is a no-op if not actually paused, so this is
+      // always safe to call unconditionally here.
+      resumeGame();
     } else if(roundS===S){
       declineExtraLife();
     }
@@ -1188,6 +1246,7 @@ function requestLuckyFireflyDouble(){
       applyCoinsOrLuckReward('coins',LUCKY_FIREFLY_BASE_REWARD*2);
       capMilestoneFx('✨ +'+(LUCKY_FIREFLY_BASE_REWARD*2)+' coins from the Lucky Firefly ✨');
       saveProgress();
+      resumeGame(); // E45: same defensive un-stick as requestExtraLife()'s own success branch -- a no-op if not actually paused
     }
     // res===false, or the promise rejects below: the offer stays open --
     // an ad failure/cancel never consumes the opportunity, per direct
@@ -1216,6 +1275,7 @@ function requestWorkshopCoins(){
       coins+=75;
       if(!YT){ try{ localStorage.setItem('gk2_coins',''+coins); }catch(e){} }
       saveProgress();
+      resumeGame(); // E45: same defensive un-stick as requestExtraLife()'s own success branch -- a no-op if not actually paused
     }
   },()=>{ workshopFavorPending=false; });
 }
@@ -1283,6 +1343,7 @@ function requestMysteryChest(){
       mysteryChestReward=reward;
       mysteryChestLastNight=nightNumber;
       saveProgress();
+      resumeGame(); // E45: same defensive un-stick as requestExtraLife()'s own success branch -- a no-op if not actually paused
     }
   },()=>{ mysteryChestPending=false; });
 }
@@ -2839,7 +2900,7 @@ function requestCosmeticTrial(category,id){
   catch(e){ cosmeticTrialPending=false; return; }
   Promise.resolve(result).then(res=>{
     cosmeticTrialPending=false;
-    if(res===true){ cosmeticTrial={category,id}; cosmeticTrialT=COSMETIC_TRIAL_SECONDS; }
+    if(res===true){ cosmeticTrial={category,id}; cosmeticTrialT=COSMETIC_TRIAL_SECONDS; resumeGame(); } // E45: same defensive un-stick as requestExtraLife()'s own success branch -- a no-op if not actually paused
     // res===false, or the promise rejects below: no trial granted, nothing
     // consumed -- the cosmetic is still just as trial-eligible afterward.
   },()=>{ cosmeticTrialPending=false; });
@@ -4965,6 +5026,20 @@ let prestigeConfirmOpen=false;
 // Jar Hero). Closed defensively wherever the shop is entered/exited so a
 // stray open modal can't survive into an unrelated shop visit.
 let jarCompareOpen=false;
+// E45: whether the jar PURCHASE confirmation modal is open, and which jar
+// key it's confirming. Session-level shop UI state, same category as
+// jarCompareOpen/prestigeConfirmOpen directly above -- not S, not
+// persisted, cleared defensively in reset(). Fixes a real reachable bug:
+// a single tap on an unowned/locked jar used to call tryBuyOrEquipJar()
+// directly and spend coins immediately (see the jarCardRects() tap site
+// below) -- an accidental tap could silently buy a jar the player never
+// meant to. Now a tap on an UNOWNED jar only opens this confirmation
+// (never deducts coins); tryBuyOrEquipJar() itself is unchanged and still
+// the one function that actually purchases/equips, now only ever called
+// from CONFIRM_ACTION_BTN's own tap (or immediately, unchanged, for an
+// already-OWNED jar's plain equip tap -- see Case 8's own requirement
+// that owned-jar behavior must not change).
+let jarPurchaseConfirm=null;
 // E33 (New Player Discovery): the ONE shared slot for a one-time
 // "discovery card" -- a small dismissible overlay for a genuinely major,
 // one-time-ever explanation (the best-night village mechanic, a new
@@ -5175,6 +5250,7 @@ function reset(){
   KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
   prestigeConfirmOpen=false; // Phase 12: same defensive clear as pauseConfirm above
+  jarPurchaseConfirm=null; // E45: same defensive clear as pauseConfirm/prestigeConfirmOpen above -- a stray open jar-purchase confirmation can't survive into an unrelated round
   discoveryCard=null; // E33: same defensive clear as pauseConfirm/prestigeConfirmOpen above -- a stray open discovery card can't survive into an unrelated round
   villageDetailsDragActive=false; // E20: same defensive clear as pointer.down above -- a fresh round should never inherit a mid-drag scroll gesture
   // Lumora 2.0 Phase 1: the ONE place objective generation/restoration is
@@ -6326,7 +6402,7 @@ cv.addEventListener('pointerdown',e=>{
     else if(inRect(p.x,p.y,hitRectH(LUCKY_DOUBLE_BTN)))requestLuckyFireflyDouble();
     return;
   }
-  initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
+  initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume().catch(()=>{}); // E45: same unhandled-rejection fix as pauseGame()/resumeGame() -- a refused resume (e.g. platform quirk) never reaches the console
   // D3: Contract Selection screen. The card rect IS the tap target (no
   // inner targets, no long-press, no drag, per direct spec) -- checked as
   // plain top-left+w/h bounds, matching how the spec itself expresses the
@@ -6519,7 +6595,32 @@ cv.addEventListener('pointerdown',e=>{
       if(dist(p.x,p.y,JAR_COMPARE_CLOSE_BTN.x,JAR_COMPARE_CLOSE_BTN.y)<=hitR(JAR_COMPARE_CLOSE_BTN))jarCompareOpen=false; // E43: was raw r:16, isolated (only button in this modal)
       return;
     }
-    if(dist(p.x,p.y,SHOP_CLOSE_BTN.x,SHOP_CLOSE_BTN.y)<=hitR(SHOP_CLOSE_BTN)){ screen=shopFrom; jarCompareOpen=false; return; }
+    // E45: the jar purchase confirmation modal, same "owns all input, only
+    // Cancel/Action respond, anything else is fully swallowed (not
+    // dismissed)" discipline as pauseConfirm's own Restart/Go Home confirm
+    // above -- a tap outside the dialog must never purchase anything (the
+    // whole point of this modal existing), and this matches that exact
+    // established precedent rather than inventing a new "tap outside
+    // dismisses" behavior. Checked before jarCompareOpen's own priority
+    // slot below since it's the more restrictive modal, though in practice
+    // the two can never be open at once (each closes/replaces the other's
+    // only entry point).
+    if(jarPurchaseConfirm){
+      if(inRect(p.x,p.y,hitRectH(CONFIRM_CANCEL_BTN)))jarPurchaseConfirm=null; // Cancel -- no purchase, jar stays unowned, coins unchanged
+      else if(inRect(p.x,p.y,hitRectH(CONFIRM_ACTION_BTN))){
+        // one-shot: clear BEFORE calling tryBuyOrEquipJar() so a stray
+        // duplicate dispatch of this same event can never re-enter this
+        // branch and double-purchase -- same "check right before mutation"
+        // discipline as jarCanAcceptCatch()/finalizeNight()'s own guards.
+        const key=jarPurchaseConfirm; jarPurchaseConfirm=null;
+        tryBuyOrEquipJar(key); // the ONE function that actually deducts coins/grants ownership, unchanged
+      }
+      // else: tap landed elsewhere in/around the modal -- swallowed, not
+      // dismissed, exactly like pauseConfirm's own confirm modal. Never
+      // purchases anything.
+      return;
+    }
+    if(dist(p.x,p.y,SHOP_CLOSE_BTN.x,SHOP_CLOSE_BTN.y)<=hitR(SHOP_CLOSE_BTN)){ screen=shopFrom; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
     // E43: 7 tabs side by side, not stacked -- height-only padding can't
     // make one tab intrude on its horizontal neighbor.
     for(const tab of shopTabRects()){ if(inRect(p.x,p.y,hitRectH(tab))){ shopTab=tab.key; return; } }
@@ -6562,7 +6663,18 @@ cv.addEventListener('pointerdown',e=>{
       // Lumora UI port: whole-card tap target, same as JarCard.tsx's own
       // single <button> wrapping the whole card -- no separate small buy/
       // equip button to hit-test
-      for(const rect of jarCardRects()){ if(inRect(p.x,p.y,rect))tryBuyOrEquipJar(rect.key); }
+      // E45: an OWNED jar's tap still equips immediately (Case 8 -- do not
+      // change existing owned-jar behavior at all), but an UNOWNED jar's
+      // tap no longer calls tryBuyOrEquipJar() (and therefore never spends
+      // coins) directly -- it only opens the purchase confirmation above.
+      // Existing prices/eligibility are untouched; only WHEN the actual
+      // purchase call happens has changed.
+      for(const rect of jarCardRects()){
+        if(inRect(p.x,p.y,rect)){
+          if(upgrades.ownedJars[rect.key])tryBuyOrEquipJar(rect.key);
+          else jarPurchaseConfirm=rect.key;
+        }
+      }
     } else if(shopTab==='capacity'){
       // E4: routes through handleUpgradeButtonTap() -- a tap on this exact
       // button either buys normally or, if this specific line is currently
@@ -6630,7 +6742,7 @@ cv.addEventListener('pointerdown',e=>{
     // neighbor. Was raw h:64, still undershoots 48dp at small mobile scale.
     for(const btn of titleNavRects()){
       if(inRect(p.x,p.y,hitRectH(btn))){
-        if(btn.key==='shop'){ shopFrom='title'; screen='shop'; jarCompareOpen=false; }
+        if(btn.key==='shop'){ shopFrom='title'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; }
         // Glowkeeper Story pass: from title, the Journal always opens
         // fresh at the chapter list (not mid-chapter from a previous
         // village-link visit) -- journalReading=null makes that explicit
@@ -6676,7 +6788,7 @@ cv.addEventListener('pointerdown',e=>{
       // must not make an existing screen's input any less forgiving
       // E43: checked second, nothing closer than the already-capped
       // HOME_BTN_OVER above it -- safe to pad uncapped.
-      if(inRect(p.x,p.y,hitRectH(SHOP_BTN_OVER))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; return; }
+      if(inRect(p.x,p.y,hitRectH(SHOP_BTN_OVER))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
       // "Double the Glow" -- same carve-out pattern as SHOP_BTN_OVER above --
       // only drawn/tappable once the tutorial is done, the SDK actually
       // offers rewarded ads (see drawOver()), and this night earned
@@ -6760,6 +6872,7 @@ window.addEventListener('keydown',e=>{
     if(paused&&pauseReason==='user'&&pauseConfirm)pauseConfirm=null; // Esc cancels the confirm modal first, same as tapping Cancel — doesn't fall through to resuming in the same keystroke
     else if(paused&&pauseReason==='user')resumeGame();
     else if(showWelcomeBack)showWelcomeBack=false;
+    else if(screen==='shop'&&jarPurchaseConfirm)jarPurchaseConfirm=null; // E45: Esc cancels the purchase confirmation first, same two-step precedent as jarCompareOpen/pauseConfirm below -- never purchases, doesn't fall through to closing the shop in the same keystroke
     else if(screen==='shop'&&jarCompareOpen)jarCompareOpen=false; // Aurora shop-presentation pass: Esc closes the compare modal first, same two-step precedent as pauseConfirm above -- doesn't fall through to closing the shop in the same keystroke
     else if(screen==='shop')screen=shopFrom; // SHOULD: Esc closes modals — every modal screen is
     else if(screen==='village')screen='title';
@@ -6792,14 +6905,14 @@ window.addEventListener('keydown',e=>{
     return;
   }
   if(e.key==='Enter'||e.key===' '||e.key==='Spacebar'){
-    initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
+    initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume().catch(()=>{}); // E45: same unhandled-rejection fix as pauseGame()/resumeGame() -- a refused resume (e.g. platform quirk) never reaches the console
     if(screen==='title'){ beginPlay(); }
     else if(S&&S.over&&S.overT>0.35&&!S.rewardedDoubleCoinsPending){ continueFromOver(); }
     e.preventDefault(); return;
   }
   const dir=keyDir(e.key);
   if(dir){
-    initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume();
+    initAudio(); if(AC&&audioEnabled&&AC.state==='suspended')AC.resume().catch(()=>{}); // E45: same unhandled-rejection fix as pauseGame()/resumeGame() -- a refused resume (e.g. platform quirk) never reaches the console
     KEYS[dir]=1; e.preventDefault();
   }
 });
@@ -13194,6 +13307,17 @@ function drawShop(){
     // else on this tab, same "modal on top" ordering as drawConfirmModal()
     // over the pause overlay.
     if(jarCompareOpen)drawJarCompareModal();
+    // E45: the jar purchase confirmation -- reuses the EXACT same shared
+    // drawConfirmModal()/CONFIRM_CANCEL_BTN/CONFIRM_ACTION_BTN construction
+    // as the pause screen's Restart/Go Home confirm and Journal's Prestige
+    // confirm, per direct instruction to use the existing visual language
+    // rather than a new dialog design. Drawn last, same "modal on top"
+    // ordering as jarCompareOpen right above.
+    if(jarPurchaseConfirm){
+      const jar=JARS.find(j=>j.key===jarPurchaseConfirm);
+      if(jar)drawConfirmModal('Purchase '+jar.name+'?','Cost: '+jar.price.toLocaleString()+' coins. This will spend your coins.','Purchase');
+      else jarPurchaseConfirm=null; // defensive -- an unrecognized key can never leave a dangling open modal with nothing to confirm
+    }
   } else if(shopTab==='capacity'){
     drawJarCapacityCard(upgradeCardRect(0));
   } else if(shopTab==='range'){
