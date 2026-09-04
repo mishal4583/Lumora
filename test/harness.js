@@ -3840,7 +3840,7 @@ return __tick(5).then(function(){
   // Stage 3 Part A (weather + Mystery Firefly) added ZERO new top-level save
   // fields; Stage 3 Part C (quests + welcome-back) legitimately adds two more
   // (lastPlayed, quests) -- same discipline every time the shape grows for real
-  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
+  __check('the saved payload is exactly the existing fields plus the Lumora 2.0 Phase 0/9 foundation fields -- no stray extra field, still one save call', JSON.stringify(Object.keys(lastSave).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly']) && lastSave.best === 30 && lastSave.coins === 47, 'payload=' + JSON.stringify(lastSave));
   __check('the saved journal payload matches the live per-type counts, including Mystery', JSON.stringify(lastSave.journal) === JSON.stringify({ y: 3, b: 1, g: 0, e: 0, m: 2 }), 'journal=' + JSON.stringify(lastSave.journal));
   return true;
 });
@@ -3920,7 +3920,7 @@ return __tick(5).then(function(){
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('saving after loading an old-format save now writes the full extended schema going forward, including the Lumora 2.0 Phase 0/9 foundation fields', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly']), 'payload=' + JSON.stringify(payload));
   return true;
 });
 `);
@@ -4365,7 +4365,7 @@ return __tick(5).then(function(){
   return __tick(5).then(function(){
     __check('a successful Workshop favor grants exactly +75 coins', coins === coinsBefore1 + 75, 'coins=' + coins);
     __check('the granted coins persist through the existing saveData mechanism', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','cachedNightEvent','cachedNightEventFor','cachedNightObjectives','cachedNightObjectivesFor','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastNightCompletionDay','lastPlayed','nightNumber','nightStreak','objectivesCompleted','prestigeLegacyEligible','prestigeLevel','prestigeMigrated','quests','seasonId','seasonProgress','storyLegacyUnlocked','storyMigrated','trackerOn','upgrades','variantJournal','villageProgression','weekly','workshopTokens']));
+    __check('no new persistent save schema was introduced by the ads rework itself -- the saved payload has exactly the pre-rework field set plus the (separate, later) Lumora 2.0 Phase 0/9 foundation fields, nothing stray from the Workshop favor', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best','cachedNightEvent','cachedNightEventFor','cachedNightObjectives','cachedNightObjectivesFor','coinFraction','coins','contractsCompleted','cosmeticsUnlocked','equippedTheme','eventHistory','journal','lastNightCompletionDay','lastPlayed','nightNumber','nightStreak','objectivesCompleted','prestigeLegacyEligible','prestigeLevel','prestigeMigrated','quests','seasonId','seasonProgress','storyLegacyUnlocked','storyMigrated','trackerOn','upgrades','variantJournal','villageProgression','weekly']));
 
     // ---- once-per-completed-night limit ----
     var coinsAfterFirst = coins;
@@ -5637,25 +5637,32 @@ S.coinsEarnedThisNight = 140;
 __check('contractPayoutCoins() backs out exactly the multiplier\\'s own share of tonight\\'s real earnings (140*(1-1/1.4)=40)', contractPayoutCoins() === 40, 'got=' + contractPayoutCoins());
 activeContract = 3; // collector, no coinMult
 S.coinsEarnedThisNight = 140;
-__check('Collector has no coin multiplier, so contractPayoutCoins() is 0 (its reward is the flat Workshop Token instead)', contractPayoutCoins() === 0);
+// E38: Collector's reward (the flat Workshop Token) was removed entirely --
+// it now has no reward at all, so contractPayoutCoins() being 0 is simply
+// "no coin reward", not "a non-coin reward shown elsewhere" any more.
+__check('Collector has no coin multiplier and no reward at all -- contractPayoutCoins() is 0', contractPayoutCoins() === 0);
 activeContract = -1;
 __check('no contract: contractPayoutCoins() is 0', contractPayoutCoins() === 0);
 
-// ---- finalizeNight(): records which contract ran, grants Collector's Workshop Token exactly once ----
+// ---- E38: Workshop Tokens are gone -- the state variable itself no longer exists ----
+__check('E38: workshopTokens is no longer a defined variable anywhere in scope -- not just zeroed, genuinely removed', typeof workshopTokens === 'undefined');
+
+// ---- finalizeNight(): records which contract ran; Collector grants no reward, so no token/balance of any kind can be created ----
 upgrades.tutorialDone = true;
 reset(); screen = 'play'; paused = false;
-activeContract = 1; // rush -- a coin-multiplier contract, no token
+activeContract = 1; // rush -- a coin-multiplier contract, unaffected by the removal
 var contractsCompletedBefore = contractsCompleted.length;
-var tokensBefore = workshopTokens;
 finalizeNight();
 __check('finalizeNight() records the accepted contract\\'s id in contractsCompleted', contractsCompleted.length === contractsCompletedBefore + 1 && contractsCompleted[contractsCompleted.length - 1] === 'rush');
-__check('a coin-multiplier contract does not touch workshopTokens', workshopTokens === tokensBefore);
 
 reset(); screen = 'play'; paused = false;
-activeContract = 3; // collector -- grants a Workshop Token
-var tokensBefore2 = workshopTokens;
-finalizeNight();
-__check('completing a Collector night grants exactly one Workshop Token', workshopTokens === tokensBefore2 + 1);
+activeContract = 3; // collector -- E38: grants nothing now, no token, no replacement reward
+var coinsBeforeCollectorNight = coins, contractsCompletedBefore2 = contractsCompleted.length;
+var threwOnCollectorFinalize = false;
+try { finalizeNight(); } catch (e) { threwOnCollectorFinalize = true; }
+__check('completing a Collector night does not throw now that its token reward is gone', !threwOnCollectorFinalize);
+__check('completing a Collector night still records it in contractsCompleted (that tracking is unrelated to the removed reward)', contractsCompleted.length === contractsCompletedBefore2 + 1 && contractsCompleted[contractsCompleted.length - 1] === 'collector');
+__check('completing a Collector night grants no coins either -- no replacement reward was added', coins === coinsBeforeCollectorNight);
 
 reset(); screen = 'play'; paused = false;
 activeContract = -1; // no contract (shouldn't happen post-D3 for a real night, but must still be safe)
@@ -6095,7 +6102,7 @@ return __tick(5).then(function(){
   best = 25; nightNumber = 10; // a village-level-2 state
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']), 'payload=' + JSON.stringify(payload));
+  __check('Test 6: Village Level introduces NO new save field -- derived from best+nightNumber, both already present in the existing payload, no duplicate persistence system', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly']), 'payload=' + JSON.stringify(payload));
   __check('Test 6: the payload\\'s own best/nightNumber already fully encode the reached level -- a fresh load of this exact payload would read the same level with no extra code', payload.best === 25 && payload.nightNumber === 10 && villageLevelFor(payload.best, payload.nightNumber) === 2);
 });
 `);
@@ -6225,7 +6232,7 @@ return __tick(5).then(function(){
   saveProgress();
   var payload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
   __check('Test 7: saveProgress() writes equippedTheme into the existing save payload -- no new save key/mechanism', payload.equippedTheme === 'default');
-  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
+  __check('Test 7: no save field beyond equippedTheme was introduced for themes', JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly']));
 });
 `);
 
@@ -6513,7 +6520,7 @@ return __tick(5).then(function(){
   upgrades.tutorialDone = true;
   saveProgress();
   var payload1 = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
-  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
+  __check('Test 13: saveProgress() still writes exactly the existing fields -- no new Phase 8 save key was introduced (everything Phase 8 added is session-only)', JSON.stringify(Object.keys(payload1).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly']));
 
   // ---- Test 20: Night Complete's existing layout is completely unaffected by Phase 8 monetization state (Mystery Chest/Lucky Firefly live OUTSIDE Night Complete entirely -- see this phase's own report for why) ----
   upgrades.tutorialDone = true;
@@ -7439,7 +7446,7 @@ return __tick(5).then(function(){
   __check('a successful Almost Affordable ad grants EXACTLY the shortfall (' + expectedShortfall + '), never the full cost and never a fixed amount', coins === coinsBeforeAd + expectedShortfall && coins === costForReward, 'coins=' + coins + ' cost=' + costForReward);
   __check('requestRewardedAd was called with the reserved WORKSHOP_SMALL_UPGRADE id, not a new one', rewardCalls[rewardCalls.length - 1] === 'lumora-workshop-small-upgrade');
   __check('the granted coins persist through the existing saveData mechanism -- no new save field', JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]).coins === coins);
-  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly', 'workshopTokens']));
+  __check('no new persistent save schema was introduced by Almost Affordable -- the saved payload has exactly the pre-E4 field set', JSON.stringify(Object.keys(JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1])).sort()) === JSON.stringify(['best', 'cachedNightEvent', 'cachedNightEventFor', 'cachedNightObjectives', 'cachedNightObjectivesFor', 'coinFraction', 'coins', 'contractsCompleted', 'cosmeticsUnlocked', 'equippedTheme', 'eventHistory', 'journal', 'lastNightCompletionDay', 'lastPlayed', 'nightNumber', 'nightStreak', 'objectivesCompleted', 'prestigeLegacyEligible', 'prestigeLevel', 'prestigeMigrated', 'quests', 'seasonId', 'seasonProgress', 'storyLegacyUnlocked', 'storyMigrated', 'trackerOn', 'upgrades', 'variantJournal', 'villageProgression', 'weekly']));
 
   // ---- one ad = one shortfall: purchasing immediately afterward drains the balance to exactly 0, no leftover ----
   var boughtOk = tryUpgradeJarCap('simple');
@@ -8273,27 +8280,27 @@ __check('16: existing rewarded-ad entry points remain present and distinct from 
 // frame (realistic under a high-spawn contract/event, since the miss-
 // detection for-loop never breaks after a single miss), it could be
 // called more than once for one real night ending -- double-pushing
-// contractsCompleted and double-granting a Collector night's Workshop
-// Token. Fixed with a one-line idempotency guard (if(S.over)return;),
-// mirroring jarCanAcceptCatch()'s own "check right before mutation"
-// discipline. This test calls finalizeNight() directly, twice in a row --
-// the exact reachable double-fire shape -- rather than trying to choreograph
-// two fireflies expiring in the same real frame, which is the same
-// "drive the canonical function directly" approach objectiveProgress()/
+// contractsCompleted (originally also double-granting a Collector night's
+// Workshop Token, before E38 removed that reward entirely). Fixed with a
+// one-line idempotency guard (if(S.over)return;), mirroring
+// jarCanAcceptCatch()'s own "check right before mutation" discipline. This
+// test calls finalizeNight() directly, twice in a row -- the exact
+// reachable double-fire shape -- rather than trying to choreograph two
+// fireflies expiring in the same real frame, which is the same "drive the
+// canonical function directly" approach objectiveProgress()/
 // advanceChain()'s own existing tests already use.
 scenario('lumora2-e15-finalizeNight-reentry', null, `
 reset();
-activeContract = 3; // Collector -- the one contract with a real, discrete token reward to duplicate
-var tokensBefore = workshopTokens, completedBefore = contractsCompleted.length;
+activeContract = 3; // Collector -- E38: no reward of any kind any more, but contractsCompleted tracking is still the thing under test here
+var completedBefore = contractsCompleted.length, coinsBefore = coins;
 finalizeNight();
-var tokensAfterFirst = workshopTokens, completedAfterFirst = contractsCompleted.length;
-__check('a real (first) finalizeNight() call grants the Workshop Token exactly once', tokensAfterFirst === tokensBefore + 1);
+var completedAfterFirst = contractsCompleted.length;
 __check('a real (first) finalizeNight() call records the contract exactly once', completedAfterFirst === completedBefore + 1);
 finalizeNight(); // the exact double-fire shape a same-frame double-miss would produce
-__check('a second finalizeNight() call for the SAME already-ended round grants no additional Workshop Token', workshopTokens === tokensAfterFirst);
 __check('a second finalizeNight() call for the SAME already-ended round does not double-record the contract', contractsCompleted.length === completedAfterFirst);
 finalizeNight(); finalizeNight(); // a third and fourth call, for good measure
-__check('repeated finalizeNight() calls remain fully idempotent', workshopTokens === tokensAfterFirst && contractsCompleted.length === completedAfterFirst);
+__check('repeated finalizeNight() calls remain fully idempotent', contractsCompleted.length === completedAfterFirst);
+__check('E38: none of this ever grants coins either -- Collector has no reward, so there is nothing left to duplicate', coins === coinsBefore);
 `);
 
 // E15: a second real, reachable duplicate-Continue bug found during this
@@ -9979,6 +9986,106 @@ activatePrestige();
 __check('activating still works normally through the grandfather, granting the real, single, unchanged reward -- nothing invented', prestigeLevel === 1 && upgrades.statueOwned === true);
 `);
 
+// ===== E38: Workshop Tokens removed completely -- Collector remains, with no reward, unchanged otherwise =====
+scenario('e38-workshop-token-removal', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({})); // resolve the initial cloud load first -- saveProgress() below defers until this happens, same as any real Playables session
+return __tick(5).then(function(){
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+
+// ---- 1: Workshop Token state is no longer active gameplay state ----
+__check('1: workshopTokens is not a defined variable anywhere in scope', typeof workshopTokens === 'undefined');
+
+// ---- 2/3/4: Collector grants no token, cannot create/increment any balance, finalizeNight() cannot grant one ----
+activeContract = 3; // collector
+var coinsBefore = coins, contractsCompletedBefore = contractsCompleted.length;
+var threw = false;
+try { finalizeNight(); } catch (e) { threw = true; }
+__check('2/4: completing a Collector night through finalizeNight() does not throw and grants no coins (no replacement reward)', !threw && coins === coinsBefore);
+__check('3: contractsCompleted still records the contract (unrelated tracking), but nothing token-shaped was created -- there is no token field on window/scope to even inspect', contractsCompleted.length === contractsCompletedBefore + 1 && typeof workshopTokens === 'undefined');
+activeContract = -1;
+
+// ---- 7: cloud-save serialization does not actively serialize Workshop Tokens ----
+reset(); screen='play';
+saveProgress();
+var lastPayload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+__check('7: the saved cloud payload has no workshopTokens key at all', !Object.prototype.hasOwnProperty.call(lastPayload, 'workshopTokens'));
+
+// ---- 9/10: no Workshop Token UI/reward text is rendered anywhere the Collector card draws ----
+(function(){
+  screen = 'contract'; contractSel = 3; contractExitAt = -1; contractScreenAt = 2;
+  var calls = [];
+  var orig = ctx.fillText;
+  ctx.fillText = function(text){ calls.push(text); return orig.apply(ctx, arguments); };
+  var drawThrew = false;
+  try { draw(); } catch (e) { drawThrew = true; } finally { ctx.fillText = orig; }
+  __check('9/10 setup: the contract screen (with Collector selected) renders without throwing', !drawThrew);
+  var joined = calls.join(' | ');
+  __check('9: no "Workshop Token" text is rendered anywhere on the contract screen', joined.indexOf('Workshop Token') === -1 && joined.indexOf('Workshop token') === -1);
+  __check('10: no token reward glyph/label ("TOKEN", "✦ Workshop", the old reward icon text) is rendered', joined.indexOf('TOKEN') === -1);
+  screen = 'play';
+})();
+(function(){
+  // Night Complete's own contract result row, with Collector as tonight's contract
+  S.over = true; S.overT = 1; S.tip = NIGHT_TIPS[0]; coinsAtRoundStart = coins; S.coinsEarnedThisNight = 0;
+  activeContract = 3;
+  var calls = [];
+  var orig = ctx.fillText;
+  ctx.fillText = function(text){ calls.push(text); return orig.apply(ctx, arguments); };
+  var drawThrew = false;
+  try { drawOver(); } catch (e) { drawThrew = true; } finally { ctx.fillText = orig; }
+  __check('9/10 (b) setup: Night Complete renders without throwing with Collector as tonight\\'s contract', !drawThrew);
+  var joined = calls.join(' | ');
+  __check('9 (b): Night Complete shows no "Workshop Token" text for a Collector night', joined.indexOf('Workshop Token') === -1 && joined.indexOf('Workshop token') === -1);
+  __check('10 (b): Night Complete shows no token reward glyph ("TOKEN") for a Collector night -- it now uses the same coin figure every other contract already used (here, +0, since Collector has no coinMult)', joined.indexOf('✦ TOKEN') === -1);
+  activeContract = -1; screen = 'play';
+})();
+
+// ---- 11/12/14: Collector still exists, Playful x2 unchanged, risk unchanged ----
+var collector = CONTRACTS.find(function(c){ return c.id === 'collector'; });
+__check('11: Collector still exists as a real contract', !!collector && collector.name === 'COLLECTOR');
+__check('12: Collector\\'s Playful spawn multiplier is still exactly 2, unchanged', collector.playfulMult === 2);
+__check('14: Collector\\'s risk is still exactly 2, unchanged', collector.risk === 2);
+__check('11 (b): Collector has no tokenReward field left on it at all', !('tokenReward' in collector));
+
+// ---- 13: Collector's E37 objective-selection fix remains intact ----
+activeContract = 3; nightNumber = 1; cachedNightObjectivesFor = -1; cachedNightObjectives = null;
+generateNightObjectives(null);
+var catchObj = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+__check('13: Collector still prefers catch_playful for its forced catch objective -- the E37 fix was not regressed', !!catchObj && catchObj.id === 'catch_playful');
+activeContract = -1;
+
+// ---- 15: other contracts remain completely unchanged ----
+var peaceful = CONTRACTS.find(function(c){ return c.id === 'peaceful'; });
+var rush = CONTRACTS.find(function(c){ return c.id === 'rush'; });
+var moth = CONTRACTS.find(function(c){ return c.id === 'moth'; });
+__check('15: Peaceful is unchanged (speed -25%, +2 misses, +20% coins, risk 1)', peaceful.speedMult === 0.75 && peaceful.missBonus === 2 && peaceful.coinMult === 1.20 && peaceful.risk === 1);
+__check('15 (b): Rush is unchanged (spawn +60%, rare +50%, +40% coins, risk 3)', rush.spawnMult === 1.60 && rush.rareMult === 1.50 && rush.coinMult === 1.40 && rush.risk === 3);
+__check('15 (c): Moth is unchanged (moths x3, rare x2, +65% coins, risk 3)', moth.mothMult === 3 && moth.rareMult === 2 && moth.coinMult === 1.65 && moth.risk === 3);
+__check('15 (d): CONTRACTS still has exactly 4 entries -- none added, none removed', CONTRACTS.length === 4);
+return true;
+});
+`);
+
+// ===== E38 TEST 5/6: non-YT local reload -- an old save containing workshopTokens must be safely ignored, never recreated =====
+scenario('e38-workshop-token-reload', null, `
+// seeded (via the localStorage seed chain below): gk2_best=40, and
+// gk2_lumora2 still contains an old workshopTokens field (as a genuine
+// pre-E38 save would) alongside otherwise-normal fields.
+__check('5: after a genuine reload from a save whose gk2_lumora2 blob still contains an old workshopTokens field, the variable is still not defined -- the field was simply ignored, not converted/compensated', typeof workshopTokens === 'undefined');
+__check('6: nothing else on the loaded save was disturbed by the presence of the stale field -- best loaded correctly', best === 40);
+__check('6 (b): nightNumber (a sibling field in the SAME gk2_lumora2 blob as the stale workshopTokens key) also loaded correctly, proving the stale key did not corrupt parsing of the rest of the object', nightNumber === 7);
+`);
+
+// ===== E38 TEST 8: YT cloud-save reload -- an old cloud payload containing workshopTokens must be safely ignored, never recreated =====
+scenario('e38-workshop-token-cloud-reload', { audioEnabled: true }, `
+__spy.loadResolve(JSON.stringify({ best: 40, coins: 100, nightNumber: 7, workshopTokens: 12 })); // a genuine pre-E38 cloud save, workshopTokens included exactly as it would really be saved
+return __tick(5).then(function(){
+  __check('8: after loading an old cloud-save payload that still contains workshopTokens, the variable is still not defined -- the field was simply ignored, not converted/compensated', typeof workshopTokens === 'undefined');
+  __check('8 (b): sibling fields in the SAME payload loaded correctly, proving the stale key did not corrupt loading of the rest of the object', best === 40 && coins === 100 && nightNumber === 7);
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -10093,6 +10200,12 @@ async function main() {
       // proves the approved grandfather preserves ELIGIBILITY (button stays
       // reachable) without fabricating the reward itself.
       : sc.name === 'e37-prestige-legacy-eligible' ? `try{ localStorage.setItem('gk2_best','25'); localStorage.setItem('gk2_lumora2', JSON.stringify({nightNumber:20})); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:0,completionThreshold:500,milestones:[],completed:false},{id:'moonfall',name:'Moonfall',bestNightDelivered:0,completionThreshold:1000,milestones:[],completed:false},{id:'aurora',name:'Aurora',bestNightDelivered:0,completionThreshold:null,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E38 TEST 5/6: a genuine pre-E38 save -- best=40, gk2_lumora2 still
+      // contains an old workshopTokens field (as a real save from before this
+      // removal would) alongside a normal sibling field, nightNumber:7. The
+      // stale field must be silently ignored, not converted/compensated, and
+      // must not corrupt loading of the rest of the object.
+      : sc.name === 'e38-workshop-token-reload' ? `try{ localStorage.setItem('gk2_best','40'); localStorage.setItem('gk2_lumora2', JSON.stringify({nightNumber:7, workshopTokens:12})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value

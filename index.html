@@ -108,7 +108,7 @@ if(YT){
 let loadDone=(!YT||!YT.game||!YT.game.loadData), pendingSave=false;
 function saveProgress(){
   if(!loadDone){ pendingSave=true; return; } // platform rejects saveData until the initial loadData resolves
-  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed},villageProgression,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
+  if(YT&&YT.game&&YT.game.saveData){ try{ YT.game.saveData(JSON.stringify({best,coins,coinFraction,journal,variantJournal,upgrades,trackerOn,lastPlayed,quests,nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,weekly:{stats:weeklyStats,claimed:weeklyMilestonesClaimed,chestClaimed:weeklyChestClaimed},villageProgression,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
 }
 const rand=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1022,9 +1022,8 @@ function finalizeNight(){
   // call finalizeNight() again before S.over's own early-return in update()
   // ever gets a chance to matter (that check only guards the NEXT frame,
   // not further iterations of the SAME for-loop pass). Without this guard,
-  // a second call would double-push contractsCompleted and, for a Collector
-  // night, double-grant its Workshop Token -- a real, reachable duplicate-
-  // reward bug, not a contrived one. This is a pure idempotency check, the
+  // a second call would double-push contractsCompleted -- a real, reachable
+  // duplicate-state bug, not a contrived one. This is a pure idempotency check, the
   // same "check right before mutation" discipline jarCanAcceptCatch()
   // already established -- the first, legitimate call always sees
   // S.over===false (only finalizeNight() itself ever sets it true), so
@@ -1033,8 +1032,8 @@ function finalizeNight(){
   // Frozen once, right here -- the one authoritative "gameplay earned this
   // night" figure Double the Glow reads (see requestDoubleNightCoins()).
   // Taken before S.over flips true, so nothing reachable from the Night
-  // Complete screen (Workshop's own favor, a stray double-claim) can ever
-  // contaminate it after the fact.
+  // Complete screen (the Glowkeeper's Favor ad reward, a stray double-claim)
+  // can ever contaminate it after the fact.
   S.coinsEarnedThisNight=coins-coinsAtRoundStart;
   // Miss-category objectives no longer need anything evaluated here -- they
   // were redefined to be live-scored (checked at the same delivery-success
@@ -1047,11 +1046,14 @@ function finalizeNight(){
   // nightsCompletedThisSession update at (in continueFromOver()). The coin
   // multiplier reward already landed continuously all night via
   // grantDeliveryCoins() (see contractPayoutCoins() for the display-only
-  // re-derivation); Collector's flat Workshop Token has no continuous hook
-  // to ride along with, so it's granted here instead.
+  // re-derivation).
+  // E38: Collector's Workshop Token reward was granted here (once, at this
+  // same authoritative moment) before being removed entirely -- Collector
+  // itself, its Playful spawn multiplier, its objective-selection fix, and
+  // contractsCompleted tracking below are all untouched. Collector
+  // currently grants no reward at all; that's intentional, not a bug.
   if(activeContract>=0){
     contractsCompleted.push(CONTRACTS[activeContract].id);
-    if(CONTRACTS[activeContract].tokenReward)workshopTokens++;
   }
   S.over=true; S.overT=0; sOver(); saveProgress(); recordNightEconomy();
   // E33 (New Player Discovery): the "best-night" discovery card, shown
@@ -1288,7 +1290,7 @@ function continueFromOver(){
     // introduces or is scoped to fix -- but the streak/reward specifically
     // must be protected per direct instruction, hence this one flag).
     if(!S.streakCommitted){ S.streakCommitted=true; commitNightStreak(); }
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     weeklyProgress('nights',1); // Lumora 2.0 Phase 9: same "exactly once per genuinely completed non-tutorial night" moment as nightNumber itself
     saveProgress();
     workshopFavorClaimedThisNight=false; // fresh Workshop favor opportunity each completed night
@@ -2703,13 +2705,10 @@ let eventHistory=[]; // Night Events (future phase) -- past event ids the player
 let contractsCompleted=[]; // Night Contracts (Phase 3) -- completed contract
 // records, keyed by stable id rather than display text, per direct instruction.
 // Pushed exactly once per completed real night, in finalizeNight().
-// D3: Collector's own reward is a flat Workshop Token rather than a coin
-// multiplier (the handoff's own placeholder reward type) -- persisted like
-// coins, granted once per completed Collector night in finalizeNight().
-// Deliberately no redemption/spend mechanic yet -- same "reserved, not yet
-// wired to anything" precedent contractsCompleted itself already set before
-// this phase existed.
-let workshopTokens=0;
+// E38: Workshop Tokens (Collector's own reward, a flat non-coin token
+// rather than a coin multiplier) removed entirely -- the state variable,
+// its earn site, its persistence, and its UI are all gone. Collector
+// itself remains, with no reward, per direct instruction.
 let cosmeticsUnlocked=[]; // Reserved for a NEW cosmetic category a future phase
 // introduces (e.g. village themes/landscape skins) that doesn't fit the jar or
 // trail shape. Existing cosmetic-ish ownership/equip state
@@ -2816,9 +2815,9 @@ const SEASONS=[
 ];
 // The two fields actually persisted -- both scalars, folded into the SAME
 // "Phase 0 foundation fields" bucket nightNumber/objectivesCompleted/
-// eventHistory/contractsCompleted/cosmeticsUnlocked/equippedTheme/
-// workshopTokens already share (gk2_lumora2 + the YT save payload), not a
-// new dedicated key. seasonId is stored raw and re-validated on every read
+// eventHistory/contractsCompleted/cosmeticsUnlocked/equippedTheme already
+// share (gk2_lumora2 + the YT save payload), not a new dedicated key.
+// seasonId is stored raw and re-validated on every read
 // via currentSeason()'s own fallback, same "defer validation to read time"
 // reasoning equippedTheme already established in Phase 7 (avoids an
 // ordering-hazard-prone validation at this early top-level point).
@@ -2875,7 +2874,7 @@ function seasonProgressAdd(n){
   seasonProgress=Math.min(seasonProgress+(n||1),currentSeason().milestones);
   for(let lvl=prev+1;lvl<=seasonProgress;lvl++)grantSeasonLevel(lvl);
   if(seasonProgress>prev){
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     saveProgress();
   }
 }
@@ -3004,7 +3003,7 @@ function activatePrestige(){
   if(!prestigeEligible())return false;
   prestigeLevel+=1;
   grantPrestigeReward(prestigeLevel);
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -3042,7 +3041,9 @@ if(!YT){
     // so a corrupted or since-removed theme id sitting here is inert, never
     // trusted, and never crashes anything.
     if(typeof l2.equippedTheme==='string')equippedTheme=l2.equippedTheme;
-    if(typeof l2.workshopTokens==='number'&&l2.workshopTokens>=0)workshopTokens=l2.workshopTokens;
+    // E38: l2.workshopTokens is deliberately never read any more -- an old
+    // save's field is simply ignored (ambient, no conversion/compensation),
+    // exactly the "smallest safe migration" the removal calls for.
     // Phase 11: same "store raw, re-validate at read time" reasoning as
     // equippedTheme just above -- currentSeason() falls back safely if
     // seasonId is ever unrecognized. seasonProgress is clamped defensively
@@ -3434,7 +3435,7 @@ function ensureNightObjectives(){
     // this is what makes a genuine page reload mid-night restore the SAME
     // 3 objectives instead of silently rerolling a different set for what
     // the player experiences as the same night.
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     saveProgress();
     S.isNewNight=true; // a genuine new night -- show the reveal card
   }
@@ -3514,7 +3515,7 @@ function ensureNightEvent(){
     // real happens" discipline as ensureNightObjectives()'s own generate
     // branch, so a genuine page reload mid-night restores the exact same
     // outcome instead of silently rerolling.
-    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
+    if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
     saveProgress();
   }
 }
@@ -3734,11 +3735,18 @@ const CONTRACTS=[
     mods:['Moths ×3','Rare fireflies ×2'], rewardLabel:'+65% coins', risk:3,
     line:'More moths, more rares · +65% coins',
     mothMult:3, rareMult:2, coinMult:1.65, objCategory:null },
+  // E38: Workshop Token reward removed entirely (rewardLabel/line no longer
+  // mention it, tokenReward field gone) -- Collector itself, its Playful
+  // spawn multiplier, its risk, its objective-selection fix, and its mods/
+  // desc text are all byte-for-byte unchanged. rewardLabel is '' (not
+  // omitted) so the card's reward-text draw call never renders the literal
+  // string "undefined". No replacement reward -- Collector intentionally
+  // has none right now.
   { id:'collector', name:'COLLECTOR', full:'COLLECTOR’S NIGHT', glyph:'star',
     desc:'Only Playful light the way.',
-    mods:['Playful spawns ×2','Collection objective'], rewardLabel:'✦ Workshop Token', risk:2,
-    line:'Playful ×2 · a Workshop token',
-    playfulMult:2, tokenReward:true, objCategory:'catch' }
+    mods:['Playful spawns ×2','Collection objective'], rewardLabel:'', risk:2,
+    line:'Playful ×2',
+    playfulMult:2, objCategory:'catch' }
 ];
 // Session-level, like nightsCompletedThisSession/cachedNightObjectives --
 // NOT part of S (a contract is chosen on its own screen BEFORE reset() ever
@@ -3768,8 +3776,8 @@ function contractObjectiveCategory(){ return activeContract>=0?CONTRACTS[activeC
 // -- the SAME "computed fresh from what's already real" discipline the
 // Objective Bonus row already uses, rather than a second, separately-
 // tracked shadow economy that could ever drift out of sync with it.
-// Collector has no coinMult (its reward is a flat Workshop Token, shown as
-// its own '✦ TOKEN' case at the call site) so this correctly returns 0 for it.
+// Collector has no coinMult (E38: its former Workshop Token reward was
+// removed; it currently has no reward at all) so this correctly returns 0.
 function contractPayoutCoins(){
   if(activeContract<0)return 0;
   const c=CONTRACTS[activeContract];
@@ -4333,7 +4341,7 @@ function equipTheme(id){
   if(!validVillageTheme(id)||!isThemeOwned(id))return false;
   if(equippedTheme===id)return true;
   equippedTheme=id;
-  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,workshopTokens,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
+  if(!YT){ try{ localStorage.setItem('gk2_lumora2',JSON.stringify({nightNumber,objectivesCompleted,eventHistory,contractsCompleted,cosmeticsUnlocked,equippedTheme,seasonId,seasonProgress,prestigeLevel,nightStreak,lastNightCompletionDay,cachedNightObjectivesFor,cachedNightObjectives,cachedNightEventFor,cachedNightEvent,storyMigrated,storyLegacyUnlocked,prestigeMigrated,prestigeLegacyEligible})); }catch(e){} }
   saveProgress();
   return true;
 }
@@ -4602,7 +4610,10 @@ if(YT&&YT.game&&YT.game.loadData){
       // read" reasoning as the non-YT load path's own comment -- a
       // corrupted/since-removed theme id here is inert, never trusted.
       if(typeof d.equippedTheme==='string')equippedTheme=d.equippedTheme;
-      if(typeof d.workshopTokens==='number'&&d.workshopTokens>=0)workshopTokens=d.workshopTokens;
+      // E38: d.workshopTokens is deliberately never read any more -- an old
+      // cloud save's field is simply ignored (ambient, no conversion/
+      // compensation), exactly the "smallest safe migration" the removal
+      // calls for.
       // Phase 11: same defensive pattern as equippedTheme just above.
       if(typeof d.seasonId==='string')seasonId=d.seasonId;
       if(typeof d.seasonProgress==='number'&&d.seasonProgress>=0)seasonProgress=Math.min(d.seasonProgress,currentSeason().milestones);
@@ -7148,8 +7159,9 @@ function update(dt){
       // Swarm's compensating +20%, round-scoped and completely separate
       // from the persistent/LOCKED Coin Value line above.
       // D3: a 5th layer, contractCoinMult() -- Peaceful/Rush/Moth's own
-      // "+N% coins" reward, defaulting to 1 for Collector (a flat Workshop
-      // Token instead, granted once at finalizeNight()) and for no contract.
+      // "+N% coins" reward, defaulting to 1 for Collector (E38: its former
+      // Workshop Token reward was removed; it has no coin reward) and for
+      // no contract.
       // Phase 10: a 6th layer, jarIdentityCoinMult(s.type) -- Elder's Rare
       // Seeker (+15% when THIS delivered firefly is a rare type) / Moon's
       // Night Watcher (+10% during an active event), defaulting to 1 for
@@ -10197,12 +10209,14 @@ function drawContractCard(i,o){
     ctx.beginPath(); ctx.arc(x+16+rlw+9+k*9,y+177.5,2.6,0,6.28);
     ctx.fillStyle=k<c.risk?'#b98ec9':'#7b83a8'; ctx.fill();
   }
-  // reward -- a coin disc for a coin-scaled reward; Collector's own flat
-  // Workshop Token skips it (the token's own '✦' already sits in its own
-  // label), same "non-coin reward shows as its own thing" rule C5 uses.
+  // reward -- a coin disc for a coin-scaled reward. E38: gated on
+  // c.rewardLabel actually being non-empty (not the removed tokenReward
+  // flag) -- Collector currently has no reward at all, so this correctly
+  // skips the coin disc for it too, rather than drawing a coin icon next
+  // to blank text.
   ctx.textAlign='right'; ctx.font='600 12.5px Georgia,serif';
   const rw=ctx.measureText(c.rewardLabel).width;
-  if(!c.tokenReward){
+  if(c.rewardLabel){
     const coinCx=x+CONTRACT_CARD_W-16-rw-11;
     const cg=ctx.createRadialGradient(coinCx-1.35,y+177-1.35,0,coinCx,y+177,4.5);
     cg.addColorStop(0,'#fbf2d4'); cg.addColorStop(0.55,'#fbd26b'); cg.addColorStop(1,'#f09638');
@@ -10393,7 +10407,12 @@ function drawContractResultRow(panelR,b){
   ctx.fillText('CONTRACT · '+c.name,panelR.x+40,panelR.y+b+4);
   try{ ctx.letterSpacing='0px'; }catch(e){}
   ctx.textAlign='right'; ctx.font='600 15px Georgia,serif'; ctx.fillStyle=d2gold(0.95);
-  ctx.fillText(c.tokenReward?'✦ TOKEN':('+'+contractPayoutCoins()),panelR.x+panelR.w-18,panelR.y+b+5);
+  // E38: the token-reward branch (c.tokenReward?'✦ TOKEN':...) is gone --
+  // every contract, Collector included, now uses the same existing
+  // contractPayoutCoins() figure it already used. Collector's own coinMult
+  // is absent, so this already, correctly, shows '+0' for it -- not a new
+  // value, the same fallback every non-coin-reward contract always had.
+  ctx.fillText('+'+contractPayoutCoins(),panelR.x+panelR.w-18,panelR.y+b+5);
 }
 // D5 (R2): same grammar as the contract row above, exactly -- one glyph
 // dispatcher, one draw shape. The figure is derived (eventPayoutCoins(),
