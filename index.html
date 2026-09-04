@@ -6840,58 +6840,35 @@ cv.addEventListener('pointerdown',e=>{
       // goHome() itself already discards nothing permanent -- same
       // abandon-without-reset() semantics the pause screen's own
       // GOHOME_BTN uses.
-      // E43: HOME_BTN_OVER sits 56 virtual px BELOW SHOP_BTN_OVER but is
-      // checked FIRST -- capped so its own padding can't grow upward past
-      // SHOP_BTN_OVER's territory and intercept a tap meant for it.
-      // E46: that 56 alone is no longer enough -- HOME_BTN_OVER is also
-      // checked BEFORE DOUBLE_COINS_BTN below it, and on a real (not
-      // artificially empty-objectives) night, DOUBLE_COINS_BTN.y's own
-      // clamp formula can land it much closer than 56 virtual px away (a
-      // genuine, reachable case measured at ~26px), letting HOME_BTN_OVER's
-      // own uncapped-below padding swallow a tap meant for the Watch Ad
-      // button's own drawn centre. Capped against whichever real gap is
-      // SMALLER -- 56 to Shop above, or the actual live gap to
-      // DOUBLE_COINS_BTN below (computed fresh every frame, valid even on
-      // frames where that button isn't currently drawn/interactive).
-      if(inRect(p.x,p.y,hitRectHCapped(HOME_BTN_OVER,Math.min(56,DOUBLE_COINS_BTN.y-HOME_BTN_OVER.y)))){ goHome(); return; }
+      // E43/E46/E47: HOME_BTN_OVER is checked FIRST among these three, so
+      // it's capped against whichever real neighbour gap is SMALLER --
+      // Shop above or Watch Ad below -- so its own padding can never grow
+      // into either one's territory. E47 replaced the old fixed-gap layout
+      // formula with one computed from the actual available space every
+      // frame (see drawOver()'s own comment on panelBottom/gaps below), so
+      // both gaps here are read live rather than assumed as constants --
+      // always exactly correct regardless of how tall tonight's report is.
+      if(inRect(p.x,p.y,hitRectHCapped(HOME_BTN_OVER,Math.min(HOME_BTN_OVER.y-SHOP_BTN_OVER.y,DOUBLE_COINS_BTN.y-HOME_BTN_OVER.y)))){ goHome(); return; }
       // shop button is a specific carve-out; every other click on this screen
       // still replays immediately, exactly as before this session — Part B
       // must not make an existing screen's input any less forgiving
-      // E46: E43's own comment here ("checked second, nothing closer than
-      // the already-capped HOME_BTN_OVER above it -- safe to pad uncapped")
-      // only accounted for the gap to HOME_BTN_OVER below it -- it never
-      // considered the gap to Continue (playBtn) ABOVE it, which has no
-      // hit-test rect of its own at all (Continue is the pointerdown
-      // fallthrough at the bottom of this whole block, so nothing else
-      // stops SHOP_BTN_OVER's own padding from growing up into it). At the
-      // smallest supported viewport, hitRectH()'s uncapped worst-case
-      // padding (48/scale, ~122 virtual px) reaches several px past
-      // playBtn.y itself -- a tap on the lower half of the visibly-drawn
-      // Continue button could silently open the Workshop instead. Capped
-      // against the real, fixed 55px gap SHOP_BTN_OVER.y=playBtn.y+55
-      // always maintains, same discipline as HOME_BTN_OVER's own cap above.
-      if(inRect(p.x,p.y,hitRectHCapped(SHOP_BTN_OVER,55))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
+      // E43/E46/E47: capped against the live gap to Continue (playBtn)
+      // above it -- Continue has no hit-test rect of its own at all (it's
+      // the pointerdown fallthrough at the bottom of this whole block), so
+      // nothing else stops SHOP_BTN_OVER's own padding from growing up
+      // into its visibly-drawn area if left uncapped.
+      if(inRect(p.x,p.y,hitRectHCapped(SHOP_BTN_OVER,SHOP_BTN_OVER.y-playBtn.y))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
       // "Double the Glow" -- same carve-out pattern as SHOP_BTN_OVER above --
       // only drawn/tappable once the tutorial is done, the SDK actually
       // offers rewarded ads (see drawOver()), and this night earned
       // something worth doubling, but the hit-test itself stays defensive
       // about all three regardless.
-      // E46: E43's own "safe to pad uncapped" claim here held for the
-      // COMMON case but not every real one. DOUBLE_COINS_BTN.y's own
-      // formula (Math.min(H-40,Math.max(910,HOME_BTN_OVER.y+66))) is NOT a
-      // fixed offset from HOME_BTN_OVER.y -- both the 910 floor and the
-      // H-40 ceiling can each independently apply depending on how tall
-      // the panel is that night (how many optional tail rows are present),
-      // and a real, reachable case (a genuine contract night with its own
-      // objectives -- not the artificial empty-objectives shape a bare
-      // reset() produces) was measured landing at only ~52 virtual px of
-      // actual gap, well under the 66 this cap originally assumed. Rather
-      // than trying to re-derive a new safe constant by inspection, the
-      // gap is computed LIVE here every time -- always exactly correct
-      // regardless of which branch of that clamp is currently active, with
-      // no reliance on reasoning about the formula's own worst case at
-      // code-review time. Ad-adjacent reward control -- only its hit
-      // target changed, never the reward/eligibility itself.
+      // E46/E47: capped against the live gap to HOME_BTN_OVER above it --
+      // computed fresh every frame from drawOver()'s own layout math
+      // rather than assumed as a constant, always exactly correct
+      // regardless of how tall tonight's report is. Ad-adjacent reward
+      // control -- only its hit target changed, never the reward/
+      // eligibility itself.
       if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardedDoubleCoinsClaimed&&S.coinsEarnedThisNight>0&&inRect(p.x,p.y,hitRectHCapped(DOUBLE_COINS_BTN,DOUBLE_COINS_BTN.y-HOME_BTN_OVER.y))){ requestDoubleNightCoins(); return; }
       continueFromOver(); pointer.down=false;
     }
@@ -10965,22 +10942,33 @@ function drawContractChip(){
 // case for the overwhelming majority of nights).
 function nightCompleteTailRows(hasObjectives,hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasStreak,hasVillageCompleted){
   let base=hasObjectives?350:208; // E30: +44 for the new Score row on the Night Complete panel, see drawOver()'s panelH comment
+  // E47: a night with 4+ optional tail rows present at once (a contract,
+  // an event, a bonus row, AND a streak/village row, all the same night)
+  // is rare but real over a long playthrough, and directly feeds panelH,
+  // which everything below the report (Continue/Workshop/Home/Watch Ad)
+  // is positioned relative to -- a taller panel leaves those buttons less
+  // room. A small, content-free density increase (26px pitch -> 24px)
+  // ONLY once there are enough rows for it to matter recovers real space
+  // for the action stack below without touching the 1-3-row case's
+  // existing, already-comfortable spacing at all.
+  const flagCount=[hasContract,hasEvent,hasBonus,hasVillageLevelUp,hasVillageCompleted,hasStreak].filter(Boolean).length;
+  const pitch=flagCount>=4?24:26;
   const rows=[];
-  if(hasContract){ rows.push({kind:'contract',b:base}); base+=26; }
-  if(hasEvent){ rows.push({kind:'event',b:base}); base+=26; }
-  if(hasBonus){ rows.push({kind:'bonus',b:base}); base+=26; }
-  if(hasVillageLevelUp){ rows.push({kind:'villageLevelUp',b:base}); base+=26; }
+  if(hasContract){ rows.push({kind:'contract',b:base}); base+=pitch; }
+  if(hasEvent){ rows.push({kind:'event',b:base}); base+=pitch; }
+  if(hasBonus){ rows.push({kind:'bonus',b:base}); base+=pitch; }
+  if(hasVillageLevelUp){ rows.push({kind:'villageLevelUp',b:base}); base+=pitch; }
   // E19: the NEW delivery-based Village 1 completion row -- deliberately
   // its own kind, not merged into villageLevelUp above (that one is the
   // OLD score-based Village Level system, a completely different meter,
   // see grantVillageProgress()'s own comment). Placed right after it in the
   // stack, before Night Streak, so Streak keeps its existing "last line
   // before CONTINUE" position untouched.
-  if(hasVillageCompleted){ rows.push({kind:'villageCompleted',b:base}); base+=26; }
+  if(hasVillageCompleted){ rows.push({kind:'villageCompleted',b:base}); base+=pitch; }
   // E7: Night Streak -- last in the stack, deliberately (it reads as "and
   // see you tomorrow", the final line before CONTINUE, matching the
   // spec's own mockup ordering).
-  if(hasStreak){ rows.push({kind:'streak',b:base}); base+=26; }
+  if(hasStreak){ rows.push({kind:'streak',b:base}); base+=pitch; }
   return rows;
 }
 function drawContractResultRow(panelR,b){
@@ -11408,7 +11396,20 @@ function drawOver(){
   // so nothing overlaps and nothing besides this new row's own vertical
   // space changes.
   const panelH=tailRows.length?(tailRows[tailRows.length-1].b+20):(hasObjectives?324:194);
-  const panelR={x:W/2-160,y:H*0.34,w:320,h:panelH};
+  // E47: the panel used to start at a FIXED H*0.34 regardless of panelH --
+  // on a short report (no tail rows) that left a large, genuinely wasted
+  // gap under the title; on a tall one (several tail rows) the panel's own
+  // start position never moved to compensate, so panelBottom (and
+  // everything anchored to it below) landed much lower than it needed to,
+  // crowding the action buttons into whatever little room was left. The
+  // panel now starts right under the title's own real bottom edge (a
+  // small, deliberate gap, not zero) -- computed from the title's actual
+  // drawn content (the "N fireflies never made it home" line, when
+  // present, is the lowest one), not a fraction of H, so the recovered
+  // space scales correctly on any supported viewport height.
+  const titleBottom=H*0.22+(S.carried.length>0?66:38)+14;
+  const panelGap=16;
+  const panelR={x:W/2-160,y:titleBottom+panelGap,w:320,h:panelH};
   lumPanel(panelR.x,panelR.y,panelR.w,panelR.h,20);
   rows.forEach((row,i)=>{
     const ry=panelR.y+30+i*44;
@@ -11507,40 +11508,93 @@ function drawOver(){
   // hasObjectives/contractExtra branch table -- verified to reproduce
   // every one of the old shipped values exactly (511.4≈512, 641.4≈642,
   // 687.4≈688, 696.4≈697, 742.4≈743) before trusting it going forward.
+  // E47: replaces the old fixed/clamped-per-anchor formula (35 / +55 / +56
+  // / Math.min(H-10,Math.max(910,+66))) with one that actually measures
+  // the room it has to work with. That old scheme anchored everything to
+  // panelBottom with fixed gaps, then bolted on a ceiling for
+  // DOUBLE_COINS_BTN alone once panelBottom got tall enough to threaten
+  // running off-screen -- which is exactly what let it independently
+  // clamp DOUBLE_COINS_BTN closer to HOME_BTN_OVER than the two buttons'
+  // own combined half-heights allow (E46's own fix). Now every gap is
+  // computed from the ACTUAL space between panelBottom and the bottom of
+  // the viewport: a hard, never-violated floor per gap (each already
+  // comfortably larger than the two neighbouring controls' own combined
+  // half-heights, so this alone can never produce a visual overlap,
+  // independent of anything below), stretched with extra breathing room
+  // when the report is short enough to leave slack, and -- only in the
+  // realistic range this project's own content can produce -- gracefully
+  // giving up some of the LEAST visually important gap (report-to-
+  // Continue) first if even the floors don't fit, before ever touching
+  // the three gaps that actually sit between two buttons.
   const panelBottom=panelR.y+panelH;
-  playBtn.y=panelBottom+35;
-  SHOP_BTN_OVER.y=playBtn.y+55;
-  // DOUBLE_COINS_BTN is the one anchor that does NOT follow the panel --
-  // WITH objectives it stays clamped at its original 910 (a straight
-  // shift would put it past y956, clipping its own content off a 960
-  // frame); WITHOUT objectives it still has headroom, so it takes
-  // whatever the tail added (only ever the bonus row in practice, since a
-  // no-objectives night is tutorial-only and never has a contract/event).
-  // E22: Home flows right below Visit the Workshop, same +56-ish gap.
-  // DOUBLE_COINS_BTN is computed AFTER it (reordered from the original
-  // hasObjectives?910:... single-branch formula) so it can shift down
-  // along with Home on the rare night every optional bonus row is present
-  // at once, instead of Home ever needing to squeeze up into/past it --
-  // still floored at 910 (its original tuned position) for every normal
-  // night, and ceilinged at H-40 so it can never run off the bottom of a
-  // 960-tall frame even in that extreme case.
-  HOME_BTN_OVER.y=SHOP_BTN_OVER.y+56;
-  // E46: the H-40 ceiling below was tuned as "never run off the bottom of a
-  // 960 frame" -- correct as far as it goes, but it can independently
-  // clamp DOUBLE_COINS_BTN BELOW the +66 gap the Math.max() right next to
-  // it is trying to guarantee, on a night tall enough that HOME_BTN_OVER.y
-  // itself already sits close to that ceiling (every optional tail row
-  // present, or simply a high night-streak/village-level-up night -- a
-  // real, reachable shape over a long playthrough, not a contrived one).
-  // Measured live: a real Collector night with a streak/village-level-up
-  // row present pushed the two buttons down to a ~26px gap -- well under
-  // their own combined raw half-heights (44/2+48/2=46), meaning the
-  // buttons visibly overlapped on screen, independent of any touch-target
-  // padding at all. Relaxed to H-10 -- still comfortably on-screen (the
-  // button's own content never approached the old 40px margin's worth of
-  // extra room in practice), and gives the +66 gap enough room to actually
-  // hold in every case this project's own tail-row combinations can produce.
-  DOUBLE_COINS_BTN.y=hasObjectives?Math.min(H-10,Math.max(910,HOME_BTN_OVER.y+66)):(830+(panelH-194)); // E30: -194, was -150 -- the no-objectives baseline panelH grew by 44 for the new Score row, so this keeps the same relative gap
+  const doubleHalf=DOUBLE_COINS_BTN.h/2, bottomMargin=14; // 14: same tight-but-on-screen margin E46 already established as safe for DOUBLE_COINS_BTN specifically
+  const spaceForGaps=(H-bottomMargin-doubleHalf)-panelBottom; // total room for the 4 cumulative gaps: report->Continue->Shop->Home->Watch Ad
+  // [report->Continue, Continue->Shop, Shop->Home, Home->WatchAd]. These are
+  // the SAME four values the original, shipped layout always used (35/55/
+  // 56/66) -- each already tuned to clear its own pair's combined half-
+  // heights with real margin (Continue 29 + Shop 22 = 51, Shop 22 + Home
+  // 22 = 44), and the last one clears the "Double the Glow" EYEBROW text
+  // drawn 34px above DOUBLE_COINS_BTN's own centre (not just the button's
+  // own 24px half-height -- confirmed live: a smaller value here let the
+  // eyebrow visibly collide with Home's own label). Reused as the FLOOR
+  // here rather than re-derived, specifically because they're proven.
+  const floorGaps=[35,55,56,66];
+  const bonusGaps=[15,10,10,10]; // extra room distributed proportionally when the report leaves slack, capped so a very short report doesn't space the actions out absurdly far
+  // Absolute hard floors -- the smallest each gap can ever go before its
+  // own pair of neighbours would visually touch (each one is its floor
+  // value above, minus a few px, never below the real half-height/eyebrow
+  // sum those floors were built from). Only used as a last-resort second
+  // tier, below -- normal nights never reach it.
+  const hardFloorGaps=[31,53,46,58];
+  const floorTotal=floorGaps.reduce((a,b)=>a+b,0), bonusTotal=bonusGaps.reduce((a,b)=>a+b,0);
+  const bonusScale=clamp((spaceForGaps-floorTotal)/bonusTotal,0,1);
+  let gaps=floorGaps.map((f,i)=>f+bonusGaps[i]*bonusScale);
+  let deficit=gaps.reduce((a,b)=>a+b,0)-spaceForGaps;
+  if(deficit>0){
+    // Reachable on a night tall enough to stack several optional tail rows
+    // at once (village level-up + completion + contract + event + bonus +
+    // streak, all in the same night). Tier 1: give up the report-to-
+    // Continue gap first, down to its own floor -- it borders the panel's
+    // own straight edge, not another button's rounded silhouette, so it's
+    // the least visually costly place to lose space.
+    const take1=Math.min(deficit,gaps[0]-hardFloorGaps[0]);
+    gaps[0]-=take1; deficit-=take1;
+    if(deficit>0){
+      // Tier 2 (only the truly extreme case -- every optional row at once):
+      // gaps[0] alone isn't enough. Distribute the rest across the three
+      // button-to-button gaps, proportional to each one's own remaining
+      // headroom down to ITS hard floor -- so the tightest gap (the least
+      // headroom to give) shrinks the least, and none of the three can
+      // ever be pushed past the point that would let two buttons visually
+      // touch, no matter how large the remaining deficit is.
+      const headroom=[1,2,3].map(i=>gaps[i]-hardFloorGaps[i]);
+      const totalHeadroom=headroom.reduce((a,b)=>a+b,0);
+      const shrinkFrac=totalHeadroom>0?Math.min(1,deficit/totalHeadroom):0;
+      [1,2,3].forEach((i,k)=>{ gaps[i]-=headroom[k]*shrinkFrac; });
+      deficit-=totalHeadroom*shrinkFrac;
+    }
+  }
+  playBtn.y=panelBottom+gaps[0];
+  SHOP_BTN_OVER.y=playBtn.y+gaps[1];
+  HOME_BTN_OVER.y=SHOP_BTN_OVER.y+gaps[2];
+  // Tier 3, absolute last resort, checked directly against the real
+  // result rather than the earlier estimate: every gap above is already
+  // at its own hard floor (Tier 1/2 already ran), so no two buttons can
+  // visually touch each other -- but on a report tall enough to stack
+  // nearly every optional tail row at once, even THAT can still leave
+  // DOUBLE_COINS_BTN's own bottom edge past the viewport. Shifting the
+  // WHOLE already-laid-out stack up by the exact overrun preserves every
+  // gap computed above untouched (nothing between two buttons can newly
+  // overlap, since none of their relative spacing changes) -- the only
+  // thing that shrinks is the one gap bordering the panel's own straight
+  // edge, taken down to a final bare-minimum clearance if truly needed.
+  const projectedBottom=HOME_BTN_OVER.y+gaps[3]+doubleHalf;
+  const overrun=projectedBottom-(H-2);
+  if(overrun>0){
+    const shift=Math.min(overrun,playBtn.y-panelBottom-29); // never push Continue's own top edge past the panel's bottom edge
+    playBtn.y-=shift; SHOP_BTN_OVER.y-=shift; HOME_BTN_OVER.y-=shift;
+  }
+  DOUBLE_COINS_BTN.y=HOME_BTN_OVER.y+gaps[3];
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
@@ -14693,8 +14747,27 @@ function draw(){
     if(S.carried.length>=S.cap&&!S.over)drawFullJarAlert();
     drawMothWarningFlash(); // always-on gameplay feedback, independent of the tutorial
     if(newNightCardVisible())drawNewNightCard(); // D1: drawn over live gameplay + HUD, per direct spec ("nothing is gated: the jar is spawned")
-    if(S.over)drawOver();
-    if(S.extraLifeOfferOpen)drawExtraLifeOffer(); // shown INSTEAD of drawOver() the instant the normal 5-miss ending is reached -- S.over is still false while this is up
+    // E47: E42 restructured the miss-ending flow so finalizeNight() (which
+    // sets S.over=true) now runs UNCONDITIONALLY before the Extra Life
+    // offer ever opens on top of it -- this comment pair used to be
+    // accurate ("shown INSTEAD of drawOver()") back when S.over was still
+    // false while the offer was up, but that's no longer true, and nobody
+    // updated the drawOver() call to match: it kept rendering underneath
+    // drawExtraLifeOffer()'s own semi-transparent backdrop, so Continue/
+    // Visit the Workshop/Home/Watch Ad · 2x Coins stayed visibly readable
+    // behind the modal. The pointerdown handler's own hit-tests were
+    // ALREADY correctly isolated (S.extraLifeOfferOpen is checked well
+    // before S.over there, and returns unconditionally -- verified, not
+    // changed here) -- this was a purely visual leak, not an input one.
+    // Suppressing drawOver() entirely while the offer is open is the
+    // smallest fix: nothing downstream reads playBtn/SHOP_BTN_OVER/
+    // HOME_BTN_OVER/DOUBLE_COINS_BTN's positions while extraLifeOfferOpen
+    // is true (their own hit-tests are unreachable for the same reason),
+    // so skipping the one frame's worth of layout math here is safe, and
+    // the very next real draw() call after the offer closes (either
+    // outcome) recomputes them fresh regardless.
+    if(S.over&&!S.extraLifeOfferOpen)drawOver();
+    if(S.extraLifeOfferOpen)drawExtraLifeOffer(); // now genuinely the only thing shown -- see the comment above
     if(S.luckyOfferOpen)drawLuckyFireflyOffer(); // shown the instant S.lucky is caught -- see the proximity check in update()
     if(paused)drawPaused();
     if(tutorialPanelOpen)drawTutorialPanel(); // topmost overlay, same precedent as drawPaused()/drawOver() above

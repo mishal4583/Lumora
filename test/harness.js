@@ -11195,6 +11195,178 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// E47: One More Chance modal suppression + Night Complete vertical layout.
+// =====================================================================
+
+// ---- Issue 1: while the One More Chance modal is open, the underlying
+// Night Complete action layer (Continue/Workshop/Home/Watch Ad · 2x Coins)
+// must not be drawn AND must not be interactable -- only the modal's own
+// two controls (Watch Ad · +2 Extra Misses / End Night) may respond. ----
+scenario('e47-one-more-chance-suppression', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple' } }));
+return __tick(5).then(function(){
+  upgrades.tutorialDone = true;
+  upgrades.seenFirstNightCompleteDiscovery = true;
+  upgrades.seenFirstMilestoneDiscovery = true;
+  var rewardCalls = [];
+  ytgame.ads = {
+    requestRewardedAd: function(id){ rewardCalls.push(id); return Promise.resolve(true); },
+    requestInterstitialAd: function(){ return Promise.resolve(); }
+  };
+
+  function enterNightComplete(){
+    screen = 'contract'; activeContract = -1; contractScreenAt = 0; contractSel = -1; contractSelAt = -1; contractDockAt = -1; contractExitAt = -1;
+    __acceptAnyContract();
+  }
+  function forceMiss(){
+    S.newNightT = 4.30; S.isNewNight = false;
+    S.misses = 4;
+    S.flies = [{ type: 'y', state: 'drift', patience: 0.001, maxP: 12, x: 270, y: 400, vx: 0, vy: 0, rest: 0, flick: 0 }];
+    update(0.02);
+  }
+
+  // ---- 1: the offer opens at 5 misses, layered on top of Night Complete (S.over already true) ----
+  enterNightComplete();
+  forceMiss();
+  __check('1: the One More Chance offer opens at 5 misses, with Night Complete already genuinely over underneath', S.over === true && S.extraLifeOfferOpen === true);
+
+  // ---- 2/3: draw() no longer positions/draws the underlying action layer
+  // while the offer is open -- playBtn/SHOP_BTN_OVER/HOME_BTN_OVER/
+  // DOUBLE_COINS_BTN are frozen at whatever they were before the offer
+  // opened, and none of their hit-tests can fire. E42's own flow sets
+  // S.over and S.extraLifeOfferOpen true in the SAME synchronous step, so
+  // there is no real prior frame where these ever held a legitimate
+  // Night-Complete position for THIS specific round -- pinned here to a
+  // realistic, known value (matching where they'd actually sit) instead
+  // of whatever arbitrary default/leftover value they'd otherwise still
+  // hold, so the taps below test a real, representative location rather
+  // than an accidental coordinate that might coincide with the REAL
+  // modal's own controls (EXTRA_LIFE_AD_BTN/END_BTN sit much higher up).
+  playBtn.y = 850; SHOP_BTN_OVER.y = 900; HOME_BTN_OVER.y = 940; DOUBLE_COINS_BTN.y = 990;
+  var playBtnBefore = JSON.stringify(playBtn), shopBefore = JSON.stringify(SHOP_BTN_OVER), homeBefore = JSON.stringify(HOME_BTN_OVER), doubleBefore = JSON.stringify(DOUBLE_COINS_BTN);
+  var drawThrew = false;
+  try { draw(); } catch (e) { drawThrew = true; }
+  __check('2: draw() does not throw while the offer is open (drawOver() is skipped, not broken)', !drawThrew);
+  __check('2 (b): the underlying button positions are frozen (drawOver() genuinely does not run while the offer is open)', JSON.stringify(playBtn) === playBtnBefore && JSON.stringify(SHOP_BTN_OVER) === shopBefore && JSON.stringify(HOME_BTN_OVER) === homeBefore && JSON.stringify(DOUBLE_COINS_BTN) === doubleBefore);
+
+  var screenBefore = screen, coinsBefore = coins;
+  __fire(cv, 'pointerdown', __fakeEvent(playBtn.x, playBtn.y));
+  __check('3: a tap at Continue\\'s own (frozen) location does nothing while the offer is open', screen === screenBefore && S.extraLifeOfferOpen === true);
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_BTN_OVER.x, SHOP_BTN_OVER.y));
+  __check('3 (b): a tap at Visit the Workshop\\'s own (frozen) location does nothing while the offer is open', screen === screenBefore && S.extraLifeOfferOpen === true);
+  __fire(cv, 'pointerdown', __fakeEvent(HOME_BTN_OVER.x, HOME_BTN_OVER.y));
+  __check('3 (c): a tap at Home\\'s own (frozen) location does nothing while the offer is open', screen === screenBefore && S.extraLifeOfferOpen === true);
+  __fire(cv, 'pointerdown', __fakeEvent(DOUBLE_COINS_BTN.x, DOUBLE_COINS_BTN.y));
+  __check('3 (d): a tap at Watch Ad \\u00b7 2x Coins\\'s own (frozen) location does nothing while the offer is open -- no rewarded ad requested either', screen === screenBefore && S.extraLifeOfferOpen === true && rewardCalls.length === 0 && coins === coinsBefore);
+
+  // ---- 4/6: Watch Ad remains fully functional, exactly +2, modal closes ----
+  var callsBefore = rewardCalls.length;
+  __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_AD_BTN.x, EXTRA_LIFE_AD_BTN.y));
+  return __tick(5).then(function(){
+    __check('4: Watch Ad still requests the existing rewarded ad', rewardCalls.length === callsBefore + 1 && rewardCalls[rewardCalls.length - 1] === REWARDED_AD_IDS.EXTRA_LIFE);
+    __check('6: a successful ad grants exactly +2 continuation misses', currentMissLimit() === 7);
+    __check('7: the modal closes and the round resumes live after a successful claim', S.extraLifeOfferOpen === false && S.over === false);
+
+    // ---- 5/8: End Night remains functional, finalizes correctly ----
+    enterNightComplete();
+    forceMiss();
+    __check('5 setup: a second offer is open', S.extraLifeOfferOpen === true);
+    __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_END_BTN.x, EXTRA_LIFE_END_BTN.y));
+    __check('5: End Night still closes the offer normally', S.extraLifeOfferOpen === false);
+    __check('8: End Night finalizes correctly -- Night Complete stays genuinely over, not re-finalized', S.over === true && S.extraLifeUsed === true);
+
+    // ---- no stale buttons after the modal closes: drawOver() runs again and repositions everything fresh ----
+    draw();
+    __check('no stale buttons: drawOver() runs again once the modal is closed, repositioning the action layer fresh', playBtn.y > 0 && SHOP_BTN_OVER.y > playBtn.y);
+
+    // ---- 9: rapid End Night taps cannot double-finalize ----
+    enterNightComplete();
+    forceMiss();
+    var sBeforeRapid = S;
+    __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_END_BTN.x, EXTRA_LIFE_END_BTN.y));
+    __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_END_BTN.x, EXTRA_LIFE_END_BTN.y));
+    __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_END_BTN.x, EXTRA_LIFE_END_BTN.y));
+    __check('9: rapid End Night taps produce one decline, no duplicate finalization (S untouched by the extra taps -- declineExtraLife() itself is a no-op once already closed)', S === sBeforeRapid && S.extraLifeUsed === true && S.over === true);
+  });
+});
+`);
+
+// ---- Issue 2: the Match Report moves upward into the previously-wasted
+// space above it, and the action buttons below it stay non-overlapping at
+// both the smallest supported viewport and the tallest realistic report. ----
+scenario('e47-night-complete-layout', {}, `
+__spy.loadResolve(JSON.stringify({ best: 999999, coins: 2181, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple' } }));
+return __tick(5).then(function(){
+  upgrades.tutorialDone = true;
+  upgrades.seenFirstNightCompleteDiscovery = true;
+  upgrades.seenFirstMilestoneDiscovery = true;
+  bestAtRoundStart = 999999; nightNumber = 5;
+
+  function enterNightComplete(){
+    screen = 'contract'; activeContract = -1; contractScreenAt = 0; contractSel = -1; contractSelAt = -1; contractDockAt = -1; contractExitAt = -1;
+    selectContract(3); acceptContract(); finishContractAccept();
+    S.newNightT = 4.30; S.isNewNight = false;
+    S.over = true; S.overT = 1; S.coinsEarnedThisNight = 40;
+  }
+
+  // ---- 1: a short report (minimum realistic case -- just the night streak) moves Continue meaningfully higher than the OLD fixed-panel-position formula ever placed it ----
+  enterNightComplete();
+  draw();
+  __check('1: the report moves upward -- Continue lands well above the old fixed-panel-position formula\\'s own value for this same (short) report (was 757.4)', playBtn.y < 740, 'playBtn.y=' + playBtn.y);
+
+  // ---- 2: all report content is still present and drawing does not throw, for a report with every optional row populated ----
+  S.score = 16; S.deliveredN = 16; S.eventActive = 'fireflyRain'; S.bestChainThisRound = 11; S.perfectDeliveryCount = 1; S.nightStreak = 2; S.villageCompletedThisNight = true;
+  S.objectiveActive = [
+    { label: 'Catch 3 Shy', reward: 10, done: false, progress: 0, target: 3 },
+    { label: 'Deliver 25 Fireflies', reward: 20, done: false, progress: 16, target: 25 },
+    { label: 'Reach 18 Light, <3 Misses', reward: 15, done: false, progress: 0, target: 1, failed: true }
+  ];
+  var drawThrew = false;
+  try { draw(); } catch (e) { drawThrew = true; }
+  __check('2: drawOver() still renders the full report (score/objectives/contract/event/bonus/village/streak) without throwing', !drawThrew);
+  __check('2 (b): the underlying data every row reads from is completely unchanged by this layout pass', S.score === 16 && S.deliveredN === 16 && S.eventActive === 'fireflyRain' && S.bestChainThisRound === 11 && S.objectiveActive.length === 3);
+
+  function checkSeparation(label){
+    var homeBottom = HOME_BTN_OVER.y + HOME_BTN_OVER.h / 2;
+    var adEye = DOUBLE_COINS_BTN.y - 34;
+    var shopTop = SHOP_BTN_OVER.y - SHOP_BTN_OVER.h / 2, continueBottom = playBtn.y + 29;
+    var homeTop = HOME_BTN_OVER.y - HOME_BTN_OVER.h / 2, shopBottom = SHOP_BTN_OVER.y + SHOP_BTN_OVER.h / 2;
+    __check(label + ': Continue/Workshop do not visually overlap', shopTop > continueBottom, 'shopTop=' + shopTop + ' continueBottom=' + continueBottom);
+    __check(label + ': Workshop/Home do not visually overlap', homeTop > shopBottom, 'homeTop=' + homeTop + ' shopBottom=' + shopBottom);
+    __check(label + ': Home/Watch Ad (its own eyebrow) do not visually overlap', adEye > homeBottom, 'adEye=' + adEye + ' homeBottom=' + homeBottom);
+    __check(label + ': the bottom control (Watch Ad) is not clipped by the viewport', DOUBLE_COINS_BTN.y + DOUBLE_COINS_BTN.h / 2 <= H, 'bottom=' + (DOUBLE_COINS_BTN.y + DOUBLE_COINS_BTN.h / 2) + ' H=' + H);
+  }
+
+  // ---- 3: full separation at a normal viewport, with every optional row present ----
+  scale = 1; draw();
+  checkSeparation('3 (normal viewport, tall report)');
+
+  // ---- 4: full separation at the smallest supported viewport too ----
+  scale = 0.394; draw();
+  checkSeparation('4 (smallest viewport, tall report)');
+
+  // ---- 5: the absolute tallest realistic report (every optional tail row at once) still fits, at the smallest viewport ----
+  enterNightComplete();
+  S.eventActive = 'fireflyRain'; S.bestChainThisRound = 11; S.perfectDeliveryCount = 1; S.nightStreak = 2; S.villageCompletedThisNight = true;
+  S.objectiveActive = [
+    { label: 'Catch 3 Shy', reward: 10, done: false, progress: 0, target: 3 },
+    { label: 'Deliver 25 Fireflies', reward: 20, done: false, progress: 16, target: 25 },
+    { label: 'Reach 18 Light, <3 Misses', reward: 15, done: false, progress: 0, target: 1, failed: true }
+  ];
+  scale = 0.394; draw();
+  checkSeparation('5 (smallest viewport, EVERY optional tail row present)');
+  scale = 1;
+
+  // ---- 6: hit-test centres still reach exactly their own control at the new layout (E46's own capped hit-tests, re-verified against the new dynamic positions) ----
+  enterNightComplete();
+  draw();
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_BTN_OVER.x, SHOP_BTN_OVER.y));
+  __check('6: Workshop\\'s own centre still opens the Workshop at the new layout', screen === 'shop');
+  screen = 'play';
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
