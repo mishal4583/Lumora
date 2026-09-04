@@ -1069,6 +1069,22 @@ function finalizeNight(){
     upgrades.seenFirstMilestoneDiscovery=true;
     persistUpgradesLocal(); saveProgress();
     openDiscoveryCard('✨ The Village Is Waking',S.firstMilestoneDiscoveryPending+' restored.','Your best single night of delivered fireflies restores the village — not the total across every night. Beat your record to light the next landmark.');
+  } else if(!upgrades.seenFirstNightCompleteDiscovery){
+    // E39 (Beginner Onboarding): the single most important onboarding
+    // moment -- a genuinely first-ever completed night reaching Night
+    // Complete. `else` on purpose: on the rare night this ALSO happens to
+    // be a player's first-ever milestone restoration, that card (rarer,
+    // more exciting, and already E33-approved) wins the one shared
+    // discoveryCard slot outright rather than the two clobbering each
+    // other -- this card simply shows on whichever later Night Complete
+    // is next instead, which still satisfies "early in the player's
+    // first few nights" without inventing a second on-screen slot. Points
+    // at the EXISTING "Visit the Workshop" button (SHOP_BTN_OVER) already
+    // drawn on this exact screen -- no new button, no forced navigation,
+    // per direct instruction ("guided, not trapped").
+    upgrades.seenFirstNightCompleteDiscovery=true;
+    persistUpgradesLocal(); saveProgress();
+    openDiscoveryCard('✨ Ready for Your Next Hunt?','Visit the Shop','Unlock new jars and upgrade your equipment to catch more fireflies. You can visit any time between hunts.');
   }
   // Night Complete tips: picked once, right here, rather than re-rolled
   // every drawOver() frame -- same "pick once at the moment of the event"
@@ -2179,7 +2195,19 @@ function migrateEconomyV2(){
 // state: nothing here is ever read by grantVillageProgress(), delivery
 // crediting, coin grants, or any other progression path, per direct
 // instruction not to repeat the tutorialDone/village-credit bug class.
-let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, seenFirstMilestoneDiscovery:false, seenMoonfallUnlockDiscovery:false, seenMoonfallFirstEntry:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, dailyDeal:null};
+// E39 (Beginner Onboarding): four more one-time discovery flags, same
+// exact convention -- the next layer of PROGRESSIVE guidance after the
+// interactive first-night tutorial and the E33 milestone/Moonfall cards
+// above. Each fires exactly once, ever, the moment its own card is shown
+// (see finalizeNight()/drawShop()/drawJournalScreen()/enterContractScreen()
+// for the actual call sites), reusing the same shared discoveryCard/
+// openDiscoveryCard() mechanism -- no new UI system, no new persistence
+// system. Explicitly did NOT add a fifth flag for Night Objectives or for
+// choosing between villages: the existing "Tonight's Goals" reveal card
+// (drawNewNightCard(), every new night) and the existing E33 Moonfall-
+// unlock discovery card already cover those, and a second explanation
+// would just be clutter/duplication, per direct instruction.
+let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, seenFirstMilestoneDiscovery:false, seenMoonfallUnlockDiscovery:false, seenMoonfallFirstEntry:false, seenFirstNightCompleteDiscovery:false, seenShopDiscovery:false, seenJournalDiscovery:false, seenContractDiscovery:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, dailyDeal:null};
 if(!YT){
   try{
     const u=JSON.parse(localStorage.getItem('gk2_upgrades')||'{}');
@@ -2220,6 +2248,11 @@ if(!YT){
     if(u.seenFirstMilestoneDiscovery===true)upgrades.seenFirstMilestoneDiscovery=true;
     if(u.seenMoonfallUnlockDiscovery===true)upgrades.seenMoonfallUnlockDiscovery=true;
     if(u.seenMoonfallFirstEntry===true)upgrades.seenMoonfallFirstEntry=true;
+    // E39: same flat-boolean load pattern, four more one-time discovery flags.
+    if(u.seenFirstNightCompleteDiscovery===true)upgrades.seenFirstNightCompleteDiscovery=true;
+    if(u.seenShopDiscovery===true)upgrades.seenShopDiscovery=true;
+    if(u.seenJournalDiscovery===true)upgrades.seenJournalDiscovery=true;
+    if(u.seenContractDiscovery===true)upgrades.seenContractDiscovery=true;
     if(u.ownedJars&&typeof u.ownedJars==='object'){ Object.keys(u.ownedJars).forEach(k=>{ if(u.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
     if(typeof u.equippedJar==='string')upgrades.equippedJar=u.equippedJar;
     // legacy: a save from before the Jar Collection port only has ownedSkins/
@@ -4555,6 +4588,11 @@ if(YT&&YT.game&&YT.game.loadData){
         if(d.upgrades.seenFirstMilestoneDiscovery===true)upgrades.seenFirstMilestoneDiscovery=true;
         if(d.upgrades.seenMoonfallUnlockDiscovery===true)upgrades.seenMoonfallUnlockDiscovery=true;
         if(d.upgrades.seenMoonfallFirstEntry===true)upgrades.seenMoonfallFirstEntry=true;
+        // E39: same flat-boolean load pattern, four more one-time discovery flags.
+        if(d.upgrades.seenFirstNightCompleteDiscovery===true)upgrades.seenFirstNightCompleteDiscovery=true;
+        if(d.upgrades.seenShopDiscovery===true)upgrades.seenShopDiscovery=true;
+        if(d.upgrades.seenJournalDiscovery===true)upgrades.seenJournalDiscovery=true;
+        if(d.upgrades.seenContractDiscovery===true)upgrades.seenContractDiscovery=true;
         if(d.upgrades.ownedJars&&typeof d.upgrades.ownedJars==='object'){ Object.keys(d.upgrades.ownedJars).forEach(k=>{ if(d.upgrades.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
         if(typeof d.upgrades.equippedJar==='string')upgrades.equippedJar=d.upgrades.equippedJar;
         if(d.upgrades.ownedSkins&&typeof d.upgrades.ownedSkins==='object'){ Object.keys(d.upgrades.ownedSkins).forEach(k=>{ if(d.upgrades.ownedSkins[k]===true)upgrades.ownedJars[k==='classic'?'simple':k]=true; }); }
@@ -5078,6 +5116,19 @@ function beginPlay(){
 function enterContractScreen(){
   screen='contract';
   contractScreenAt=0; contractSel=-1; contractSelAt=-1; contractDockAt=-1; contractExitAt=-1;
+  // E39 (Beginner Onboarding): one-time-ever orientation card, shown the
+  // first time this screen is EVER reached -- which, since this is the
+  // one single entry point onto it (see the comment above) and it's only
+  // ever reached once tutorialDone is true, is necessarily the player's
+  // second night, right as they're about to begin it. Explains what a
+  // Contract IS in one line, then leaves the actual cards (mods/risk/
+  // reward, all untouched) to speak for themselves -- no modifier is
+  // re-explained here.
+  if(!upgrades.seenContractDiscovery&&!discoveryCard){
+    upgrades.seenContractDiscovery=true;
+    persistUpgradesLocal(); saveProgress();
+    openDiscoveryCard('📜 Before You Begin','Contracts','Contracts change the way tonight\'s hunt plays -- each one adds its own challenge and its own reward. Pick the one that sounds like your kind of night.');
+  }
 }
 // Tapping a card: the SELECTED card again -> deselect (dock retracts, the
 // "choose a contract" hint returns). A DIFFERENT card -> the dock's text
@@ -6035,10 +6086,11 @@ cv.addEventListener('pointerdown',e=>{
   // same "modal overlay owns everything" guard as pause/tutorial/welcome-
   // back below -- checked FIRST, ahead of even `paused`, since a discovery
   // card can appear on more than one screen (Night Complete, Village
-  // Selection) and must always be dismissible regardless of whatever
-  // other state happens to be true underneath it. Only its own "Got it"
-  // button responds; this purely closes the card -- it never touches
-  // score, coins, village progression, or any other gameplay value.
+  // Selection, and -- E39 -- Shop/Journal/Contract Selection too) and must
+  // always be dismissible regardless of whatever other state happens to be
+  // true underneath it. Only its own "Got it" button responds; this purely
+  // closes the card -- it never touches score, coins, village progression,
+  // or any other gameplay value.
   if(discoveryCard){
     if(inRect(p.x,p.y,DISCOVERY_CARD_BTN))discoveryCard=null;
     return;
@@ -12686,6 +12738,24 @@ function drawStatueCard(item,rect){
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }
 function drawShop(){
+  // E39 (Beginner Onboarding): one-time-ever orientation card, shown the
+  // first time this screen is ever opened, from either entry point
+  // (SHOP_BTN_TITLE or SHOP_BTN_OVER) -- same "!discoveryCard" precedent
+  // as drawJourneyScreen()'s Moonfall-unlock check, so it never fights
+  // another discovery card already open. Deliberately covers BOTH the
+  // spec's "Shop -- First Visit" section AND its separate "Jar / Equipment
+  // Guidance" section in one card: Jars is the Shop's own default tab
+  // (shopTab==='jars'), so for virtually every player those are the exact
+  // same moment -- a second card moments later would just be clutter.
+  // Teaches HOW the shop works (jars vary, upgrades apply to the equipped
+  // jar, come back between hunts), never WHAT to buy -- no price/tier is
+  // named, matching every individual stat card's own existing description
+  // text (see drawJarStatCard() call sites below), not duplicating it.
+  if(!upgrades.seenShopDiscovery&&!discoveryCard){
+    upgrades.seenShopDiscovery=true;
+    persistUpgradesLocal(); saveProgress();
+    openDiscoveryCard('🛍️ Welcome to the Workshop','Jars & Upgrades','Different jars have different strengths -- equip one, then spend coins on upgrades to improve it. Come back any time between hunts.');
+  }
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
   const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
   // Premium Transparent Glassmorphism Redesign (section 10): this full-
@@ -13802,6 +13872,19 @@ function drawPrestigeJournal(){
 // (still JOURNAL_CLOSE_BTN, same circle, same position -- just relabeled),
 // and only closes the screen for real (to journalFrom) once back at the list.
 function drawJournalScreen(){
+  // E39 (Beginner Onboarding): one-time-ever orientation card, shown the
+  // first time the Journal is ever opened -- same "!discoveryCard" guard
+  // as drawShop()'s own check above and drawJourneyScreen()'s existing
+  // Moonfall-unlock check. Names only the tabs a beginner has actually
+  // reached by then (Fireflies discovered, the ongoing Story) rather than
+  // enumerating every tab (Weekly/Season/Prestige are their own, later
+  // discoveries) -- kept high-level per direct instruction not to explain
+  // every individual system in one popup.
+  if(!upgrades.seenJournalDiscovery&&!discoveryCard){
+    upgrades.seenJournalDiscovery=true;
+    persistUpgradesLocal(); saveProgress();
+    openDiscoveryCard('📖 The Glowkeeper\'s Journal','Your Journal','Keep track of the fireflies you\'ve discovered and your ongoing story here. Come back any time to see how far you\'ve come.');
+  }
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
   const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
   scrim.addColorStop(0,'rgba(8,10,26,0.6)');

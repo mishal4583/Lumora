@@ -258,6 +258,15 @@ const FIXED_LASTPLAYED_CROSS_MIDNIGHT_MS = new Date(2026, 7, 9, 23, 59, 0).getTi
 // Scenario 1: standalone (no YT / non-Playables env) — localStorage fallback
 // =====================================================================
 scenario('standalone', null, `
+// E39: this scenario predates the four new one-time onboarding discovery
+// cards (Shop/Journal/Contract/first-night-complete) and exercises Shop/
+// Journal screens extensively for completely unrelated reasons throughout
+// -- pre-marking all four "seen" up front keeps this long-standing test
+// isolated from that new, unrelated feature (an unexpectedly-open
+// discoveryCard would otherwise swallow a later pointerdown meant for an
+// actual game button). The E39-specific tests exercising these cards live
+// in their own dedicated scenario instead.
+upgrades.seenShopDiscovery = true; upgrades.seenJournalDiscovery = true; upgrades.seenContractDiscovery = true; upgrades.seenFirstNightCompleteDiscovery = true;
 __check('YT is null outside Playables env', YT === null);
 __check('best seeded from localStorage fallback', best === 7, 'best=' + best);
 
@@ -3785,7 +3794,7 @@ return __tick(5).then(function(){
   // on some smaller in-range tier. Capacity is untouched (its formula
   // never changed) and economyV2Migrated is now set, guarding against
   // this ever running a second time.
-  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 32, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 24, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 27, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 32, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 24, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 27, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('reopening restores the Tracker toggle exactly', trackerOn === true);
   __check('reopening restores the persisted lastPlayed and quest progress exactly', prevLastPlayed === staleLastPlayed && quests.length === 1 && quests[0].progress === 3, 'prevLastPlayed=' + prevLastPlayed + ' quests=' + JSON.stringify(quests));
 
@@ -3901,7 +3910,7 @@ return __tick(5).then(function(){
 // full extended schema from then on.
 // =====================================================================
 scenario('playables-old-format-save', { audioEnabled: true }, `
-__check('coins, journal (including Mystery/Crimson), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0, r: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
+__check('coins, journal (including Mystery/Crimson), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0, r: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
 __spy.loadResolve(JSON.stringify({ best: 12 })); // the exact shape the shipped build has always saved -- no coins, journal, upgrades, or trackerOn at all
 return __tick(5).then(function(){
   __check('an old-format {best}-only save loads without throwing', best === 12, 'best=' + best);
@@ -3914,7 +3923,7 @@ return __tick(5).then(function(){
   // already-all-zero upgrades object, but it DOES set economyV2Migrated,
   // which a completely fresh/old-format player should carry from here on
   // (so a later real purchase never re-triggers a migration pass).
-  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('trackerOn defaults sensibly (off) when the old save has no trackerOn field', trackerOn === false);
   __check('an old-format save with no lastPlayed field is treated as a genuine first-ever session (fresh quests rolled, not an empty/broken list)', quests.length > 0 && quests.length <= 3);
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
@@ -6814,6 +6823,13 @@ return __tick(5).then(function(){
 `);
 
 scenario('lumora2-phase12-prestige', null, `
+// E39: pre-marked seen -- this scenario calls drawJournalScreen() directly
+// (Test 4 below) for reasons unrelated to the new Journal onboarding card;
+// leaving it unseen would flip upgrades.seenJournalDiscovery as a side
+// effect of that draw call AND open a discoveryCard that swallows the very
+// next pointerdown this test fires, breaking an assertion about Prestige/
+// Cancel, not about onboarding.
+upgrades.seenJournalDiscovery = true;
 // ---- Test 1: default state ----
 __check('Test 1: a fresh player starts at Prestige 0', prestigeLevel === 0);
 
@@ -9535,6 +9551,13 @@ __check('E33: tapping "Got it" dismisses the discovery card', discoveryCard === 
 // per-night high-water mark, not cumulative across nights -- delivering 50
 // in one night then 50 more in a SEPARATE night would only tie the existing
 // best of 50, never reach 100; see grantVillageProgress()'s own comment).
+// E39: pre-seeded seen here too -- otherwise finalizeNight()'s own,
+// unrelated E39 first-night-complete card would take the shared
+// discoveryCard slot on THIS finalizeNight() call (since the milestone
+// one is already seen and stays silent), breaking this test's own
+// "discoveryCard === null" assertion for a completely different reason
+// than the one it's actually checking.
+upgrades.seenFirstNightCompleteDiscovery = true;
 reset(); screen = 'play'; paused = false;
 for (var iM3 = 0; iM3 < 100; iM3++) S.carried.push({ type: 'y', ph: 0, sp: 1 });
 S.jar.y = 999; S.jar.ty = 999;
@@ -10086,6 +10109,115 @@ return __tick(5).then(function(){
 });
 `);
 
+// ===== E39: Beginner Onboarding & Contextual Tips =====
+// Covers the four NEW one-time discovery cards (first-night-complete/Shop/
+// Journal/Contract) end to end -- each appears exactly once, points at the
+// existing real navigation (no invented button/screen), and never fights
+// the OTHER cards for the one shared discoveryCard slot. E33's three
+// existing discovery cards (milestone/Moonfall-unlock/Moonfall-first-entry)
+// are proven untouched by their own pre-existing scenarios (still 100%
+// passing, unmodified logic) -- not re-duplicated here.
+scenario('e39-beginner-onboarding', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+activeContract = -1;
+
+// ---- 1: first completed match triggers the intended next-step guidance ----
+__check('1 setup: no discovery card is open yet', discoveryCard === null);
+finalizeNight();
+__check('1: a genuinely first-ever completed night opens a discovery card', discoveryCard !== null);
+__check('1 (b): it points toward the Shop, by name, not an invented screen', discoveryCard.heading === 'Visit the Shop');
+__check('1 (c): it does not recommend a specific purchase -- no price, tier, or item name appears in the body', discoveryCard.body.indexOf('coin') === -1 && discoveryCard.body.indexOf('$') === -1);
+__check('1 (d): upgrades.seenFirstNightCompleteDiscovery is now true, set at the moment it is actually shown', upgrades.seenFirstNightCompleteDiscovery === true);
+__fire(cv, 'pointerdown', __fakeEvent(DISCOVERY_CARD_BTN.x, DISCOVERY_CARD_BTN.y));
+__check('1 (e): dismissing it works, same shared \\'Got it\\' button every other discovery card already uses', discoveryCard === null);
+
+// ---- next-hunt guidance appears only once: a SECOND completed night does not reopen it ----
+reset(); screen = 'play'; paused = false; activeContract = -1;
+finalizeNight();
+__check('1 (f): a second completed night does not reopen the already-seen first-night-complete card', discoveryCard === null);
+
+// ---- 2/3: first-time Shop guidance appears, teaches jars vary + upgrades apply to the equipped jar + return between hunts, and persists as seen after dismissal ----
+screen = 'shop'; shopFrom = 'title'; jarCompareOpen = false;
+draw();
+__check('2: opening the Shop for the first time ever opens a discovery card', discoveryCard !== null);
+__check('2 (b): it does not name a specific price/tier -- teaches HOW the shop works, not WHAT to buy', discoveryCard.body.match(/[0-9]/) === null);
+__check('3: upgrades.seenShopDiscovery is now true', upgrades.seenShopDiscovery === true);
+__fire(cv, 'pointerdown', __fakeEvent(DISCOVERY_CARD_BTN.x, DISCOVERY_CARD_BTN.y));
+__check('3 (b): dismissing it works', discoveryCard === null);
+screen = 'title'; screen = 'shop';
+draw();
+__check('3 (c): revisiting the Shop again does not reshow the already-seen card -- persists as seen after dismissal', discoveryCard === null);
+screen = 'title';
+
+// ---- 5: Journal guidance appears only when appropriate -- the first time the Journal is actually opened, not before, and never a second time ----
+__check('5 setup: seenJournalDiscovery is still false -- the Journal has not been opened yet in this scenario', upgrades.seenJournalDiscovery === false);
+journalFrom = 'title'; journalTab = 'fireflies'; journalReading = null;
+screen = 'journal';
+draw();
+__check('5: opening the Journal for the first time ever opens a discovery card', discoveryCard !== null && discoveryCard.heading === 'Your Journal');
+__check('5 (b): upgrades.seenJournalDiscovery is now true', upgrades.seenJournalDiscovery === true);
+__fire(cv, 'pointerdown', __fakeEvent(DISCOVERY_CARD_BTN.x, DISCOVERY_CARD_BTN.y));
+screen = 'title'; screen = 'journal';
+draw();
+__check('5 (c): reopening the Journal again does not reshow the already-seen card', discoveryCard === null);
+screen = 'title';
+
+// ---- 6: Contract guidance appears only when appropriate -- the first time the Contract Selection screen is actually reached, not before, and never a second time ----
+__check('6 setup: seenContractDiscovery is still false -- the Contract screen has not been reached yet in this scenario', upgrades.seenContractDiscovery === false);
+enterContractScreen();
+__check('6: reaching the Contract Selection screen for the first time ever opens a discovery card', discoveryCard !== null && discoveryCard.heading === 'Contracts');
+__check('6 (b): it explains what a Contract IS without re-explaining any individual modifier (mods stay on the real cards, untouched)', discoveryCard.body.indexOf('Playful') === -1 && discoveryCard.body.indexOf('risk') === -1);
+__check('6 (c): upgrades.seenContractDiscovery is now true', upgrades.seenContractDiscovery === true);
+__fire(cv, 'pointerdown', __fakeEvent(DISCOVERY_CARD_BTN.x, DISCOVERY_CARD_BTN.y));
+enterContractScreen();
+__check('6 (d): reaching Contract Selection again (a later night) does not reshow the already-seen card', discoveryCard === null);
+
+// ---- 10/11: Collector objective remains Playful, Playful x2 remains unchanged ----
+activeContract = 3; nightNumber = 1; cachedNightObjectivesFor = -1; cachedNightObjectives = null;
+generateNightObjectives(null);
+var catchObj = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+__check('10: Collector still prefers catch_playful for its forced catch objective -- untouched by any E39 onboarding change', !!catchObj && catchObj.id === 'catch_playful');
+__check('11: Collector\\'s Playful spawn multiplier is still exactly 2, unchanged', CONTRACTS.find(function(c){ return c.id === 'collector'; }).playfulMult === 2);
+activeContract = -1;
+
+// ---- 12: no Workshop Token references/functionality return ----
+__check('12: workshopTokens is still not a defined variable anywhere in scope', typeof workshopTokens === 'undefined');
+__check('12 (b): Collector still has no tokenReward field', !('tokenReward' in CONTRACTS.find(function(c){ return c.id === 'collector'; })));
+
+// ---- 13/14/15: existing progression, economy, and village thresholds remain unchanged ----
+__check('13: Prestige max is still exactly 1, untouched', PRESTIGE_MAX === 1);
+__check('14: CONTRACTS still has exactly 4 entries with their existing coin multipliers unchanged (Peaceful 1.20, Rush 1.40, Moth 1.65)', CONTRACTS.length === 4 && CONTRACTS.find(function(c){return c.id==='peaceful';}).coinMult === 1.20 && CONTRACTS.find(function(c){return c.id==='rush';}).coinMult === 1.40 && CONTRACTS.find(function(c){return c.id==='moth';}).coinMult === 1.65);
+__check('15: village thresholds are unchanged (Lumora 500, Moonfall 1000, Aurora still locked/null)', defaultVillageProgression().villages[0].completionThreshold === 500 && defaultVillageProgression().villages[1].completionThreshold === 1000 && defaultVillageProgression().villages[2].completionThreshold === null);
+`);
+
+// ===== E39 TEST: reload does not repeat already-seen onboarding guidance =====
+scenario('e39-onboarding-reload', null, `
+// seeded (via the localStorage seed chain below): all four new E39
+// discovery flags already true, exactly as a returning player's real save
+// would have them once each card has genuinely been shown and dismissed.
+__check('4 setup: all four E39 discovery flags survived the reload as true', upgrades.seenFirstNightCompleteDiscovery === true && upgrades.seenShopDiscovery === true && upgrades.seenJournalDiscovery === true && upgrades.seenContractDiscovery === true);
+upgrades.tutorialDone = true;
+
+screen = 'shop'; shopFrom = 'title'; jarCompareOpen = false;
+draw();
+__check('4: reloading with the Shop guidance already seen does not reshow it', discoveryCard === null);
+screen = 'title';
+
+journalFrom = 'title'; journalTab = 'fireflies'; journalReading = null;
+screen = 'journal';
+draw();
+__check('4 (b): reloading with the Journal guidance already seen does not reshow it', discoveryCard === null);
+screen = 'title';
+
+enterContractScreen();
+__check('4 (c): reloading with the Contract guidance already seen does not reshow it', discoveryCard === null);
+
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999; activeContract = -1;
+finalizeNight();
+__check('4 (d): reloading with the first-night-complete guidance already seen does not reshow it on a later completed night', discoveryCard === null);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -10120,7 +10252,12 @@ async function main() {
       // acknowledged after a genuine fresh reload -- the card must never
       // reappear just because the underlying milestone (bestNightDelivered
       // already past the first threshold) still exists.
-      : sc.name === 'e33-discovery-reload' ? `try{ localStorage.setItem('gk2_upgrades', JSON.stringify({seenFirstMilestoneDiscovery:true})); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:50,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
+      // E39: seenFirstNightCompleteDiscovery also pre-seeded true here -- this
+      // scenario is specifically about the MILESTONE discovery flag surviving
+      // a reload, and finalizeNight() now also has its own, unrelated E39
+      // first-night-complete card that would otherwise take the one shared
+      // discoveryCard slot on this test's own finalizeNight() call below.
+      : sc.name === 'e33-discovery-reload' ? `try{ localStorage.setItem('gk2_upgrades', JSON.stringify({seenFirstMilestoneDiscovery:true, seenFirstNightCompleteDiscovery:true})); localStorage.setItem('gk2_village', JSON.stringify({currentVillage:'lumora',villages:[{id:'lumora',name:'Lumora',bestNightDelivered:50,completionThreshold:500,milestones:[],completed:false}]})); }catch(e){}\n`
       : sc.name === 'lumora-village-lumora-migration-old-100' ? `try{ localStorage.setItem('gk2_best','30'); }catch(e){}\n`
       // PERMANENT-VILLAGE-RESTORATION pass: a save written with the OLD field
       // name (restorationProgress, pre-pivot) -- proves the one-time
@@ -10206,6 +10343,9 @@ async function main() {
       // stale field must be silently ignored, not converted/compensated, and
       // must not corrupt loading of the rest of the object.
       : sc.name === 'e38-workshop-token-reload' ? `try{ localStorage.setItem('gk2_best','40'); localStorage.setItem('gk2_lumora2', JSON.stringify({nightNumber:7, workshopTokens:12})); }catch(e){}\n`
+      // E39 TEST 4: all four new discovery flags already marked seen, as a
+      // returning player's real save would have them.
+      : sc.name === 'e39-onboarding-reload' ? `try{ localStorage.setItem('gk2_upgrades', JSON.stringify({seenFirstNightCompleteDiscovery:true, seenShopDiscovery:true, seenJournalDiscovery:true, seenContractDiscovery:true})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value
