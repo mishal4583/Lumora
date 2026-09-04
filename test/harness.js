@@ -10629,6 +10629,89 @@ __check('18: E42 miss behavior is unchanged -- currentMissLimit() is still exact
 __check('18 (b): E40 Back button (CONTRACT_BACK_BTN) still defined with real geometry', typeof CONTRACT_BACK_BTN === 'object' && typeof CONTRACT_BACK_BTN.x === 'number');
 `);
 
+// =====================================================================
+// E44: Final YouTube Playables ads + submission compliance verification.
+// Every scenario above that touches continueFromOver()/the interstitial
+// (ads-interstitial, lumora2-e15-continueFromOver-reentry, and others)
+// calls it as a bare FUNCTION -- never through the actual pointerdown
+// handler a real tap goes through. That is the one real, previously-
+// untested gap this audit exists to close: prove the REAL player-facing
+// trigger path (a tap landing on the drawn "Continue" button's own
+// coordinates, routed through the real cv 'pointerdown' listener via
+// __fire()/__fakeEvent(), exactly as E43's own touch-target tests already
+// do for other controls) actually reaches continueFromOver(), and that
+// the two adjacent buttons on the same screen (Home, Visit the Workshop)
+// do NOT accidentally trigger it.
+// =====================================================================
+scenario('e44-ad-compliance-reviewer-trigger', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  weeklyProgress = function(){}; // isolate from unrelated weekly-milestone coin bonuses, same discipline as ads-interstitial
+  var rewardedCalls = [], interstitialCalls = [];
+  ytgame.ads = {
+    requestRewardedAd: function(id){ rewardedCalls.push(id); return Promise.resolve(true); },
+    requestInterstitialAd: function(){ interstitialCalls.push(1); return Promise.resolve(); }
+  };
+  upgrades.tutorialDone = true;
+
+  // ---- 1: a REAL tap on the drawn "Continue" button's own coordinates (not a bare continueFromOver() call) reaches the interstitial ----
+  reset(); screen = 'play';
+  S.newNightT = 4.30; S.isNewNight = false; // the per-round "new night" reveal card has long since auto-dismissed by the time a real night reaches its end -- same real gate newNightCardActive() itself checks, not a bypass of anything the pointerdown handler does
+  S.over = true; S.overT = 1; S.coinsEarnedThisNight = 0;
+  drawOver(); // computes playBtn.y/SHOP_BTN_OVER.y/HOME_BTN_OVER.y for this exact frame, same as every real frame before a tap can land
+  var continueSpot = { x: playBtn.x, y: playBtn.y };
+  __fire(cv, 'pointerdown', __fakeEvent(continueSpot.x, continueSpot.y));
+  return __tick(5).then(function(){
+    __check('1: a real tap on the drawn Continue button reaches the interstitial trigger, not just a direct continueFromOver() call', interstitialCalls.length === 1, 'calls=' + interstitialCalls.length);
+    __acceptAnyContract();
+    __check('1 (b): gameplay resumes correctly afterward (Contract Selection drained, back to play)', screen === 'play' && S.over === false);
+
+    // ---- 2: tapping Home on the SAME screen does not fire the interstitial ----
+    reset(); screen = 'play';
+    S.newNightT = 4.30; S.isNewNight = false;
+    S.over = true; S.overT = 1; S.coinsEarnedThisNight = 0;
+    drawOver();
+    var callsBeforeHome = interstitialCalls.length;
+    __fire(cv, 'pointerdown', __fakeEvent(HOME_BTN_OVER.x, HOME_BTN_OVER.y));
+    __check('2: tapping Home does not request an interstitial -- only the Continue path does, per direct instruction not to add an exit-triggered ad', interstitialCalls.length === callsBeforeHome && screen === 'title');
+
+    // ---- 3: tapping "Visit the Workshop" on the SAME screen does not fire the interstitial either ----
+    reset(); screen = 'play';
+    S.newNightT = 4.30; S.isNewNight = false;
+    S.over = true; S.overT = 1; S.coinsEarnedThisNight = 0;
+    drawOver();
+    var callsBeforeShop = interstitialCalls.length;
+    __fire(cv, 'pointerdown', __fakeEvent(SHOP_BTN_OVER.x, SHOP_BTN_OVER.y));
+    __check('3: tapping Visit the Workshop does not request an interstitial', interstitialCalls.length === callsBeforeShop && screen === 'shop');
+    screen = 'title';
+
+    // ---- 4: the "One More Chance" rewarded-ad button is reachable via the SAME real-tap mechanism, independent of the interstitial ----
+    // E39's own "Visit the Shop" discovery card (checked FIRST, ahead of
+    // S.extraLifeOfferOpen) would otherwise swallow this tap on a genuinely
+    // first-ever completed night -- pre-marking it seen isolates THIS test
+    // to the rewarded-ad path specifically; E39's own card is already
+    // covered by its own scenario elsewhere in this file.
+    upgrades.seenFirstNightCompleteDiscovery = true;
+    upgrades.seenFirstMilestoneDiscovery = true;
+    reset(); screen = 'play';
+    S.newNightT = 4.30; S.isNewNight = false; // same new-night-reveal-card gate as above -- also checked ahead of S.extraLifeOfferOpen in the real pointerdown handler
+    S.misses = 4;
+    // drive a real miss the same way the game itself does -- one firefly's patience expiring -- rather than teleporting S.over/S.extraLifeOfferOpen directly
+    S.flies = [{ type: 'y', state: 'drift', patience: 0.001, maxP: 12, x: 270, y: 400, vx: 0, vy: 0, rest: 0, flick: 0 }];
+    update(0.02);
+    __check('4 setup: the miss genuinely ended the night through the real update() path, opening the real Extra Life offer', S.over === true && S.extraLifeOfferOpen === true, 'over=' + S.over + ' offer=' + S.extraLifeOfferOpen);
+    var callsBeforeRewarded = rewardedCalls.length;
+    __fire(cv, 'pointerdown', __fakeEvent(EXTRA_LIFE_AD_BTN.x, EXTRA_LIFE_AD_BTN.y));
+    return __tick(5).then(function(){
+      __check('4: a real tap on the drawn "Watch Ad - +2 Extra Misses" button requests the rewarded ad and grants exactly +2', rewardedCalls.length === callsBeforeRewarded + 1 && rewardedCalls[rewardedCalls.length - 1] === REWARDED_AD_IDS.EXTRA_LIFE && currentMissLimit() === 7, 'limit=' + currentMissLimit());
+
+      // ---- 5: rewarded and interstitial are genuinely independent -- claiming the rewarded ad above did not also fire an interstitial ----
+      __check('5: the rewarded-ad claim above never requested an interstitial -- the two ad types stay fully independent', interstitialCalls.length === callsBeforeShop);
+    });
+  });
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
