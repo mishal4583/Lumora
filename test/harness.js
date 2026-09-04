@@ -3794,7 +3794,7 @@ return __tick(5).then(function(){
   // on some smaller in-range tier. Capacity is untouched (its formula
   // never changed) and economyV2Migrated is now set, guarding against
   // this ever running a second time.
-  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 32, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 24, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 27, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('reopening migrates a pre-split magnetTier into per-jar reach/magnetReach/duration, migrates a legacy jarTier into per-jar jarCapTiers, defaults the not-yet-existing fountain/statue/skins/trails/lightTier fields, and (E2) converts those migrated tiers into their new-step equivalents exactly once', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: true, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, seenMissExplainer: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 1, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 32, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 24, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 27, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('reopening restores the Tracker toggle exactly', trackerOn === true);
   __check('reopening restores the persisted lastPlayed and quest progress exactly', prevLastPlayed === staleLastPlayed && quests.length === 1 && quests[0].progress === 3, 'prevLastPlayed=' + prevLastPlayed + ' quests=' + JSON.stringify(quests));
 
@@ -3910,7 +3910,7 @@ return __tick(5).then(function(){
 // full extended schema from then on.
 // =====================================================================
 scenario('playables-old-format-save', { audioEnabled: true }, `
-__check('coins, journal (including Mystery/Crimson), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0, r: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
+__check('coins, journal (including Mystery/Crimson), upgrades (including fountain/statue/skins/trails) and trackerOn all start at their initialized defaults before any load resolves', coins === 0 && JSON.stringify(journal) === JSON.stringify({ y: 0, b: 0, g: 0, e: 0, m: 0, r: 0 }) && JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, seenMissExplainer: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null }) && trackerOn === false);
 __spy.loadResolve(JSON.stringify({ best: 12 })); // the exact shape the shipped build has always saved -- no coins, journal, upgrades, or trackerOn at all
 return __tick(5).then(function(){
   __check('an old-format {best}-only save loads without throwing', best === 12, 'best=' + best);
@@ -3923,7 +3923,7 @@ return __tick(5).then(function(){
   // already-all-zero upgrades object, but it DOES set economyV2Migrated,
   // which a completely fresh/old-format player should carry from here on
   // (so a later real purchase never re-triggers a migration pass).
-  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
+  __check('upgrades defaults sensibly (nothing owned, including fountain/statue/skins/trails) when the old save has no upgrades field', JSON.stringify(upgrades) === JSON.stringify({ lightTier: 0, deco: false, fountain: false, statueOwned: false, statueEquipped: false, tutorialDone: false, seenFirstMilestoneDiscovery: false, seenMoonfallUnlockDiscovery: false, seenMoonfallFirstEntry: false, seenFirstNightCompleteDiscovery: false, seenShopDiscovery: false, seenJournalDiscovery: false, seenContractDiscovery: false, seenMissExplainer: false, ownedJars: { simple: true }, equippedJar: 'simple', ownedTrails: { none: true }, equippedTrail: 'none', jarCapTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, reachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, magnetReachTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, durationTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, lightValueTiers: { simple: 0, lantern: 0, moon: 0, crystal: 0, elder: 0, aurora: 0 }, dailyDeal: null, economyV2Migrated: true }), 'upgrades=' + JSON.stringify(upgrades));
   __check('trackerOn defaults sensibly (off) when the old save has no trackerOn field', trackerOn === false);
   __check('an old-format save with no lastPlayed field is treated as a genuine first-ever session (fresh quests rolled, not an empty/broken list)', quests.length > 0 && quests.length <= 3);
   __check('welcome-back never shows for a save with no real prevLastPlayed to compare against', showWelcomeBack === false);
@@ -10276,6 +10276,125 @@ __check('11: workshopTokens is still not a defined variable anywhere in scope', 
 __check('11 (b): Collector still has no tokenReward field', !('tokenReward' in CONTRACTS.find(function(c){ return c.id === 'collector'; })));
 `);
 
+// ===== E41: Life/Miss System -- clarify the HUD =====
+scenario('e41-miss-hud-clarity', null, `
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+activeContract = -1;
+
+// shared helper: force a real miss through the actual production path
+// (patience expiry), same technique the pre-existing 'standalone'
+// scenario's own miss test already uses -- not a hand-set S.misses++.
+// The miss itself (S.misses++, the toast fields set, the finalizeNight()
+// check) fires entirely within this fly's own FIRST stepped frame
+// (patience is already negative after one dt) -- a single __stepFrame is
+// both necessary and sufficient. Deliberately does NOT wait for the fly
+// to actually be spliced out of S.flies: it lingers in 'leaving' state
+// (harmless -- a 'leaving' fly never re-enters the patience/miss check,
+// see update()'s own state machine) for a further couple of SIMULATED
+// seconds while it animates off-screen, which was flaky here for exactly
+// the same reason it was in the E41 reload test above -- long enough for
+// a short (2.2s) toast timer to already have decayed to 0 by the time a
+// wait-for-removal loop finally exited, an intermittent FAIL depending on
+// incidental per-fly drift-animation timing, not any real bug.
+function forceMiss(type){
+  spawnFly(type || 'y');
+  var f = S.flies[S.flies.length - 1];
+  f.patience = 0.01; f.rest = 0; f.pause = 0;
+  __stepFrame(16);
+}
+
+// ---- 1: HUD-backing state accurately reflects the actual remaining miss count (no contract) ----
+__check('1: at round start, currentMissLimit() is 5 (no contract, no Extra Life claimed)', currentMissLimit() === 5);
+__check('1 (b): S.misses starts at 0, so misses-left is 5', S.misses === 0 && (currentMissLimit() - S.misses) === 5);
+
+var scoreBefore = S.score, coinsBefore = coins, villageBefore = JSON.stringify(villageProgression);
+forceMiss('y');
+
+// ---- 2: losing one chance updates the HUD-backing state correctly ----
+__check('2: S.misses is now 1 after one real miss', S.misses === 1);
+__check('2 (b): misses-left is now 4', (currentMissLimit() - S.misses) === 4);
+
+// ---- 7/8/9: score/coins/village progression unaffected by a miss ----
+__check('7: score is unaffected by a miss', S.score === scoreBefore);
+__check('8: coins are unaffected by a miss', coins === coinsBefore);
+__check('9: village progression is unaffected by a miss', JSON.stringify(villageProgression) === villageBefore);
+
+// ---- 13: first-time contextual miss explanation appears correctly, and is persisted ----
+__check('13: the first-ever miss opens the fuller two-line explainer variant', S.missHintExplain === true && S.missHintLeft === 4 && S.missHintT > 0);
+__check('13 (b): upgrades.seenMissExplainer is now true, set at the moment it is actually shown', upgrades.seenMissExplainer === true);
+__check('13 (c): the toast text states the real remaining count, not a hardcoded one', missHintLabel() === 'Missed — 4 misses left');
+
+// ---- a second miss shows the short variant only, not the explainer again ----
+forceMiss('y');
+__check('2 (c): S.misses is now 2 after a second miss', S.misses === 2);
+__check('a SECOND miss does not repeat the fuller explainer -- short toast only', S.missHintExplain === false && S.missHintLeft === 3);
+__check('the short toast still states the correct remaining count', missHintLabel() === 'Missed — 3 misses left');
+
+// ---- 3: losing all chances still ends the night exactly as before ----
+forceMiss('y'); forceMiss('y'); forceMiss('y');
+__check('3 setup: S.misses reached the 5-miss limit', S.misses === 5);
+__check('3: the night ends exactly as before -- S.over is true (no Extra Life offer available outside a real Playables session -- rewardedAdsAvailable() is false here)', S.over === true);
+
+// ---- 4: starting a new night resets the display correctly ----
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999; activeContract = -1;
+__check('4: a fresh reset() brings S.misses back to 0', S.misses === 0);
+__check('4 (b): misses-left is back to 5', (currentMissLimit() - S.misses) === 5);
+
+// ---- 5: Peaceful's existing +2 extra misses is represented correctly (not hardcoded to 5) ----
+activeContract = 0; // peaceful, missBonus: 2
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+__check('5: under Peaceful, currentMissLimit() is 7 (5 base + Peaceful\\'s own +2), not hardcoded to 5', currentMissLimit() === 7);
+forceMiss('y'); forceMiss('y'); forceMiss('y'); forceMiss('y'); forceMiss('y');
+__check('5 (b): 5 misses under Peaceful does NOT end the night -- Peaceful\\'s real +2 headroom is genuinely usable, matching the fixed HUD', S.misses === 5 && S.over === false);
+__check('5 (c): misses-left correctly reflects 2 remaining under Peaceful, not 0', (currentMissLimit() - S.misses) === 2);
+forceMiss('y'); forceMiss('y');
+__check('5 (d): the night ends only once the REAL Peaceful-adjusted limit (7) is reached', S.misses === 7 && S.over === true);
+activeContract = -1;
+
+// ---- 6: other contracts do not incorrectly alter the display (none of them has a missBonus field) ----
+[1, 2, 3].forEach(function(idx){
+  activeContract = idx;
+  reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+  __check('6: contract index ' + idx + ' (' + CONTRACTS[idx].id + ') does not alter the miss limit -- still exactly 5', currentMissLimit() === 5);
+});
+activeContract = -1;
+
+// ---- 10: Collector remains unchanged ----
+__check('10: Collector still has Playful x2 and risk 2, untouched by this HUD-only change', CONTRACTS.find(function(c){ return c.id === 'collector'; }).playfulMult === 2 && CONTRACTS.find(function(c){ return c.id === 'collector'; }).risk === 2);
+
+// ---- 11: Workshop Tokens remain removed ----
+__check('11: workshopTokens is still not a defined variable anywhere in scope', typeof workshopTokens === 'undefined');
+
+// ---- 12: existing E37/E40 behavior remains intact ----
+activeContract = 3; nightNumber = 1; cachedNightObjectivesFor = -1; cachedNightObjectives = null;
+generateNightObjectives(null);
+var catchObj = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+__check('12: Collector still prefers catch_playful (E37) after this HUD change', !!catchObj && catchObj.id === 'catch_playful');
+__check('12 (b): CONTRACT_BACK_BTN (E40) is still defined with real geometry', typeof CONTRACT_BACK_BTN === 'object' && typeof CONTRACT_BACK_BTN.x === 'number');
+activeContract = -1;
+`);
+
+// ===== E41 TEST 14: reload does not repeat the already-seen miss explainer =====
+scenario('e41-miss-explainer-reload', null, `
+// seeded (via the localStorage seed chain below): upgrades.seenMissExplainer
+// already true, exactly as a returning player's real save would have it.
+__check('14 setup: seenMissExplainer survived the reload as true', upgrades.seenMissExplainer === true);
+upgrades.tutorialDone = true;
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999; activeContract = -1;
+spawnFly('y');
+var f = S.flies[S.flies.length - 1];
+f.patience = 0.01; f.rest = 0; f.pause = 0;
+// the miss itself (S.misses++, the toast timer set) fires within this
+// fly's own FIRST stepped frame (patience is already negative after one
+// dt) -- checked right here, not after waiting for the fly to fully leave
+// the screen (its 'leaving' float-up animation can run for a couple of
+// seconds, long enough for a short 2.2s toast to already have faded by
+// the time it's actually spliced out of S.flies).
+__stepFrame(16);
+__check('14: a miss after reload (explainer already seen) shows the short toast only, not the fuller explainer again', S.misses === 1 && S.missHintExplain === false && S.missHintT > 0);
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
@@ -10404,6 +10523,8 @@ async function main() {
       // E39 TEST 4: all four new discovery flags already marked seen, as a
       // returning player's real save would have them.
       : sc.name === 'e39-onboarding-reload' ? `try{ localStorage.setItem('gk2_upgrades', JSON.stringify({seenFirstNightCompleteDiscovery:true, seenShopDiscovery:true, seenJournalDiscovery:true, seenContractDiscovery:true})); }catch(e){}\n`
+      // E41 TEST 14: seenMissExplainer already marked seen, as a returning player's real save would have it.
+      : sc.name === 'e41-miss-explainer-reload' ? `try{ localStorage.setItem('gk2_upgrades', JSON.stringify({seenMissExplainer:true})); }catch(e){}\n`
       : '';
 
     // The IIFE call is the script's last statement, so its completion value

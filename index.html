@@ -2207,7 +2207,14 @@ function migrateEconomyV2(){
 // (drawNewNightCard(), every new night) and the existing E33 Moonfall-
 // unlock discovery card already cover those, and a second explanation
 // would just be clutter/duplication, per direct instruction.
-let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, seenFirstMilestoneDiscovery:false, seenMoonfallUnlockDiscovery:false, seenMoonfallFirstEntry:false, seenFirstNightCompleteDiscovery:false, seenShopDiscovery:false, seenJournalDiscovery:false, seenContractDiscovery:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, dailyDeal:null};
+// E41 (Life/Miss HUD clarity): one more one-time flag, same convention --
+// flips true the moment the player's genuinely first-ever miss shows the
+// fuller "Too many will end the night" explainer (see its trigger site in
+// update()'s patience<=0 branch). Every OTHER miss (this round or any
+// future one) shows only the short, non-gated "Missed -- N left" toast,
+// which is not behind a seen-flag at all since the remaining count is
+// live information, not a one-time discovery.
+let upgrades={lightTier:0, deco:false, fountain:false, statueOwned:false, statueEquipped:false, tutorialDone:false, seenFirstMilestoneDiscovery:false, seenMoonfallUnlockDiscovery:false, seenMoonfallFirstEntry:false, seenFirstNightCompleteDiscovery:false, seenShopDiscovery:false, seenJournalDiscovery:false, seenContractDiscovery:false, seenMissExplainer:false, ownedJars:{simple:true}, equippedJar:'simple', ownedTrails:{none:true}, equippedTrail:'none', jarCapTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, reachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, magnetReachTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, durationTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, lightValueTiers:{simple:0,lantern:0,moon:0,crystal:0,elder:0,aurora:0}, dailyDeal:null};
 if(!YT){
   try{
     const u=JSON.parse(localStorage.getItem('gk2_upgrades')||'{}');
@@ -2253,6 +2260,8 @@ if(!YT){
     if(u.seenShopDiscovery===true)upgrades.seenShopDiscovery=true;
     if(u.seenJournalDiscovery===true)upgrades.seenJournalDiscovery=true;
     if(u.seenContractDiscovery===true)upgrades.seenContractDiscovery=true;
+    // E41: same flat-boolean load pattern.
+    if(u.seenMissExplainer===true)upgrades.seenMissExplainer=true;
     if(u.ownedJars&&typeof u.ownedJars==='object'){ Object.keys(u.ownedJars).forEach(k=>{ if(u.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
     if(typeof u.equippedJar==='string')upgrades.equippedJar=u.equippedJar;
     // legacy: a save from before the Jar Collection port only has ownedSkins/
@@ -3791,6 +3800,16 @@ const CONTRACTS=[
 let activeContract=-1;
 function contractSpeedMult(){ return activeContract>=0?(CONTRACTS[activeContract].speedMult||1):1; }
 function contractMissBonus(){ return activeContract>=0?(CONTRACTS[activeContract].missBonus||0):0; }
+// E41 (Life/Miss HUD clarity): the ONE place the real, dynamic miss
+// ceiling is computed -- shared by the actual ending check (in update(),
+// where S.misses>=missLimit finalizes the night) and the HUD's own dot
+// row/label, so the two can never drift out of sync. Byte-identical to
+// the formula update() already used inline: base 5 (6 once Extra Life is
+// claimed) plus whatever the active contract's own missBonus grants
+// (Peaceful: +2; every other contract: +0 via contractMissBonus()'s own
+// ||0 default). Read-only -- never mutates S.misses/S.extraLifeAvailable/
+// anything else; purely a derived value for display and comparison.
+function currentMissLimit(){ return (S.extraLifeAvailable?6:5)+contractMissBonus(); }
 function contractCoinMult(){ return activeContract>=0?(CONTRACTS[activeContract].coinMult||1):1; }
 function contractSpawnMult(){ return activeContract>=0?(CONTRACTS[activeContract].spawnMult||1):1; }
 // Moonfall's own modest firefly-opportunity bump (MOONFALL_SPAWN_RATE_BONUS,
@@ -4593,6 +4612,8 @@ if(YT&&YT.game&&YT.game.loadData){
         if(d.upgrades.seenShopDiscovery===true)upgrades.seenShopDiscovery=true;
         if(d.upgrades.seenJournalDiscovery===true)upgrades.seenJournalDiscovery=true;
         if(d.upgrades.seenContractDiscovery===true)upgrades.seenContractDiscovery=true;
+        // E41: same flat-boolean load pattern.
+        if(d.upgrades.seenMissExplainer===true)upgrades.seenMissExplainer=true;
         if(d.upgrades.ownedJars&&typeof d.upgrades.ownedJars==='object'){ Object.keys(d.upgrades.ownedJars).forEach(k=>{ if(d.upgrades.ownedJars[k]===true)upgrades.ownedJars[k]=true; }); }
         if(typeof d.upgrades.equippedJar==='string')upgrades.equippedJar=d.upgrades.equippedJar;
         if(d.upgrades.ownedSkins&&typeof d.upgrades.ownedSkins==='object'){ Object.keys(d.upgrades.ownedSkins).forEach(k=>{ if(d.upgrades.ownedSkins[k]===true)upgrades.ownedJars[k==='classic'?'simple':k]=true; }); }
@@ -4708,7 +4729,12 @@ if(YT&&YT.game&&YT.game.loadData){
 }
 let hintStage=0; // 0=drag hint, 1=caught at least once
 // one-time onboarding hints — persist across replays (not reset by reset()) since they're only needed the first round ever
-let villageHintShown=false, refillHintShown=false, missHintShown=false;
+// E41: missHintShown (a session-only "first round ever" gate) is retired --
+// the miss toast it used to gate now fires on EVERY miss (see the E41
+// comment at its trigger site), and the genuinely one-time-ever richer
+// explanation is now upgrades.seenMissExplainer, a real PERSISTED flag
+// (survives reload), not a session-only let.
+let villageHintShown=false, refillHintShown=false;
 
 // ---------- first-night tutorial ----------
 // Isolated state machine (kept separate from every other onboarding flag
@@ -5022,7 +5048,7 @@ function reset(){
     bloomT:rand(24,34), bloomBanner:0, deliverT:0, deliverN:0,
     lightAnim:{},
     hintFade:(hintStage===0?1:0), shootT:rand(4,8), shots:[], aurora:0, constA:0, deliverHint:0, statuePulse:0, mothFlash:0, mothHint:0, seenMoth:false, seenShy:false, shyHint:0,
-    deliverExplainT:0, missHintT:0,
+    deliverExplainT:0, missHintT:0, missHintLeft:0, missHintExplain:false, // E41: carried alongside missHintT so drawHUD()'s banner draw reads the exact remaining count/variant captured at the moment of that specific miss, not a live recompute that could drift if drawn a frame later
     // moth-collision warning flash (always-on gameplay feedback, not
     // tutorial-gated -- see the "moth interrupt" block in update()) and the
     // three contextual tutorial hints (item 9) -- all simple decrementing
@@ -7027,7 +7053,6 @@ function update(dt){
         f.state='leaving'; f.vy=-30;
         S.misses++; sMiss(); puff(f.x,f.y,GLOW_M,5,26,0.9);
         breakChain(); // Lumora 2.0 Phase 2: missing is the ONLY thing that breaks a Glow Chain
-        if(!missHintShown){ missHintShown=true; S.missHintT=4; } // one-time reminder: fireflies drift off if kept waiting too long — first round only
         // Extra Life ("One More Chance"): missLimit is 5 normally, 6 once
         // Extra Life has been successfully claimed this round
         // (S.extraLifeAvailable) -- S.misses itself is NEVER touched/reset,
@@ -7038,7 +7063,27 @@ function update(dt){
         // D3: Peaceful's "Two extra misses" folds in here, on top of Extra
         // Life's own +1 -- both are additive headroom grants, not competing
         // systems, so they simply add rather than one overriding the other.
-        const missLimit=(S.extraLifeAvailable?6:5)+contractMissBonus();
+        const missLimit=currentMissLimit();
+        // E41 (Life/Miss HUD clarity): the small "Missed -- N left" toast --
+        // every miss, not gated to "first ever" (unlike the OLD static
+        // "a firefly drifted away" reminder this replaces, which really did
+        // only fire once per session) -- the remaining count changes each
+        // time, so this stays genuinely useful on every occurrence, not
+        // just the first. The FIRST miss a player EVER experiences (a real
+        // persisted flag, survives reload -- see upgrades initializer) gets
+        // a fuller two-line variant that also states the consequence
+        // ("Too many will end the night"); every other miss, this round or
+        // any future one, gets just the short count. Neither variant is a
+        // blocking modal -- both ride the exact same transient banner slot
+        // every other in-play hint already shares (see the priority chain
+        // in drawHUD()), so gameplay is never interrupted.
+        S.missHintLeft=Math.max(0,missLimit-S.misses);
+        if(!upgrades.seenMissExplainer){
+          upgrades.seenMissExplainer=true; persistUpgradesLocal(); saveProgress();
+          S.missHintT=4.2; S.missHintExplain=true;
+        } else {
+          S.missHintT=2.2; S.missHintExplain=false;
+        }
         if(S.misses>=missLimit){
           if(!S.extraLifeUsed&&upgrades.tutorialDone&&rewardedAdsAvailable()){
             S.extraLifeOfferOpen=true; // pauses simulation (see loop()'s update() gate); drawExtraLifeOffer() takes over the screen instead of drawOver()
@@ -9296,6 +9341,26 @@ function banner(txt,y,color,alpha){
   ctx.fillText(txt,W/2,y);
   ctx.globalAlpha=1;
 }
+// E41 (Life/Miss HUD clarity): the miss toast's own text -- S.missHintLeft
+// is captured once, at the exact moment of that specific miss (see the
+// trigger site in update()), not recomputed live here, so a slow-fading
+// banner can never silently drift from what actually happened. Singular/
+// plural handled explicitly ("1 miss left" vs "N misses left"); 0 is
+// grammatically "0 misses left" (standard English, same as "0 items").
+function missHintLabel(){ return 'Missed — '+S.missHintLeft+(S.missHintLeft===1?' miss left':' misses left'); }
+// One line every time ("Missed -- N left"), or two lines exactly once,
+// ever, for a player's genuinely first-ever miss (S.missHintExplain, set
+// alongside upgrades.seenMissExplainer at the trigger site) -- the second
+// line states the actual consequence in the game's own real terms ("Too
+// many will end the night"), not an invented one. Shares the exact same
+// non-blocking, non-modal transient-banner slot/fade timing every other
+// in-play hint already uses (same y=96 anchor, same Math.min(1,S.missHintT)
+// fade) -- this never pauses or interrupts gameplay, per direct instruction.
+function drawMissHintBanner(){
+  const a=Math.min(1,S.missHintT);
+  banner(missHintLabel(),96,'#f2b98e',a);
+  if(S.missHintExplain)banner('Too many will end the night.',122,'#f2b98e',a*0.85);
+}
 // D1 (Claude Design spec, section 4): the dedicated objective-complete
 // composite -- three lines (eyebrow / italic title / reward), centred at
 // (270,140) rather than the generic banner's y=96 slot, so it sits clear
@@ -9696,10 +9761,30 @@ function drawHUD(){
   ctx.font='600 30px Georgia,serif';
   ctx.fillStyle='#ffe9b8'; ctx.textAlign='left';
   ctx.fillText('✦ '+S.score,22,26);
-  for(let i=0;i<5;i++){
-    ctx.globalAlpha=i<S.misses?0.85:0.22;
-    ctx.fillStyle=i<S.misses?'#b98ec9':'#7b83a8';
-    ctx.beginPath(); ctx.arc(30+i*15,72,4,0,6.28); ctx.fill();
+  // E41 (Life/Miss HUD clarity): previously an unexplained, unlabeled row
+  // of exactly 5 dots -- real player confusion (misses vs lives vs some
+  // other mechanic was never stated), and genuinely WRONG once a contract
+  // granted extra misses (Peaceful's own +2): the old `i<5` loop and its
+  // `i<S.misses` fill test both silently assumed a hardcoded ceiling of 5,
+  // so a Peaceful night already at 5 misses (2 of Peaceful's 7 remaining)
+  // showed every dot lit as if the night were about to end. Fixed on both
+  // counts: currentMissLimit() (shared with the real ending check in
+  // update(), so this can never drift out of sync with it) drives how many
+  // dots are drawn, and a dot's fill now means "still available" -- lit =
+  // one miss left, dim = already used -- matching the explicit label above
+  // it and the plain-English reading "MISSES LEFT: these dots are what you
+  // have left," not an unexplained tally of mistakes made.
+  const missLimit=currentMissLimit(), missesLeft=Math.max(0,missLimit-S.misses);
+  ctx.font='600 9px Georgia,serif'; ctx.fillStyle='rgba(174,184,203,0.75)'; ctx.textAlign='left';
+  try{ ctx.letterSpacing='1.1px'; }catch(e){}
+  ctx.fillText('MISSES LEFT',22,66);
+  try{ ctx.letterSpacing='0px'; }catch(e){}
+  const dotsX=112; // clear of "MISSES LEFT" at 9px bold + letter-spacing (measured live, verified in the browser); fixed like every other dot/icon offset in this file rather than measured post-reset
+  for(let i=0;i<missLimit;i++){
+    const has=i<missesLeft;
+    ctx.globalAlpha=has?0.85:0.22;
+    ctx.fillStyle=has?'#b98ec9':'#7b83a8';
+    ctx.beginPath(); ctx.arc(dotsX+i*15,70,4,0,6.28); ctx.fill();
   }
   ctx.globalAlpha=1;
   if(!S.over)drawObjectivesHUD(); // Lumora 2.0 Phase 1 -- hides itself once Night Complete has its own summary
@@ -9737,7 +9822,7 @@ function drawHUD(){
   if(eventAnnounceActive()){
     // suppressed -- nothing in the shared slot this frame
   } else if(S.deliverExplainT>0)banner('jar\'s empty — go catch more fireflies!',96,'#ffe9b8',Math.min(1,S.deliverExplainT));
-  else if(S.missHintT>0)banner('a firefly drifted away — don\'t keep them waiting',96,'#f2b98e',Math.min(1,S.missHintT));
+  else if(S.missHintT>0)drawMissHintBanner();
   else if(S.bloomBanner>0)banner('a firefly bloom!',96,'#ffe9b8',S.bloomBanner);
   else if(S.mothFlash>0)banner('a moth startled your firefly!',96,'#dcb0d0',S.mothFlash);
   else if(jarNearAnyMoth())banner('⚠ moth nearby — keep your jar away',96,'#f2c199',0.75+0.2*Math.sin(S.t*3));
