@@ -6940,6 +6940,18 @@ function keyDir(k){
 }
 window.addEventListener('keydown',e=>{
   if(e.key==='Escape'){ // MUST NOT preventDefault on Esc — Safari fullscreen relies on it reaching the browser
+    // Deep-audit fix: an interstitial-gated Restart/Go Home request is
+    // already in flight (pauseTransitionPending) -- pointerdown's own
+    // paused+user block checks this FIRST, ahead of even pauseConfirm (see
+    // its own comment), so Esc must match or it can silently defeat that
+    // guard: clearing pauseConfirm here while the deferred callback is
+    // still pending would hide the "Requesting…" modal (drawConfirmModal
+    // only draws while pauseConfirm is still set) without cancelling the
+    // actual restart/Go Home, which fires anyway once the ad request
+    // resolves -- Esc would visually look like "cancel" but the action
+    // would happen a moment later regardless. Swallow Esc for the same one
+    // async gap pointerdown already swallows every tap for.
+    if(paused&&pauseReason==='user'&&pauseTransitionPending)return;
     if(paused&&pauseReason==='user'&&pauseConfirm)pauseConfirm=null; // Esc cancels the confirm modal first, same as tapping Cancel — doesn't fall through to resuming in the same keystroke
     else if(paused&&pauseReason==='user')resumeGame();
     else if(showWelcomeBack)showWelcomeBack=false;

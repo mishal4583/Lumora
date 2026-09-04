@@ -11367,6 +11367,68 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// Deep audit fix: Esc must respect pauseTransitionPending, same as
+// pointerdown's own guard -- otherwise Esc can clear pauseConfirm (hiding
+// the "Requesting…" modal) while the deferred Restart/Go Home callback is
+// still pending, making Esc look like a cancel when the action fires
+// anyway once the in-flight interstitial resolves.
+// =====================================================================
+scenario('audit-escape-pause-transition-pending', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 500, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple' } }));
+return __tick(5).then(function(){
+  upgrades.tutorialDone = true;
+  var interstitialCalls = [];
+  ytgame.ads = {
+    requestRewardedAd: function(){ return Promise.resolve(false); },
+    requestInterstitialAd: function(){ interstitialCalls.push(1); return Promise.resolve(); }
+  };
+
+  // ---- Restart: Esc during the in-flight interstitial request must NOT
+  // clear pauseConfirm (which would hide the modal without actually
+  // cancelling the pending restart) ----
+  reset(); screen = 'play'; paused = false; coins = 500;
+  var coinsBefore = coins, nightNumBefore = nightNumber;
+  pauseGame('user');
+  __fire(cv, 'pointerdown', __fakeEvent(RESTART_BTN.x, RESTART_BTN.y));
+  var sBeforeConfirm = S;
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('setup: mid-request -- pauseTransitionPending is set, restart has not happened yet', pauseTransitionPending === true && S === sBeforeConfirm && paused === true);
+  __fire(window, 'keydown', { key: 'Escape', preventDefault: function(){} });
+  __check('Esc mid-request: does NOT clear pauseConfirm out from under the in-flight request (modal stays showing "Requesting…", not silently dismissed)', pauseConfirm === 'restart');
+  __check('Esc mid-request: does NOT resume the game either -- still paused, still mid-request', paused === true && pauseTransitionPending === true);
+  return __tick(5).then(function(){
+    __check('Restart still completes exactly once after the ad resolves, unaffected by the Esc press mid-flight', S !== sBeforeConfirm && paused === false && pauseReason === null);
+    __check('permanent progression untouched', coins === coinsBefore && nightNumber === nightNumBefore);
+    __check('pauseTransitionPending and pauseConfirm both cleared after completion', pauseTransitionPending === false && pauseConfirm === null);
+
+    // ---- Once genuinely idle again (no pending request), Esc on a
+    // freshly-opened confirm modal still cancels it exactly as before --
+    // confirms the fix didn't regress the normal Esc-cancels-modal path ----
+    var callsBeforeNormal = interstitialCalls.length;
+    reset(); screen = 'play'; paused = false;
+    pauseGame('user');
+    __fire(cv, 'pointerdown', __fakeEvent(RESTART_BTN.x, RESTART_BTN.y));
+    __check('normal case setup: confirm modal open, no request in flight', pauseConfirm === 'restart' && pauseTransitionPending === false);
+    __fire(window, 'keydown', { key: 'Escape', preventDefault: function(){} });
+    __check('normal case: Esc still cancels an idle confirm modal exactly as before (no regression)', pauseConfirm === null && paused === true);
+    __check('normal case: no interstitial was requested -- Esc cancelled before Confirm was ever tapped', interstitialCalls.length === callsBeforeNormal);
+
+    // ---- Go Home direct-tap (empty jar) path: same mid-request Esc guard ----
+    reset(); screen = 'play'; paused = false;
+    S.carried = [];
+    pauseGame('user');
+    __fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y));
+    __check('Go Home setup: mid-request, no confirm modal for the direct-tap path', pauseTransitionPending === true && screen === 'play' && paused === true);
+    __fire(window, 'keydown', { key: 'Escape', preventDefault: function(){} });
+    __check('Esc mid-request (Go Home direct-tap): still paused, still mid-request -- Esc does not resume or otherwise disrupt the in-flight request', paused === true && pauseTransitionPending === true && screen === 'play');
+    return __tick(5).then(function(){
+      __check('Go Home still completes exactly once after the ad resolves', screen === 'title' && paused === false);
+    });
+  });
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
