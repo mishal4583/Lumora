@@ -5073,6 +5073,18 @@ let jarCompareOpen=false;
 // already-OWNED jar's plain equip tap -- see Case 8's own requirement
 // that owned-jar behavior must not change).
 let jarPurchaseConfirm=null;
+// E48: the exact same purchase-confirmation pattern as jarPurchaseConfirm
+// directly above, applied to Trails and Decor -- each identical bug shape
+// (tapping an unowned/locked item bought it immediately, no confirmation) at
+// two more tap sites (trailCardRects() below, and the generic decor Buy-loop
+// below). Two separate slots, not one shared one, since they gate two
+// genuinely different catalogs/purchase functions (TRAIL_COLORS/
+// tryBuyOrEquipTrail vs SHOP_ITEMS/tryPurchase) -- but a jar/trail/decor
+// confirmation can never be open simultaneously in practice (each only ever
+// opens from its own tab's own tap handler). Session-level shop UI state,
+// same category as jarPurchaseConfirm -- not S, not persisted, cleared
+// defensively in reset() and on every shop-entry point, same discipline.
+let trailPurchaseConfirm=null, decorPurchaseConfirm=null;
 // E33 (New Player Discovery): the ONE shared slot for a one-time
 // "discovery card" -- a small dismissible overlay for a genuinely major,
 // one-time-ever explanation (the best-night village mechanic, a new
@@ -5285,6 +5297,7 @@ function reset(){
   pauseTransitionPending=false; // E46: same defensive clear as pauseConfirm above -- this is exactly what the deferred Restart callback itself calls reset() from, so it's already false by the time reset() runs on that path; defensive for any other path into reset()
   prestigeConfirmOpen=false; // Phase 12: same defensive clear as pauseConfirm above
   jarPurchaseConfirm=null; // E45: same defensive clear as pauseConfirm/prestigeConfirmOpen above -- a stray open jar-purchase confirmation can't survive into an unrelated round
+  trailPurchaseConfirm=null; decorPurchaseConfirm=null; // E48: same defensive clear, same reasoning, for the new Trail/Decor confirmations
   discoveryCard=null; // E33: same defensive clear as pauseConfirm/prestigeConfirmOpen above -- a stray open discovery card can't survive into an unrelated round
   villageDetailsDragActive=false; // E20: same defensive clear as pointer.down above -- a fresh round should never inherit a mid-drag scroll gesture
   // Lumora 2.0 Phase 1: the ONE place objective generation/restoration is
@@ -6681,7 +6694,34 @@ cv.addEventListener('pointerdown',e=>{
       // purchases anything.
       return;
     }
-    if(dist(p.x,p.y,SHOP_CLOSE_BTN.x,SHOP_CLOSE_BTN.y)<=hitR(SHOP_CLOSE_BTN)){ screen=shopFrom; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
+    // E48: Trail/Decor purchase confirmations -- same "owns all input, Cancel/
+    // Action respond, anything else is fully swallowed (not dismissed)"
+    // discipline as jarPurchaseConfirm right above. Two separate blocks (not
+    // folded into one) since each confirms against a different catalog/
+    // purchase function, but the shape is otherwise identical.
+    if(trailPurchaseConfirm){
+      if(inRect(p.x,p.y,hitRectH(CONFIRM_CANCEL_BTN)))trailPurchaseConfirm=null; // Cancel -- no purchase, trail stays unowned, coins unchanged
+      else if(inRect(p.x,p.y,hitRectH(CONFIRM_ACTION_BTN))){
+        // one-shot: clear BEFORE calling tryBuyOrEquipTrail(), same "check
+        // right before mutation" discipline as jarPurchaseConfirm above.
+        const key=trailPurchaseConfirm; trailPurchaseConfirm=null;
+        tryBuyOrEquipTrail(key); // the ONE function that actually deducts coins/grants ownership, unchanged
+      }
+      // else: tap landed elsewhere in/around the modal -- swallowed, not
+      // dismissed. Never purchases anything.
+      return;
+    }
+    if(decorPurchaseConfirm){
+      if(inRect(p.x,p.y,hitRectH(CONFIRM_CANCEL_BTN)))decorPurchaseConfirm=null; // Cancel -- no purchase, item stays unowned, coins unchanged
+      else if(inRect(p.x,p.y,hitRectH(CONFIRM_ACTION_BTN))){
+        const key=decorPurchaseConfirm; decorPurchaseConfirm=null;
+        tryPurchase(key); // the ONE function that actually deducts coins/grants ownership, unchanged -- covers deco/fountain/statue alike (statue's own equip step stays a separate, later, deliberate tap, unaffected by this)
+      }
+      // else: tap landed elsewhere in/around the modal -- swallowed, not
+      // dismissed. Never purchases anything.
+      return;
+    }
+    if(dist(p.x,p.y,SHOP_CLOSE_BTN.x,SHOP_CLOSE_BTN.y)<=hitR(SHOP_CLOSE_BTN)){ screen=shopFrom; jarCompareOpen=false; jarPurchaseConfirm=null; trailPurchaseConfirm=null; decorPurchaseConfirm=null; return; }
     // E43: 7 tabs side by side, not stacked -- height-only padding can't
     // make one tab intrude on its horizontal neighbor.
     for(const tab of shopTabRects()){ if(inRect(p.x,p.y,hitRectH(tab))){ shopTab=tab.key; return; } }
@@ -6772,7 +6812,26 @@ cv.addEventListener('pointerdown',e=>{
       // separate, deliberate taps -- this keeps that true on the FIRST
       // purchase, not just on subsequent ones.
       const wasStatueOwned=upgrades.statueOwned;
-      itemsForVendor('decor').forEach((item,i)=>{ if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(i)))))tryPurchase(item.key); });
+      // E48: an unowned/unlocked item's Buy tap only opens the purchase
+      // confirmation now -- it no longer calls tryPurchase() directly (the
+      // exact same bug shape jars had pre-E45: a single accidental tap
+      // could spend coins with no confirmation). An OWNED item's tap is a
+      // no-op here exactly as before (drawDecorCard()/drawStatueCard() draw
+      // no Buy button at all once owned, so there's nothing to confirm --
+      // shopItemOwned() short-circuits before ever touching
+      // decorPurchaseConfirm, matching Case 8's "owned behavior must not
+      // change" precedent). A still-LOCKED item (only the statue,
+      // pre-100%-restoration) also shows no Buy button, so no confirmation
+      // opens for it either -- same "nothing to confirm yet" outcome
+      // tryPurchase()'s own locked() check already produced, just checked
+      // explicitly up front now instead of inside the (no longer called
+      // here) purchase function.
+      itemsForVendor('decor').forEach((item,i)=>{
+        if(!inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(i)))))return;
+        if(shopItemOwned(item))return;
+        if(item.locked&&item.locked())return;
+        decorPurchaseConfirm=item.key;
+      });
       // Same rects drawStatueCard() itself draws from, single source of
       // truth as usual -- the "Equip" button uses the standard
       // cardButtonRect() (index 2 = the statue's own itemsForVendor('decor')
@@ -6789,7 +6848,17 @@ cv.addEventListener('pointerdown',e=>{
       // the Aurora Trail card is deliberately NOT hit-tested here at all
       // (see drawAuroraTrailCard()): it's informational only, never
       // purchasable, per direct instruction.
-      for(const rect of trailCardRects()){ if(inRect(p.x,p.y,rect))tryBuyOrEquipTrail(rect.key); }
+      // E48: an OWNED trail's tap still equips immediately (unchanged, same
+      // "owned behavior must not change" precedent as jars/decor above),
+      // but an UNOWNED trail's tap no longer calls tryBuyOrEquipTrail()
+      // (and therefore never spends coins) directly -- it only opens the
+      // purchase confirmation. Existing prices/eligibility are untouched;
+      // only WHEN the actual purchase call happens has changed.
+      for(const rect of trailCardRects()){
+        if(!inRect(p.x,p.y,rect))continue;
+        if(upgrades.ownedTrails[rect.key])tryBuyOrEquipTrail(rect.key);
+        else trailPurchaseConfirm=rect.key;
+      }
     }
     return;
   }
@@ -6803,7 +6872,7 @@ cv.addEventListener('pointerdown',e=>{
     // neighbor. Was raw h:64, still undershoots 48dp at small mobile scale.
     for(const btn of titleNavRects()){
       if(inRect(p.x,p.y,hitRectH(btn))){
-        if(btn.key==='shop'){ shopFrom='title'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; }
+        if(btn.key==='shop'){ shopFrom='title'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; trailPurchaseConfirm=null; decorPurchaseConfirm=null; }
         // Glowkeeper Story pass: from title, the Journal always opens
         // fresh at the chapter list (not mid-chapter from a previous
         // village-link visit) -- journalReading=null makes that explicit
@@ -6857,7 +6926,7 @@ cv.addEventListener('pointerdown',e=>{
       // the pointerdown fallthrough at the bottom of this whole block), so
       // nothing else stops SHOP_BTN_OVER's own padding from growing up
       // into its visibly-drawn area if left uncapped.
-      if(inRect(p.x,p.y,hitRectHCapped(SHOP_BTN_OVER,SHOP_BTN_OVER.y-playBtn.y))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
+      if(inRect(p.x,p.y,hitRectHCapped(SHOP_BTN_OVER,SHOP_BTN_OVER.y-playBtn.y))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; trailPurchaseConfirm=null; decorPurchaseConfirm=null; return; }
       // "Double the Glow" -- same carve-out pattern as SHOP_BTN_OVER above --
       // only drawn/tappable once the tutorial is done, the SDK actually
       // offers rewarded ads (see drawOver()), and this night earned
@@ -6956,6 +7025,8 @@ window.addEventListener('keydown',e=>{
     else if(paused&&pauseReason==='user')resumeGame();
     else if(showWelcomeBack)showWelcomeBack=false;
     else if(screen==='shop'&&jarPurchaseConfirm)jarPurchaseConfirm=null; // E45: Esc cancels the purchase confirmation first, same two-step precedent as jarCompareOpen/pauseConfirm below -- never purchases, doesn't fall through to closing the shop in the same keystroke
+    else if(screen==='shop'&&trailPurchaseConfirm)trailPurchaseConfirm=null; // E48: same two-step precedent as jarPurchaseConfirm above -- never purchases, doesn't fall through to closing the shop in the same keystroke
+    else if(screen==='shop'&&decorPurchaseConfirm)decorPurchaseConfirm=null; // E48: same two-step precedent as jarPurchaseConfirm above -- never purchases, doesn't fall through to closing the shop in the same keystroke
     else if(screen==='shop'&&jarCompareOpen)jarCompareOpen=false; // Aurora shop-presentation pass: Esc closes the compare modal first, same two-step precedent as pauseConfirm above -- doesn't fall through to closing the shop in the same keystroke
     else if(screen==='shop')screen=shopFrom; // SHOULD: Esc closes modals — every modal screen is
     else if(screen==='village')screen='title';
@@ -13565,6 +13636,30 @@ function drawShop(){
   ctx.textBaseline='alphabetic';
   drawCoinBalancePill(W-22,H-30,coins,WS_GOLD_PRICE);
   ctx.textAlign='center'; ctx.textBaseline='top';
+  // E48: Trail/Decor purchase confirmations -- reuses the EXACT same shared
+  // drawConfirmModal()/CONFIRM_CANCEL_BTN/CONFIRM_ACTION_BTN construction as
+  // the jar purchase confirmation above, per direct instruction to reuse the
+  // existing confirmation-modal architecture and visual style rather than a
+  // new dialog design. Drawn LAST, after every other Workshop element on
+  // this screen (tabs, cards, Favor/Mystery Chest/Cosmetic Trial/Daily Deal,
+  // the coin pill) -- unlike jarPurchaseConfirm's own draw call (nested
+  // inside the Jars-tab branch, safe there only because that tab's own
+  // content already fills the screen and leaves no room for those optional
+  // cards to render at all), the Trails tab genuinely CAN show Favor/Mystery
+  // Chest/Cosmetic Trial/Daily Deal cards below the trail grid -- drawing
+  // the confirmation here, after all of them, guarantees its full-screen dim
+  // backdrop always ends up on top, exactly as a modal should, regardless of
+  // which optional cards happen to be present on a given tab/day.
+  if(trailPurchaseConfirm){
+    const t=TRAIL_COLORS.find(t=>t.key===trailPurchaseConfirm);
+    if(t)drawConfirmModal('Purchase '+t.name+'?','Cost: '+t.price.toLocaleString()+' coins. This will spend your coins.','Purchase');
+    else trailPurchaseConfirm=null; // defensive -- an unrecognized key can never leave a dangling open modal with nothing to confirm
+  }
+  if(decorPurchaseConfirm){
+    const item=SHOP_ITEMS[decorPurchaseConfirm];
+    if(item)drawConfirmModal('Purchase '+item.name+'?','Cost: '+item.price.toLocaleString()+' coins. This will spend your coins.','Purchase');
+    else decorPurchaseConfirm=null; // defensive, same reasoning as above
+  }
 }
 
 // ---------- daily quests (Stage 3 Part C) ----------

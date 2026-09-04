@@ -1036,12 +1036,16 @@ upgrades.deco = false; upgrades.fountain = false; coins = 3500; // E16: enough f
 // legitimately leave the tier-line fields non-zero, this check only cares that
 // THIS purchase doesn't touch them, not what their residual value happens to be
 var jarCapTiersBefore = JSON.stringify(upgrades.jarCapTiers), reachTiersBefore = JSON.stringify(upgrades.reachTiers), magnetReachTiersBefore = JSON.stringify(upgrades.magnetReachTiers), durationTiersBefore = JSON.stringify(upgrades.durationTiers), lightTierBefore = upgrades.lightTier;
-screen = 'shop'; shopFrom = 'title'; shopTab = 'decor';
+screen = 'shop'; shopFrom = 'title'; shopTab = 'decor'; decorPurchaseConfirm = null;
 var decorBtn0 = cardButtonRect(upgradeCardRect(0)), decorBtn1 = cardButtonRect(upgradeCardRect(1));
 __fire(cv, 'pointerdown', __fakeEvent(decorBtn0.x, decorBtn0.y));
-__check('clicking item slot 0\\'s buy button purchases Garden Lanterns specifically, not the fountain', upgrades.deco === true && upgrades.fountain === false, 'deco=' + upgrades.deco + ' fountain=' + upgrades.fountain);
+__check('clicking item slot 0\\'s buy button opens the purchase confirmation for Garden Lanterns specifically (E48: confirmation-gated, no longer an immediate purchase)', decorPurchaseConfirm === 'deco' && upgrades.deco === false);
+__fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+__check('confirming slot 0\\'s purchase buys Garden Lanterns specifically, not the fountain', upgrades.deco === true && upgrades.fountain === false, 'deco=' + upgrades.deco + ' fountain=' + upgrades.fountain);
 __fire(cv, 'pointerdown', __fakeEvent(decorBtn1.x, decorBtn1.y));
-__check('clicking item slot 1\\'s buy button purchases the fountain specifically, leaving the already-owned lanterns untouched', upgrades.deco === true && upgrades.fountain === true);
+__check('clicking item slot 1\\'s buy button opens the purchase confirmation for the fountain specifically', decorPurchaseConfirm === 'fountain' && upgrades.fountain === false);
+__fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+__check('confirming slot 1\\'s purchase buys the fountain specifically, leaving the already-owned lanterns untouched', upgrades.deco === true && upgrades.fountain === true);
 __check('owning both Decor items still leaves every per-jar stat and Light Value untouched', JSON.stringify(upgrades.jarCapTiers) === jarCapTiersBefore && JSON.stringify(upgrades.reachTiers) === reachTiersBefore && JSON.stringify(upgrades.magnetReachTiers) === magnetReachTiersBefore && JSON.stringify(upgrades.durationTiers) === durationTiersBefore && upgrades.lightTier === lightTierBefore);
 
 // persistence survives reload, same defensive pattern as every other upgrade field
@@ -1155,14 +1159,16 @@ upgrades.statueOwned = false; upgrades.statueEquipped = false;
 // tryPurchase()/tryEquipStatue() functions directly, since that's
 // specifically where the bug lived.
 best = 25; coins = 12000;
-screen = 'shop'; shopFrom = 'title'; shopTab = 'decor'; jarCompareOpen = false;
+screen = 'shop'; shopFrom = 'title'; shopTab = 'decor'; jarCompareOpen = false; decorPurchaseConfirm = null;
 var statueBtn = cardButtonRect(upgradeCardRect(2));
 __fire(cv, 'pointerdown', __fakeEvent(statueBtn.x, statueBtn.y));
-__check('the first tap on the statue\\'s button purchases it but does NOT auto-equip it in the same click', upgrades.statueOwned === true && upgrades.statueEquipped === false && coins === 0, 'owned=' + upgrades.statueOwned + ' equipped=' + upgrades.statueEquipped + ' coins=' + coins);
+__check('the first tap on the statue\\'s button opens the purchase confirmation (E48: confirmation-gated, no longer an immediate purchase) -- not owned or equipped yet', decorPurchaseConfirm === 'statue' && upgrades.statueOwned === false && upgrades.statueEquipped === false);
+__fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+__check('confirming the purchase buys the statue but does NOT auto-equip it in the same click', upgrades.statueOwned === true && upgrades.statueEquipped === false && coins === 0, 'owned=' + upgrades.statueOwned + ' equipped=' + upgrades.statueEquipped + ' coins=' + coins);
 __fire(cv, 'pointerdown', __fakeEvent(statueBtn.x, statueBtn.y));
-__check('a second tap on the same spot, now that it is owned, equips it', upgrades.statueEquipped === true);
+__check('a tap on the same spot, now that it is owned, equips it immediately -- no confirmation for an already-owned item, same "owned behavior must not change" precedent as jars/trails', upgrades.statueEquipped === true && decorPurchaseConfirm === null);
 __fire(cv, 'pointerdown', __fakeEvent(statueBtn.x, statueBtn.y));
-__check('a third tap toggles it back off (the same EQUIP/EQUIPPED button is a real toggle through the real click path too)', upgrades.statueEquipped === false);
+__check('a further tap toggles it back off (the same EQUIP/EQUIPPED button is a real toggle through the real click path too)', upgrades.statueEquipped === false);
 upgrades.statueOwned = false; upgrades.statueEquipped = false; // leave clean for whatever runs next
 
 // ===== First-Night Tutorial ==================================================
@@ -11426,6 +11432,215 @@ return __tick(5).then(function(){
       __check('Go Home still completes exactly once after the ad resolves', screen === 'title' && paused === false);
     });
   });
+});
+`);
+
+// =====================================================================
+// E48: Trail and Decor purchase confirmations -- the exact same fix as
+// E45's jar purchase confirmation, applied to the two remaining Workshop
+// tap sites that could still buy something on a bare accidental tap.
+// =====================================================================
+scenario('e48-trail-purchase-confirmation', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true, ownedTrails: { none: true }, equippedTrail: 'none' } }));
+return __tick(5).then(function(){
+  screen = 'shop'; shopFrom = 'title'; shopTab = 'trails'; trailPurchaseConfirm = null;
+  coins = 20000;
+  var goldRect = trailCardRects().filter(function(r){ return r.key === 'gold'; })[0];
+  var violetRect = trailCardRects().filter(function(r){ return r.key === 'violet'; })[0];
+  __check('setup: Golden trail is priced 2000, matching the existing economy (unchanged by this pass)', TRAIL_COLORS.filter(function(t){ return t.key === 'gold'; })[0].price === 2000);
+
+  // ---- 1: accidental tap opens the confirmation only, no purchase ----
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __check('1: a tap on a locked/unowned trail opens the confirmation, not an immediate purchase', trailPurchaseConfirm === 'gold' && upgrades.ownedTrails.gold !== true && coins === 20000);
+
+  // ---- 2: Cancel -- no purchase ----
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_CANCEL_BTN.x, CONFIRM_CANCEL_BTN.y));
+  __check('2: Cancel closes the confirmation without purchasing', trailPurchaseConfirm === null && upgrades.ownedTrails.gold !== true && coins === 20000);
+
+  // ---- 3: tap outside the dialog -- never purchases ----
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __check('3 setup: confirmation reopened', trailPurchaseConfirm === 'gold');
+  __fire(cv, 'pointerdown', __fakeEvent(20, 20));
+  __check('3: a tap outside the confirmation dialog never purchases anything', upgrades.ownedTrails.gold !== true && coins === 20000);
+  trailPurchaseConfirm = null;
+
+  // ---- 4: explicit Purchase deducts the exact existing price once ----
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('4: explicit Purchase deducts exactly the existing price once and grants ownership+equips', coins === 20000 - 2000 && upgrades.ownedTrails.gold === true && upgrades.equippedTrail === 'gold', 'coins=' + coins);
+  __check('4 (b): the confirmation closes after a real purchase', trailPurchaseConfirm === null);
+
+  // ---- 5: rapid Purchase taps -- one purchase only ----
+  upgrades.ownedTrails = { none: true }; upgrades.equippedTrail = 'none'; coins = 20000;
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y)); // rapid second tap -- the modal is already closed, this is a no-op
+  __check('5: rapid repeated taps on Purchase deduct the price exactly once', coins === 20000 - 2000, 'coins=' + coins);
+
+  // ---- 6: rapid double-tap -- one confirmation, no purchase, and switching to a DIFFERENT trail's card while it's open changes nothing ----
+  upgrades.ownedTrails = { none: true }; upgrades.equippedTrail = 'none'; coins = 20000; trailPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(violetRect.x, violetRect.y)); // lands on the now-open confirmation modal, swallowed -- not Violet's own card underneath
+  __check('6: attempting to tap a different trail card while a confirmation is open does not change selection or purchase anything', trailPurchaseConfirm === 'gold' && coins === 20000 && upgrades.ownedTrails.gold !== true && upgrades.ownedTrails.violet !== true);
+  trailPurchaseConfirm = null;
+
+  // ---- 7: insufficient funds -- Purchase is a safe no-op, no partial/negative state ----
+  coins = 100;
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('7: Purchase with insufficient coins does not deduct, grant ownership, or go negative', coins === 100 && upgrades.ownedTrails.gold !== true, 'coins=' + coins);
+
+  // ---- 8: an OWNED trail never opens the confirmation -- unchanged equip behavior ----
+  upgrades.ownedTrails = { none: true, gold: true }; upgrades.equippedTrail = 'none'; coins = 20000; trailPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __check('8: tapping an ALREADY-OWNED trail never opens the purchase confirmation', trailPurchaseConfirm === null);
+  __check('8 (b): it still equips immediately, exactly as before this fix', upgrades.equippedTrail === 'gold' && coins === 20000);
+
+  // ---- 9: persistence -- a real purchase is actually saved, no double-charge on reload ----
+  upgrades.ownedTrails = { none: true }; upgrades.equippedTrail = 'none'; coins = 20000;
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  var coinsAfterPurchase = coins;
+  var savedPayload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('9: the purchase is actually persisted to the saved payload -- ownership and the exact post-purchase balance both', savedPayload.upgrades.ownedTrails.gold === true && savedPayload.coins === coinsAfterPurchase);
+
+  // ---- 10: the confirmation cannot leak a tap through to Shop Close (or vice versa) ----
+  upgrades.ownedTrails = { none: true }; coins = 20000; trailPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(violetRect.x, violetRect.y));
+  __check('10 setup: a confirmation is open (Violet)', trailPurchaseConfirm === 'violet');
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_CLOSE_BTN.x, SHOP_CLOSE_BTN.y));
+  __check('10: Shop Close is swallowed while the confirmation owns input -- never closes the shop out from under an open dialog, never purchases either', screen === 'shop' && trailPurchaseConfirm === 'violet' && upgrades.ownedTrails.violet !== true);
+  trailPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_CLOSE_BTN.x, SHOP_CLOSE_BTN.y));
+  __check('10 (b): Shop Close works normally once the confirmation is actually closed', screen === 'title' && trailPurchaseConfirm === null);
+
+  // ---- Esc keyboard equivalent: cancels the confirmation, never purchases ----
+  screen = 'shop'; shopTab = 'trails'; coins = 20000; upgrades.ownedTrails = { none: true };
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __fire(window, 'keydown', { key: 'Escape', preventDefault: function(){} });
+  __check('Esc cancels the trail purchase confirmation without purchasing, same as tapping Cancel', trailPurchaseConfirm === null && upgrades.ownedTrails.gold !== true && coins === 20000);
+
+  // ---- reset() defensively clears a stray open confirmation ----
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __check('setup: confirmation open before reset()', trailPurchaseConfirm === 'gold');
+  reset();
+  __check('reset() defensively clears a stray open trail purchase confirmation', trailPurchaseConfirm === null);
+
+  // ---- the confirmation cannot accidentally trigger any other purchase/ad system ----
+  screen = 'shop'; shopTab = 'trails'; coins = 20000; upgrades.ownedTrails = { none: true }; trailPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(goldRect.x, goldRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('purchase completes with no other purchase/ad system accidentally triggered', upgrades.ownedTrails.gold === true && workshopFavorPending === false && mysteryChestPending === false && almostAffordablePending === false && cosmeticTrialPending === false);
+});
+`);
+
+scenario('e48-decor-purchase-confirmation', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true, deco: false, fountain: false, statueOwned: false } }));
+return __tick(5).then(function(){
+  screen = 'shop'; shopFrom = 'title'; shopTab = 'decor'; decorPurchaseConfirm = null;
+  coins = 20000;
+  var decoRect = cardButtonRect(upgradeCardRect(0));
+  var fountainRect = cardButtonRect(upgradeCardRect(1));
+  var statueRect = cardButtonRect(upgradeCardRect(2));
+  __check('setup: Garden Lanterns priced 1000, Village Fountain priced 2500, matching the existing economy (unchanged by this pass)', SHOP_ITEMS.deco.price === 1000 && SHOP_ITEMS.fountain.price === 2500);
+
+  // ---- 1: accidental tap opens the confirmation only, no purchase ----
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __check('1: a tap on unowned Garden Lanterns opens the confirmation, not an immediate purchase', decorPurchaseConfirm === 'deco' && upgrades.deco !== true && coins === 20000);
+
+  // ---- 2: Cancel -- no purchase ----
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_CANCEL_BTN.x, CONFIRM_CANCEL_BTN.y));
+  __check('2: Cancel closes the confirmation without purchasing', decorPurchaseConfirm === null && upgrades.deco !== true && coins === 20000);
+
+  // ---- 3: tap outside the dialog -- never purchases ----
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __check('3 setup: confirmation reopened', decorPurchaseConfirm === 'deco');
+  __fire(cv, 'pointerdown', __fakeEvent(20, 20));
+  __check('3: a tap outside the confirmation dialog never purchases anything', upgrades.deco !== true && coins === 20000);
+  decorPurchaseConfirm = null;
+
+  // ---- 4: explicit Purchase deducts the exact existing price once ----
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('4: explicit Purchase deducts exactly the existing price once and grants ownership', coins === 20000 - 1000 && upgrades.deco === true, 'coins=' + coins);
+  __check('4 (b): the confirmation closes after a real purchase', decorPurchaseConfirm === null);
+
+  // ---- 5: rapid Purchase taps -- one purchase only ----
+  upgrades.deco = false; coins = 20000;
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('5: rapid repeated taps on Purchase deduct the price exactly once', coins === 20000 - 1000, 'coins=' + coins);
+
+  // ---- 6: rapid double-tap -- one confirmation, no purchase, and tapping a DIFFERENT decor item while it's open changes nothing ----
+  upgrades.deco = false; coins = 20000; decorPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(fountainRect.x, fountainRect.y)); // lands on the now-open confirmation modal, swallowed
+  __check('6: attempting to tap a different decor item while a confirmation is open does not change selection or purchase anything', decorPurchaseConfirm === 'deco' && coins === 20000 && upgrades.deco !== true && upgrades.fountain !== true);
+  decorPurchaseConfirm = null;
+
+  // ---- 7: insufficient funds ----
+  coins = 100;
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('7: Purchase with insufficient coins does not deduct, grant ownership, or go negative', coins === 100 && upgrades.deco !== true, 'coins=' + coins);
+
+  // ---- 8: an OWNED decor item never opens the confirmation (no Buy button there at all, same as before) ----
+  upgrades.deco = true; coins = 20000; decorPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __check('8: tapping an ALREADY-OWNED decor item never opens the purchase confirmation', decorPurchaseConfirm === null && coins === 20000);
+
+  // ---- 8 (b): a LOCKED decor item (the statue, pre-100%-restoration) never opens a confirmation either ----
+  __check('8 (b) setup: the statue is genuinely locked in this fresh state', SHOP_ITEMS.statue.locked());
+  __fire(cv, 'pointerdown', __fakeEvent(statueRect.x, statueRect.y));
+  __check('8 (b): tapping a LOCKED item never opens the purchase confirmation (no Buy button drawn there yet, same as before)', decorPurchaseConfirm === null && upgrades.statueOwned !== true && coins === 20000);
+
+  // ---- 9: persistence ----
+  upgrades.deco = false; coins = 20000;
+  __fire(cv, 'pointerdown', __fakeEvent(decoRect.x, decoRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  var coinsAfterPurchase = coins;
+  var savedPayload = JSON.parse(__spy.saveDataCalls[__spy.saveDataCalls.length - 1]);
+  __check('9: the purchase is actually persisted to the saved payload -- ownership and the exact post-purchase balance both', savedPayload.upgrades.deco === true && savedPayload.coins === coinsAfterPurchase);
+
+  // ---- 10: the confirmation cannot leak a tap through to Shop Close (or vice versa) ----
+  upgrades.fountain = false; coins = 20000; decorPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(fountainRect.x, fountainRect.y));
+  __check('10 setup: a confirmation is open (Fountain)', decorPurchaseConfirm === 'fountain');
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_CLOSE_BTN.x, SHOP_CLOSE_BTN.y));
+  __check('10: Shop Close is swallowed while the confirmation owns input', screen === 'shop' && decorPurchaseConfirm === 'fountain' && upgrades.fountain !== true);
+  decorPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(SHOP_CLOSE_BTN.x, SHOP_CLOSE_BTN.y));
+  __check('10 (b): Shop Close works normally once the confirmation is actually closed', screen === 'title' && decorPurchaseConfirm === null);
+
+  // ---- Esc keyboard equivalent ----
+  screen = 'shop'; shopTab = 'decor'; coins = 20000; upgrades.fountain = false;
+  __fire(cv, 'pointerdown', __fakeEvent(fountainRect.x, fountainRect.y));
+  __fire(window, 'keydown', { key: 'Escape', preventDefault: function(){} });
+  __check('Esc cancels the decor purchase confirmation without purchasing, same as tapping Cancel', decorPurchaseConfirm === null && upgrades.fountain !== true && coins === 20000);
+
+  // ---- reset() defensively clears a stray open confirmation ----
+  __fire(cv, 'pointerdown', __fakeEvent(fountainRect.x, fountainRect.y));
+  __check('setup: confirmation open before reset()', decorPurchaseConfirm === 'fountain');
+  reset();
+  __check('reset() defensively clears a stray open decor purchase confirmation', decorPurchaseConfirm === null);
+
+  // ---- the confirmation cannot accidentally trigger any other purchase/ad system ----
+  screen = 'shop'; shopTab = 'decor'; coins = 20000; upgrades.fountain = false; decorPurchaseConfirm = null;
+  __fire(cv, 'pointerdown', __fakeEvent(fountainRect.x, fountainRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('purchase completes with no other purchase/ad system accidentally triggered', upgrades.fountain === true && workshopFavorPending === false && mysteryChestPending === false && almostAffordablePending === false && cosmeticTrialPending === false);
+
+  // ---- Jar regression: E45/E47's own jar confirmation is unaffected by any of this ----
+  shopTab = 'jars'; jarPurchaseConfirm = null; coins = 20000; upgrades.ownedJars = { simple: true }; upgrades.equippedJar = 'simple';
+  var lanternRect = jarCardRects().filter(function(r){ return r.key === 'lantern'; })[0];
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __check('jar regression: an unowned jar still opens its own confirmation, unaffected by the new Trail/Decor confirmations', jarPurchaseConfirm === 'lantern');
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_CANCEL_BTN.x, CONFIRM_CANCEL_BTN.y));
+  __check('jar regression: Cancel still works exactly as before', jarPurchaseConfirm === null && upgrades.ownedJars.lantern !== true);
+  __fire(cv, 'pointerdown', __fakeEvent(lanternRect.x, lanternRect.y));
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('jar regression: Purchase still deducts exactly once and grants ownership, exactly as before', coins === 20000 - 1500 && upgrades.ownedJars.lantern === true && jarPurchaseConfirm === null);
 });
 `);
 
