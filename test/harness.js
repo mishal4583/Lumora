@@ -10218,6 +10218,64 @@ finalizeNight();
 __check('4 (d): reloading with the first-night-complete guidance already seen does not reshow it on a later completed night', discoveryCard === null);
 `);
 
+// ===== E40: Contract Selection -- Back button =====
+scenario('e40-contract-back-button', null, `
+upgrades.tutorialDone = true;
+upgrades.seenContractDiscovery = true; // E39's own Contract discovery card -- irrelevant here, pre-seeded seen so it never occupies the shared discoveryCard slot and interferes with this test
+reset(); screen = 'play'; paused = false; S.isNewNight = false; S.newNightT = 999;
+
+// ---- 1: the Back button exists as a real drawn+hit-tested object ----
+__check('1: CONTRACT_BACK_BTN is defined with real geometry', typeof CONTRACT_BACK_BTN === 'object' && typeof CONTRACT_BACK_BTN.x === 'number' && typeof CONTRACT_BACK_BTN.y === 'number' && typeof CONTRACT_BACK_BTN.r === 'number');
+
+// enter Contract Selection the real way -- from title, via beginPlay()
+beginPlay();
+__check('setup: beginPlay() with tutorialDone=true goes straight to Contract Selection', screen === 'contract');
+
+// ---- 2: visible and clickable -- proves the draw call actually renders it, not just that the constant exists ----
+(function(){
+  var calls = [];
+  var origArc = ctx.arc;
+  ctx.arc = function(x, y, r){ calls.push({ x: x, y: y, r: r }); return origArc.apply(ctx, arguments); };
+  var drawThrew = false;
+  try { draw(); } catch (e) { drawThrew = true; } finally { ctx.arc = origArc; }
+  __check('2 setup: the Contract Selection screen renders without throwing', !drawThrew);
+  __check('2: the Back button\\'s own circle is actually drawn, at its exact coordinates and radius', calls.some(function(c){ return c.x === CONTRACT_BACK_BTN.x && c.y === CONTRACT_BACK_BTN.y && c.r === CONTRACT_BACK_BTN.r; }));
+})();
+
+// ---- 3/4/5/6: clicking Back returns to the correct screen, does not start the night, does not accept, does not modify contract/economy/village state ----
+var coinsBefore = coins, bestBefore = best, nightNumberBefore = nightNumber, villageBefore = JSON.stringify(villageProgression), contractsCompletedBefore = contractsCompleted.length, journalBefore = JSON.stringify(journal);
+__fire(cv, 'pointerdown', __fakeEvent(CONTRACT_BACK_BTN.x, CONTRACT_BACK_BTN.y));
+__check('3: clicking Back returns to the title screen -- the correct previous screen for the beginPlay() entry path', screen === 'title');
+__check('4: clicking Back does not start the night -- screen is not play', screen !== 'play');
+__check('5: clicking Back does not accept any contract -- activeContract is untouched (still -1, never set by Contract Selection alone)', activeContract === -1);
+__check('6: clicking Back changes no coins/best/night-number/village-progress/journal/contracts-completed', coins === coinsBefore && best === bestBefore && nightNumber === nightNumberBefore && JSON.stringify(villageProgression) === villageBefore && JSON.stringify(journal) === journalBefore && contractsCompleted.length === contractsCompletedBefore);
+__check('6 (b): CONTRACTS array itself is untouched by Back -- exactly 4 entries, Collector\\'s risk/Playful multiplier unchanged', CONTRACTS.length === 4 && CONTRACTS.find(function(c){ return c.id === 'collector'; }).playfulMult === 2 && CONTRACTS.find(function(c){ return c.id === 'collector'; }).risk === 2);
+
+// ---- 7: re-entering Contract Selection after Back still works normally ----
+beginPlay();
+__check('7: re-entering Contract Selection after using Back works normally, fresh (no stale selection)', screen === 'contract' && contractSel === -1);
+
+// ---- 9: existing contract selection still works ----
+selectContract(3); // Collector
+__check('9: selecting a contract (Collector) still works normally after Back was used earlier', contractSel === 3);
+
+// ---- 8: existing Accept behavior still works, all the way through to activeContract/screen ----
+acceptContract();
+__check('8 setup: ACCEPT still arms the exit sequence normally', contractExitAt >= 0);
+finishContractAccept();
+__check('8: ACCEPT still works end to end -- activeContract is set to the accepted contract and play begins normally', activeContract === 3 && screen === 'play');
+
+// ---- 10: Collector objective remains the E37 Playful objective ----
+nightNumber = 1; cachedNightObjectivesFor = -1; cachedNightObjectives = null;
+generateNightObjectives(null);
+var catchObj = S.objectiveActive.find(function(o){ return o.category === 'catch'; });
+__check('10: Collector still prefers catch_playful for its forced catch objective -- the E37 fix survives the new Back button', !!catchObj && catchObj.id === 'catch_playful');
+
+// ---- 11: no Workshop Token functionality is reintroduced ----
+__check('11: workshopTokens is still not a defined variable anywhere in scope', typeof workshopTokens === 'undefined');
+__check('11 (b): Collector still has no tokenReward field', !('tokenReward' in CONTRACTS.find(function(c){ return c.id === 'collector'; })));
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;

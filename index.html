@@ -5446,6 +5446,14 @@ const CONTRACT_GRID_X=[30,278], CONTRACT_GRID_Y=[282,504], CONTRACT_CARD_W=232, 
 const CONTRACT_ACCEPT_BTN={x:270,y:865,w:200,h:50,fontSize:15}; // drawn size, centred (170,840)+(200,50)/2
 const CONTRACT_ACCEPT_HIT={x:270,y:865,w:220,h:62}; // wider tap target, same centre, per direct spec
 const CONTRACT_CHIP_X=14, CONTRACT_CHIP_Y=208, CONTRACT_CHIP_H=30;
+// E40: Back button -- top-left mirror of SHOP_CLOSE_BTN/JOURNAL_CLOSE_BTN/
+// VILLAGE_CLOSE_BTN's own top-right corner (x:W-38,y:56,r:20), same "one
+// object drives both draw and hit-test" discipline. y=56 sits well clear of
+// the "NIGHT N" label (y=178) and everything below it -- see
+// drawContractScreen()'s own header block -- and x=38 is symmetric with
+// those screens' x:W-38, so it never competes with the centered header or
+// the cards (which start at CONTRACT_GRID_X[0]=30, CONTRACT_GRID_Y[0]=282).
+const CONTRACT_BACK_BTN={x:38,y:56,r:20};
 // Night Complete's "Visit the Workshop" -- was a bare fillText() with only a
 // small (r:34+10) CIRCULAR hit-test centered under the text, while the
 // visible label itself ("VISIT THE WORKSHOP", 12px bold, letter-spaced) is
@@ -6173,6 +6181,24 @@ cv.addEventListener('pointerdown',e=>{
   // inRect()'s own centre-based convention.
   if(screen==='contract'){
     if(contractExitAt>=0)return; // mid-accept-exit -- swallow all input, same discipline as every other "screen is mid-transition" guard above
+    // E40: Back -- cancels contract selection and returns to the title
+    // screen, reusing goHome() exactly as HOME_BTN_OVER (Night Complete's
+    // own Home button) already does. Deliberately always 'title', not a
+    // literal "wherever this visit came from" (shopFrom/journalFrom-style):
+    // Contract Selection is reached from EITHER the title screen
+    // (beginPlay()) OR continueFromOver(), and that second path has
+    // ALREADY committed nightNumber++/streak/weekly progress and set the
+    // one-shot S.continueHandled guard true before ever calling
+    // enterContractScreen() -- returning to a redisplayed Night Complete
+    // screen would leave its Continue button permanently inert (the guard
+    // blocks a second pass, and re-arming it would double-fire that real,
+    // persisted progression). Title is always safe, reuses an existing,
+    // already-tested function, and is trivially correct for the OTHER
+    // entry path (title is literally where beginPlay() was tapped from) --
+    // and from title, tapping "begin" always correctly re-enters Contract
+    // Selection fresh (see beginPlay()'s own unconditional check), so the
+    // player is never stranded.
+    if(dist(p.x,p.y,CONTRACT_BACK_BTN.x,CONTRACT_BACK_BTN.y)<=hitR(CONTRACT_BACK_BTN)){ goHome(); return; }
     for(let i=0;i<CONTRACTS.length;i++){
       const cx=CONTRACT_GRID_X[i%2], cy=CONTRACT_GRID_Y[i>>1];
       if(p.x>=cx&&p.x<=cx+CONTRACT_CARD_W&&p.y>=cy&&p.y<=cy+CONTRACT_CARD_H){ selectContract(i); return; }
@@ -10325,6 +10351,23 @@ function drawContractScreen(){
     ctx.fillStyle=rg; ctx.fillRect(270-48,240,96,1);
     ctx.font='italic 500 12.5px Georgia,serif'; ctx.fillStyle=d2haze(0.6);
     ctx.fillText('One pact, held for the whole night.',270,264);
+    ctx.restore();
+  }
+  // E40: Back button -- drawn unconditionally (not gated behind `head`,
+  // the header's own entrance fade) so it's present the instant the
+  // screen is visible, same as every other screen's close button; fades
+  // out alongside the rest of the screen via sOut once ACCEPT has been
+  // tapped and this screen is mid-exit (matching its hit-test above,
+  // which is already disabled for that same window). Same dark-navy-fill
+  // + thin lavender-border language as JOURNAL_CLOSE_BTN/VILLAGE_CLOSE_BTN
+  // (this screen's own header/copy already lean lavender/haze, not the
+  // Workshop's gold), just a left arrow instead of a close X.
+  if(1-sOut>0){
+    ctx.save(); ctx.globalAlpha=1-sOut;
+    ctx.fillStyle='rgba(25,33,67,0.6)'; ctx.strokeStyle='rgba(174,184,203,0.3)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(CONTRACT_BACK_BTN.x,CONTRACT_BACK_BTN.y,CONTRACT_BACK_BTN.r,0,6.28); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=LUM_CREAM; ctx.font='600 16px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('←',CONTRACT_BACK_BTN.x,CONTRACT_BACK_BTN.y+1);
     ctx.restore();
   }
   CONTRACTS.forEach((c,i)=>{
