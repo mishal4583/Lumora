@@ -65,6 +65,14 @@ let paused=false, pauseReason=null, audioEnabled=true, firstFrameSent=false, gam
 // pointerdown handler's paused branch for the one shared modal these two
 // destructive actions route through.
 let pauseConfirm=null;
+// E46: true while a Pause-menu Restart/Go Home is waiting on the
+// interstitial request it now triggers first (see requestInterstitialThen()
+// below) -- swallows all Pause-menu input for that one async gap so a
+// rapid repeat tap can never fire a second ad request or a second
+// restart/Go Home. Same category of state as pauseConfirm above (session-
+// level UI, not S, not persisted), cleared the instant the deferred action
+// actually runs, and defensively in reset()/goHome() too.
+let pauseTransitionPending=false;
 let pointer={down:false};
 const KEYS={up:0,down:0,left:0,right:0}; // declared early: reset() below clears it, and reset() is also called at top-level before the keyboard listeners are registered
 function pauseGame(reason){
@@ -105,6 +113,7 @@ function resumeGame(){
 // branch below, never mid-play.
 function goHome(){
   pauseConfirm=null;
+  pauseTransitionPending=false; // E46: defensive, same reasoning as pauseConfirm above -- goHome() is the actual action every Go Home path (with or without the interstitial-gated confirm) funnels through
   resumeGame();
   screen='title';
 }
@@ -1346,6 +1355,30 @@ function requestMysteryChest(){
       resumeGame(); // E45: same defensive un-stick as requestExtraLife()'s own success branch -- a no-op if not actually paused
     }
   },()=>{ mysteryChestPending=false; });
+}
+// E46: Pause-menu Restart/Go Home certification requirement -- Mediacube's
+// own review specifically asked for interstitial behavior triggered
+// through the exit/restart buttons (a reviewer can open Pause and tap
+// Restart/Go Home without ever reaching Night Complete, and Continue's own
+// interstitial -- see continueFromOver() below -- would never get a
+// chance to fire for them). Reuses the EXACT same "request first, then
+// perform the action regardless of success/failure/availability" shape
+// continueFromOver() already established and proved live for Continue --
+// deliberately NOT sharing code with it (continueFromOver()'s own
+// interstitial call site is explicitly out of scope for this change), just
+// the same proven pattern against the same existing interstitialAdsAvailable()/
+// YT.ads.requestInterstitialAd() -- no new ad ID, no second ad system. An
+// unavailable/rejected/thrown request always still runs `action` --
+// exactly like continueFromOver()'s own `.then(fn,fn)` -- so a real ad
+// outage can never trap the player behind an inert Pause menu.
+function requestInterstitialThen(action){
+  if(interstitialAdsAvailable()){
+    try{
+      Promise.resolve(YT.ads.requestInterstitialAd()).then(action,action);
+      return;
+    }catch(e){}
+  }
+  action();
 }
 // The ONE path that leaves the Night Complete screen (both "tap anywhere
 // else to continue/restart" and its Enter/Space keyboard equivalent route
@@ -5249,6 +5282,7 @@ function reset(){
   pointer.down=false;
   KEYS.up=KEYS.down=KEYS.left=KEYS.right=0; // no stale held-key motion carrying into a fresh round, same principle as pointer.down above
   pauseConfirm=null; // defensive, same reasoning — a stray open confirmation modal shouldn't survive into a fresh round
+  pauseTransitionPending=false; // E46: same defensive clear as pauseConfirm above -- this is exactly what the deferred Restart callback itself calls reset() from, so it's already false by the time reset() runs on that path; defensive for any other path into reset()
   prestigeConfirmOpen=false; // Phase 12: same defensive clear as pauseConfirm above
   jarPurchaseConfirm=null; // E45: same defensive clear as pauseConfirm/prestigeConfirmOpen above -- a stray open jar-purchase confirmation can't survive into an unrelated round
   discoveryCard=null; // E33: same defensive clear as pauseConfirm/prestigeConfirmOpen above -- a stray open discovery card can't survive into an unrelated round
@@ -6305,6 +6339,13 @@ cv.addEventListener('pointerdown',e=>{
   }
   if(paused){ // pause overlay swallows ALL input; only the resume/restart/gohome targets (and the confirm modal over them) act, only for user pauses
     if(pauseReason==='user'){
+      // E46: an interstitial-gated Restart/Go Home is already in flight --
+      // checked FIRST, ahead of even the confirm modal, so a rapid repeat
+      // tap during that one async gap can never fire a second ad request
+      // or a second restart/Go Home. Same "modal/request owns all input"
+      // discipline as every other pending-async-action guard in this file
+      // (S.extraLifePending, S.rewardedDoubleCoinsPending, jarPurchaseConfirm).
+      if(pauseTransitionPending)return;
       if(pauseConfirm){
         // LUMORA clarifications pass: while a confirmation modal is open it
         // OWNS all input — even RESUME_BTN is inert until it's resolved, so
@@ -6315,8 +6356,23 @@ cv.addEventListener('pointerdown',e=>{
         // cannot make them overlap each other horizontally.
         if(inRect(p.x,p.y,hitRectH(CONFIRM_CANCEL_BTN)))pauseConfirm=null;
         else if(inRect(p.x,p.y,hitRectH(CONFIRM_ACTION_BTN))){
-          if(pauseConfirm==='restart'){ pauseConfirm=null; resumeGame(); reset(); }
-          else if(pauseConfirm==='gohome')goHome();
+          // E46: Fledge/Mediacube certification requirement -- Restart and
+          // Go Home now request the existing interstitial FIRST (same
+          // proven "request, then act regardless of outcome" pattern
+          // continueFromOver() already uses for Continue -- see
+          // requestInterstitialThen()), only actually restarting/leaving
+          // once that resolves (or immediately, if no ad is available at
+          // all). pauseTransitionPending is set synchronously, before the
+          // async request, so the guard above catches any repeat tap for
+          // the whole gap; the real action (and clearing the flag) only
+          // ever runs once, inside the deferred callback.
+          if(pauseConfirm==='restart'){
+            pauseTransitionPending=true;
+            requestInterstitialThen(()=>{ pauseTransitionPending=false; pauseConfirm=null; resumeGame(); reset(); });
+          } else if(pauseConfirm==='gohome'){
+            pauseTransitionPending=true;
+            requestInterstitialThen(()=>{ pauseTransitionPending=false; goHome(); }); // goHome() itself already clears pauseConfirm
+          }
         }
         // E43: RESUME_BTN sits far below (112 virtual px), never checked
         // in this branch anyway (pauseConfirm modal owns input here) -- no
@@ -6332,7 +6388,12 @@ cv.addEventListener('pointerdown',e=>{
       else if(inRect(p.x,p.y,hitRectHCapped(RESTART_BTN,56)))pauseConfirm='restart'; // always confirms — see drawConfirmModal()'s Restart copy
       else if(inRect(p.x,p.y,hitRectH(GOHOME_BTN))){
         if(S.carried.length>0)pauseConfirm='gohome'; // mid-carry: confirm before discarding held fireflies
-        else goHome(); // empty jar, nothing to lose — leave immediately
+        // E46: an empty jar skips the confirm modal entirely and used to
+        // call goHome() immediately -- still true, except Go Home's own
+        // interstitial (see above) must fire on THIS path too, since a
+        // reviewer with nothing caught yet never sees the confirm modal at
+        // all otherwise.
+        else { pauseTransitionPending=true; requestInterstitialThen(()=>{ pauseTransitionPending=false; goHome(); }); }
       }
     }
     return;
@@ -6782,23 +6843,56 @@ cv.addEventListener('pointerdown',e=>{
       // E43: HOME_BTN_OVER sits 56 virtual px BELOW SHOP_BTN_OVER but is
       // checked FIRST -- capped so its own padding can't grow upward past
       // SHOP_BTN_OVER's territory and intercept a tap meant for it.
-      if(inRect(p.x,p.y,hitRectHCapped(HOME_BTN_OVER,56))){ goHome(); return; }
+      // E46: that 56 alone is no longer enough -- HOME_BTN_OVER is also
+      // checked BEFORE DOUBLE_COINS_BTN below it, and on a real (not
+      // artificially empty-objectives) night, DOUBLE_COINS_BTN.y's own
+      // clamp formula can land it much closer than 56 virtual px away (a
+      // genuine, reachable case measured at ~26px), letting HOME_BTN_OVER's
+      // own uncapped-below padding swallow a tap meant for the Watch Ad
+      // button's own drawn centre. Capped against whichever real gap is
+      // SMALLER -- 56 to Shop above, or the actual live gap to
+      // DOUBLE_COINS_BTN below (computed fresh every frame, valid even on
+      // frames where that button isn't currently drawn/interactive).
+      if(inRect(p.x,p.y,hitRectHCapped(HOME_BTN_OVER,Math.min(56,DOUBLE_COINS_BTN.y-HOME_BTN_OVER.y)))){ goHome(); return; }
       // shop button is a specific carve-out; every other click on this screen
       // still replays immediately, exactly as before this session — Part B
       // must not make an existing screen's input any less forgiving
-      // E43: checked second, nothing closer than the already-capped
-      // HOME_BTN_OVER above it -- safe to pad uncapped.
-      if(inRect(p.x,p.y,hitRectH(SHOP_BTN_OVER))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
+      // E46: E43's own comment here ("checked second, nothing closer than
+      // the already-capped HOME_BTN_OVER above it -- safe to pad uncapped")
+      // only accounted for the gap to HOME_BTN_OVER below it -- it never
+      // considered the gap to Continue (playBtn) ABOVE it, which has no
+      // hit-test rect of its own at all (Continue is the pointerdown
+      // fallthrough at the bottom of this whole block, so nothing else
+      // stops SHOP_BTN_OVER's own padding from growing up into it). At the
+      // smallest supported viewport, hitRectH()'s uncapped worst-case
+      // padding (48/scale, ~122 virtual px) reaches several px past
+      // playBtn.y itself -- a tap on the lower half of the visibly-drawn
+      // Continue button could silently open the Workshop instead. Capped
+      // against the real, fixed 55px gap SHOP_BTN_OVER.y=playBtn.y+55
+      // always maintains, same discipline as HOME_BTN_OVER's own cap above.
+      if(inRect(p.x,p.y,hitRectHCapped(SHOP_BTN_OVER,55))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; jarPurchaseConfirm=null; return; }
       // "Double the Glow" -- same carve-out pattern as SHOP_BTN_OVER above --
       // only drawn/tappable once the tutorial is done, the SDK actually
       // offers rewarded ads (see drawOver()), and this night earned
       // something worth doubling, but the hit-test itself stays defensive
       // about all three regardless.
-      // E43: DOUBLE_COINS_BTN sits well clear of both buttons above it
-      // (its own y is clamped to at least HOME_BTN_OVER.y+66, or floored
-      // at 910) -- safe to pad uncapped. Ad-adjacent reward control -- only
-      // its hit target changed, never the reward/eligibility itself.
-      if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardedDoubleCoinsClaimed&&S.coinsEarnedThisNight>0&&inRect(p.x,p.y,hitRectH(DOUBLE_COINS_BTN))){ requestDoubleNightCoins(); return; }
+      // E46: E43's own "safe to pad uncapped" claim here held for the
+      // COMMON case but not every real one. DOUBLE_COINS_BTN.y's own
+      // formula (Math.min(H-40,Math.max(910,HOME_BTN_OVER.y+66))) is NOT a
+      // fixed offset from HOME_BTN_OVER.y -- both the 910 floor and the
+      // H-40 ceiling can each independently apply depending on how tall
+      // the panel is that night (how many optional tail rows are present),
+      // and a real, reachable case (a genuine contract night with its own
+      // objectives -- not the artificial empty-objectives shape a bare
+      // reset() produces) was measured landing at only ~52 virtual px of
+      // actual gap, well under the 66 this cap originally assumed. Rather
+      // than trying to re-derive a new safe constant by inspection, the
+      // gap is computed LIVE here every time -- always exactly correct
+      // regardless of which branch of that clamp is currently active, with
+      // no reliance on reasoning about the formula's own worst case at
+      // code-review time. Ad-adjacent reward control -- only its hit
+      // target changed, never the reward/eligibility itself.
+      if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardedDoubleCoinsClaimed&&S.coinsEarnedThisNight>0&&inRect(p.x,p.y,hitRectHCapped(DOUBLE_COINS_BTN,DOUBLE_COINS_BTN.y-HOME_BTN_OVER.y))){ requestDoubleNightCoins(); return; }
       continueFromOver(); pointer.down=false;
     }
     return;
@@ -11431,7 +11525,22 @@ function drawOver(){
   // night, and ceilinged at H-40 so it can never run off the bottom of a
   // 960-tall frame even in that extreme case.
   HOME_BTN_OVER.y=SHOP_BTN_OVER.y+56;
-  DOUBLE_COINS_BTN.y=hasObjectives?Math.min(H-40,Math.max(910,HOME_BTN_OVER.y+66)):(830+(panelH-194)); // E30: -194, was -150 -- the no-objectives baseline panelH grew by 44 for the new Score row, so this keeps the same relative gap
+  // E46: the H-40 ceiling below was tuned as "never run off the bottom of a
+  // 960 frame" -- correct as far as it goes, but it can independently
+  // clamp DOUBLE_COINS_BTN BELOW the +66 gap the Math.max() right next to
+  // it is trying to guarantee, on a night tall enough that HOME_BTN_OVER.y
+  // itself already sits close to that ceiling (every optional tail row
+  // present, or simply a high night-streak/village-level-up night -- a
+  // real, reachable shape over a long playthrough, not a contrived one).
+  // Measured live: a real Collector night with a streak/village-level-up
+  // row present pushed the two buttons down to a ~26px gap -- well under
+  // their own combined raw half-heights (44/2+48/2=46), meaning the
+  // buttons visibly overlapped on screen, independent of any touch-target
+  // padding at all. Relaxed to H-10 -- still comfortably on-screen (the
+  // button's own content never approached the old 40px margin's worth of
+  // extra room in practice), and gives the +66 gap enough room to actually
+  // hold in every case this project's own tail-row combinations can produce.
+  DOUBLE_COINS_BTN.y=hasObjectives?Math.min(H-10,Math.max(910,HOME_BTN_OVER.y+66)):(830+(panelH-194)); // E30: -194, was -150 -- the no-objectives baseline panelH grew by 44 for the new Score row, so this keeps the same relative gap
 
   const b={x:playBtn.x,y:playBtn.y,w:200,h:58,fontSize:15};
   lumButton(b,'Continue','primary');
@@ -14538,9 +14647,15 @@ function drawPaused(){
   ctx.fillText('best score '+best,W/2,H*0.32+118); // E22: same relabel as the main HUD, same reasoning
   if(pauseReason==='user'){
     if(pauseConfirm==='restart'){
-      drawConfirmModal('Restart this night?','Your current night progress will be lost. Any fireflies currently held in your jar will be discarded. Your permanent coins, upgrades, equipped jar, village restoration, and journal progress will remain safe.','Restart Night');
+      // E46: while pauseTransitionPending, the interstitial requested on
+      // the confirm tap is still in flight -- same "Watching…"-style label
+      // swap every other pending ad button in this file already uses
+      // (S.rewardedDoubleCoinsPending, S.luckyPending), reusing this one
+      // shared modal's own actionLabel param rather than touching
+      // drawConfirmModal() itself.
+      drawConfirmModal('Restart this night?','Your current night progress will be lost. Any fireflies currently held in your jar will be discarded. Your permanent coins, upgrades, equipped jar, village restoration, and journal progress will remain safe.',pauseTransitionPending?'Requesting…':'Restart Night');
     } else if(pauseConfirm==='gohome'){
-      drawConfirmModal('Leave this night?','Your current collected light will be lost. Permanent progress will remain safe.','Go Home');
+      drawConfirmModal('Leave this night?','Your current collected light will be lost. Permanent progress will remain safe.',pauseTransitionPending?'Requesting…':'Go Home');
     } else {
       glowOrb(RESUME_BTN,'resume');
       lumButton(RESTART_BTN,'Restart Night','outline');

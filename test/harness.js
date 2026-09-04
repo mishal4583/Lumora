@@ -10957,6 +10957,244 @@ return __tick(5).then(function(){
 });
 `);
 
+// =====================================================================
+// E46: Night Complete button separation + Pause-menu Restart/Go Home
+// interstitial certification requirement.
+// =====================================================================
+
+// ---- Issue 1: Continue/Workshop/Double the Glow/Home no longer have
+// overlapping hit regions on Night Complete. ----
+scenario('e46-night-complete-button-separation', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 0, upgrades: { tutorialDone: true } }));
+return __tick(5).then(function(){
+  upgrades.tutorialDone = true;
+  upgrades.seenFirstNightCompleteDiscovery = true;
+  upgrades.seenFirstMilestoneDiscovery = true;
+  var interstitialCalls = [], rewardCalls = [], __dbgAccept = null;
+  ytgame.ads = {
+    requestRewardedAd: function(id){ rewardCalls.push(id); return Promise.resolve(true); },
+    requestInterstitialAd: function(){ interstitialCalls.push(1); return Promise.resolve(); }
+  };
+
+  function enterNightComplete(){
+    // Goes through a REAL contract acceptance (not a bare reset()) so
+    // S.objectiveActive is genuinely populated -- hasObjectives=true,
+    // exactly like every real (non-tutorial) night reaches Night Complete.
+    // A bare reset() leaves S.objectiveActive empty (the tutorial night's
+    // own shape), which routes DOUBLE_COINS_BTN.y through a DIFFERENT,
+    // dead-in-practice formula (Double the Glow is never even drawn during
+    // the tutorial, since it also requires upgrades.tutorialDone===true --
+    // the two conditions can never both be true in real play) -- check 8
+    // below specifically needs the real, reachable hasObjectives=true shape.
+    // same reset shape enterContractScreen() itself performs -- contractScreenAt
+    // MUST be non-negative (0) before acceptContract() captures it into
+    // contractExitAt, or the >=0 gate in loop()'s own finishContractAccept()
+    // trigger check can never pass, no matter how much time elapses afterward.
+    screen = 'contract'; activeContract = -1; contractScreenAt = 0; contractSel = -1; contractSelAt = -1; contractDockAt = -1; contractExitAt = -1;
+    __acceptAnyContract();
+    __dbgAccept = { screen: screen, contractSel: contractSel, contractExitAt: contractExitAt, contractScreenAt: contractScreenAt, activeContract: activeContract };
+    S.newNightT = 4.30; S.isNewNight = false;
+    S.over = true; S.overT = 1; S.coinsEarnedThisNight = 50; // >0 so Double the Glow/Watch Ad renders
+    drawOver(); // computes playBtn.y/SHOP_BTN_OVER.y/HOME_BTN_OVER.y/DOUBLE_COINS_BTN.y for this exact frame
+  }
+
+  // ---- 1: Continue's own centre reaches ONLY continueFromOver() ----
+  enterNightComplete();
+  var dbg1 = { screenAfterEnter: screen, over: S.over, overT: S.overT, activeContract: activeContract, playBtn: JSON.stringify(playBtn) };
+  var callsBefore = interstitialCalls.length;
+  __fire(cv, 'pointerdown', __fakeEvent(playBtn.x, playBtn.y));
+  return __tick(5).then(function(){
+    __check('1: a tap on Continue\\'s own centre reaches continueFromOver() only', interstitialCalls.length === callsBefore + 1 && screen === 'contract', 'screen=' + screen + ' calls=' + interstitialCalls.length + ' callsBefore=' + callsBefore + ' dbg=' + JSON.stringify(dbg1) + ' dbgAccept=' + JSON.stringify(__dbgAccept));
+    __acceptAnyContract();
+
+    // ---- 2: Workshop's own centre opens ONLY the Workshop ----
+    enterNightComplete();
+    __fire(cv, 'pointerdown', __fakeEvent(SHOP_BTN_OVER.x, SHOP_BTN_OVER.y));
+    __check('2: a tap on Visit the Workshop\\'s own centre opens ONLY the Workshop', screen === 'shop' && S.over === true, 'screen=' + screen);
+    screen = 'play';
+
+    // ---- 3: Home's own centre goes ONLY Home ----
+    enterNightComplete();
+    __fire(cv, 'pointerdown', __fakeEvent(HOME_BTN_OVER.x, HOME_BTN_OVER.y));
+    __check('3: a tap on Home\\'s own centre goes ONLY Home', screen === 'title');
+
+    // ---- 4: Watch Ad's own centre requests ONLY its own rewarded ad ----
+    enterNightComplete();
+    var rewardCallsBefore = rewardCalls.length;
+    __fire(cv, 'pointerdown', __fakeEvent(DOUBLE_COINS_BTN.x, DOUBLE_COINS_BTN.y));
+    __check('4: a tap on Watch Ad\\'s own centre requests ONLY the rewarded ad, not the interstitial, not Continue', rewardCalls.length === rewardCallsBefore + 1 && rewardCalls[rewardCalls.length - 1] === REWARDED_AD_IDS.DOUBLE_NIGHT_COINS && S.over === true && screen === 'play');
+
+    // ---- 5 (the actual bug): a tap on the LOWER HALF of the visibly-drawn
+    // Continue button, at the smallest supported viewport, used to be
+    // silently swallowed by Visit the Workshop's own uncapped padding
+    // (hitRectH()'s worst-case reach, ~122 virtual px, extended UP past
+    // playBtn.y itself). Capped now -- this exact tap must reach Continue.
+    enterNightComplete();
+    scale = 0.394; // smallest spec-supported viewport, same worst case E43's own audit used
+    var edgeY = playBtn.y + 15; // well inside Continue's own drawn h:58 pill (half=29), inside the OLD overlapping Workshop padding, outside the NEW capped one
+    var callsBefore2 = interstitialCalls.length;
+    __fire(cv, 'pointerdown', __fakeEvent(playBtn.x, edgeY));
+    return __tick(5).then(function(){
+      __check('5: a tap on the lower half of the visible Continue button (small viewport) now reaches Continue, not the Workshop -- the actual E46 bug', screen === 'contract' && interstitialCalls.length === callsBefore2 + 1, 'screen=' + screen);
+      __acceptAnyContract();
+
+      // ---- 6: Workshop's own centre still opens the Workshop at the smallest supported viewport (the cap didn't overshrink it into uselessness) ----
+      enterNightComplete();
+      __fire(cv, 'pointerdown', __fakeEvent(SHOP_BTN_OVER.x, SHOP_BTN_OVER.y));
+      __check('6: Workshop\\'s own centre still opens the Workshop at the smallest supported viewport', screen === 'shop');
+      screen = 'play';
+
+      // ---- 7: Watch Ad's own centre still requests the rewarded ad at the smallest supported viewport, even on a real night where the live gap to HOME_BTN_OVER above it is much tighter than the old fixed-56 cap ever accounted for (the actual E46 gap this check exists to catch: HOME_BTN_OVER's OWN downward padding could swallow this exact centre tap before DOUBLE_COINS_BTN's own check was ever reached) ----
+      enterNightComplete();
+      var rewardCallsBefore2 = rewardCalls.length;
+      __fire(cv, 'pointerdown', __fakeEvent(DOUBLE_COINS_BTN.x, DOUBLE_COINS_BTN.y));
+      __check('7: Watch Ad\\'s own centre still requests the rewarded ad at the smallest supported viewport', rewardCalls.length === rewardCallsBefore2 + 1 && screen === 'play', 'gap=' + (DOUBLE_COINS_BTN.y - HOME_BTN_OVER.y));
+      scale = 1;
+
+      // ---- 8: structural guarantee -- HOME_BTN_OVER's own capped padded region never reaches down into DOUBLE_COINS_BTN's own capped padded region, whatever the live gap between them happens to be this particular night ----
+      enterNightComplete();
+      scale = 0.394;
+      var homeCap = Math.min(56, DOUBLE_COINS_BTN.y - HOME_BTN_OVER.y);
+      var homePadded = hitRectHCapped(HOME_BTN_OVER, homeCap);
+      var doubleCap = DOUBLE_COINS_BTN.y - HOME_BTN_OVER.y;
+      var doublePadded = hitRectHCapped(DOUBLE_COINS_BTN, doubleCap);
+      var homeBottom = homePadded.y + homePadded.h / 2;
+      var doubleTop = doublePadded.y - doublePadded.h / 2;
+      __check('8: HOME_BTN_OVER\\'s own capped region never overlaps DOUBLE_COINS_BTN\\'s own capped region, at the smallest supported viewport', doubleTop >= homeBottom, 'homeBottom=' + homeBottom + ' doubleTop=' + doubleTop + ' gap=' + (DOUBLE_COINS_BTN.y - HOME_BTN_OVER.y));
+      scale = 1;
+    });
+  });
+});
+`);
+
+// ---- Issue 2: Pause-menu Restart Night and Go Home now request the
+// existing interstitial first, then always perform their existing action. ----
+scenario('e46-pause-restart-gohome-interstitial', {}, `
+__spy.loadResolve(JSON.stringify({ best: 0, coins: 500, upgrades: { tutorialDone: true, ownedJars: { simple: true }, equippedJar: 'simple' } }));
+return __tick(5).then(function(){
+  upgrades.tutorialDone = true;
+  var interstitialCalls = [];
+  var interstitialBehavior = 'success'; // success | reject
+  ytgame.ads = {
+    requestRewardedAd: function(){ return Promise.resolve(false); },
+    requestInterstitialAd: function(){
+      interstitialCalls.push(1);
+      if (interstitialBehavior === 'reject') return Promise.reject(new Error('mock interstitial reject'));
+      return Promise.resolve();
+    }
+  };
+
+  // ---- Restart: success path ----
+  reset(); screen = 'play'; paused = false; coins = 500;
+  var coinsBefore = coins, nightNumBefore = nightNumber, villageBefore = JSON.stringify(villageProgression);
+  pauseGame('user');
+  __fire(cv, 'pointerdown', __fakeEvent(RESTART_BTN.x, RESTART_BTN.y));
+  __check('Restart setup: the confirm modal is open', pauseConfirm === 'restart' && paused === true);
+  var sBeforeConfirm = S;
+  var callsBefore = interstitialCalls.length;
+  __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+  __check('the interstitial is requested immediately on confirm, before the restart itself', interstitialCalls.length === callsBefore + 1);
+  __check('the restart has NOT happened yet -- still mid-request (S unchanged, still paused)', S === sBeforeConfirm && paused === true && pauseTransitionPending === true);
+  return __tick(5).then(function(){
+    __check('Restart: after a successful interstitial, the existing restart actually runs exactly once (fresh S, unpaused)', S !== sBeforeConfirm && paused === false && pauseReason === null);
+    __check('Restart: pauseTransitionPending and pauseConfirm are both cleared', pauseTransitionPending === false && pauseConfirm === null);
+    __check('Restart: permanent progression (coins) is untouched by a restart', coins === coinsBefore);
+    __check('Restart: nightNumber is untouched by a restart (only continueFromOver() ever increments it)', nightNumber === nightNumBefore);
+    __check('Restart: village progression is untouched by a restart', JSON.stringify(villageProgression) === villageBefore);
+    __check('Restart: jar/equip state is untouched by a restart', upgrades.equippedJar === 'simple' && upgrades.ownedJars.simple === true);
+
+    // ---- Restart: ad unavailable/rejected -- restart still happens ----
+    interstitialBehavior = 'reject';
+    reset(); screen = 'play'; paused = false;
+    pauseGame('user');
+    __fire(cv, 'pointerdown', __fakeEvent(RESTART_BTN.x, RESTART_BTN.y));
+    var sBeforeConfirm2 = S;
+    __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+    return __tick(5).then(function(){
+      __check('Restart: a rejected/unavailable interstitial does NOT trap the player -- restart still happens', S !== sBeforeConfirm2 && paused === false, 'paused=' + paused);
+      __check('Restart: pauseTransitionPending is cleared even after a rejected ad', pauseTransitionPending === false);
+
+      // ---- Restart: rapid taps on Confirm -- one ad request, one restart ----
+      interstitialBehavior = 'success';
+      reset(); screen = 'play'; paused = false;
+      pauseGame('user');
+      __fire(cv, 'pointerdown', __fakeEvent(RESTART_BTN.x, RESTART_BTN.y));
+      var callsBeforeRapid = interstitialCalls.length;
+      var sBeforeRapid = S;
+      __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+      __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y)); // rapid second tap, still mid-request
+      __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y)); // rapid third tap
+      __check('Restart rapid-tap: exactly one interstitial request despite 3 taps on Confirm', interstitialCalls.length === callsBeforeRapid + 1, 'calls=' + (interstitialCalls.length - callsBeforeRapid));
+      return __tick(5).then(function(){
+        __check('Restart rapid-tap: exactly one restart happened (S replaced exactly once, not corrupted by repeat entries)', S !== sBeforeRapid && paused === false);
+
+        // ---- Go Home (via confirm, carrying fireflies): success path ----
+        reset(); screen = 'play'; paused = false;
+        S.carried = [{ type: 'y' }]; // non-empty jar -- forces the confirm modal path
+        pauseGame('user');
+        var callsBeforeHome = interstitialCalls.length;
+        __fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y));
+        __check('Go Home (carrying) setup: the confirm modal is open, no ad requested yet', pauseConfirm === 'gohome' && interstitialCalls.length === callsBeforeHome);
+        __fire(cv, 'pointerdown', __fakeEvent(CONFIRM_ACTION_BTN.x, CONFIRM_ACTION_BTN.y));
+        __check('Go Home: the interstitial is requested immediately on confirm, before Home itself', interstitialCalls.length === callsBeforeHome + 1);
+        __check('Go Home: Home has NOT happened yet -- still mid-request (still on play, still paused)', screen === 'play' && paused === true && pauseTransitionPending === true);
+        return __tick(5).then(function(){
+          __check('Go Home: after a successful interstitial, the existing Home routing actually runs exactly once', screen === 'title' && paused === false && pauseReason === null);
+          __check('Go Home: pauseTransitionPending and pauseConfirm are both cleared', pauseTransitionPending === false && pauseConfirm === null);
+
+          // ---- Go Home (direct, empty jar, no confirm modal at all): success path ----
+          reset(); screen = 'play'; paused = false;
+          S.carried = [];
+          pauseGame('user');
+          var callsBeforeHome2 = interstitialCalls.length;
+          __fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y));
+          __check('Go Home (empty jar): no confirm modal appears (existing behavior, unchanged), but the interstitial is still requested on this direct tap', pauseConfirm === null && interstitialCalls.length === callsBeforeHome2 + 1);
+          __check('Go Home (empty jar): Home has NOT happened yet -- still mid-request', screen === 'play' && paused === true);
+          return __tick(5).then(function(){
+            __check('Go Home (empty jar): Home routing runs exactly once after the ad resolves', screen === 'title' && paused === false);
+
+            // ---- Go Home: ad unavailable/rejected -- Home still happens ----
+            interstitialBehavior = 'reject';
+            reset(); screen = 'play'; paused = false;
+            S.carried = [];
+            pauseGame('user');
+            __fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y));
+            return __tick(5).then(function(){
+              __check('Go Home: a rejected/unavailable interstitial does NOT trap the player -- Home still happens', screen === 'title' && paused === false);
+              __check('Go Home: pauseTransitionPending is cleared even after a rejected ad', pauseTransitionPending === false);
+
+              // ---- Go Home: rapid taps -- one ad request, one Home navigation ----
+              interstitialBehavior = 'success';
+              reset(); screen = 'play'; paused = false;
+              S.carried = [];
+              pauseGame('user');
+              var callsBeforeHomeRapid = interstitialCalls.length;
+              __fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y));
+              __fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y)); // rapid repeat, still mid-request -- swallowed by pauseTransitionPending
+              __fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y));
+              __check('Go Home rapid-tap: exactly one interstitial request despite 3 taps', interstitialCalls.length === callsBeforeHomeRapid + 1, 'calls=' + (interstitialCalls.length - callsBeforeHomeRapid));
+              return __tick(5).then(function(){
+                __check('Go Home rapid-tap: exactly one Home navigation', screen === 'title' && paused === false);
+
+                // ---- Continue's own existing interstitial is completely unaffected by any of this ----
+                upgrades.seenFirstNightCompleteDiscovery = true; upgrades.seenFirstMilestoneDiscovery = true;
+                reset(); screen = 'play'; S.over = true; S.overT = 1;
+                var callsBeforeContinue = interstitialCalls.length;
+                continueFromOver();
+                return __tick(5).then(function(){
+                  __check('Continue\\'s own existing interstitial still fires exactly as before -- completely unaffected by the Pause-menu changes', interstitialCalls.length === callsBeforeContinue + 1);
+                  __acceptAnyContract();
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+});
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
