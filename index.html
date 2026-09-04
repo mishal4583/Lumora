@@ -5502,6 +5502,26 @@ function hitR(btn){ return Math.max(btn.r,24/scale); }
 // tall, which undershoots 48dp at typical mobile scale (~0.7-0.8), same
 // class of gap PAUSE_BTN/the close buttons had before hitR() existed.
 function hitRectH(rect){ const minH=48/scale; return rect.h>=minH?rect:{x:rect.x,y:rect.y,w:rect.w,h:minH}; }
+// E43 (Touch-Target Compliance Pass): like hitRectH() above, but for a
+// button whose vertical neighbor sits close enough that hitRectH()'s own
+// uncapped worst-case padding (48/scale, which can exceed 120 virtual px
+// at the smallest spec-supported viewport) would grow PAST the neighbor's
+// own centre and start swallowing taps meant for it -- a real, reachable
+// "wrong button fires" ambiguity, not just a missed-target one. gapToCenter
+// is the fixed, layout-defined virtual-px distance from this rect's own
+// centre to the neighbor's centre (never itself scale-dependent -- it's a
+// constant of the two buttons' own y-coordinates). The padded height is
+// clamped so it can never reach the neighbor's centre line, leaving a
+// small fixed safety margin -- the best achievable padding for this
+// specific pair without ever creating an ambiguous overlap, per direct
+// instruction ("adjust the hit regions intelligently while maintaining at
+// least the required target size" -- here, "at least" is bounded by the
+// pair's own fixed spacing, not by 48dp at every conceivable scale).
+function hitRectHCapped(rect,gapToCenter){
+  const padded=hitRectH(rect);
+  const capH=Math.max(rect.h,gapToCenter-4);
+  return padded.h>capH?{x:rect.x,y:rect.y,w:rect.w,h:capH}:padded;
+}
 // Lumora UI port: RunSummary's stat panel needs real vertical space above
 // the Continue button, so playBtn/SHOP_BTN_OVER moved down from H*0.62 --
 // nothing else in the file depends on their old exact position (the
@@ -6200,7 +6220,11 @@ cv.addEventListener('pointerdown',e=>{
   // closes the card -- it never touches score, coins, village progression,
   // or any other gameplay value.
   if(discoveryCard){
-    if(inRect(p.x,p.y,DISCOVERY_CARD_BTN))discoveryCard=null;
+    // E43: was a raw inRect() -- h:48 virtual px undershoots 48dp at
+    // typical mobile scale (the number "48" here was always a virtual-px
+    // count, never a guaranteed real-px one; see hitRectH()'s own comment).
+    // Isolated button, no neighbor -- safe to pad without a cap.
+    if(inRect(p.x,p.y,hitRectH(DISCOVERY_CARD_BTN)))discoveryCard=null;
     return;
   }
   if(paused){ // pause overlay swallows ALL input; only the resume/restart/gohome targets (and the confirm modal over them) act, only for user pauses
@@ -6210,14 +6234,27 @@ cv.addEventListener('pointerdown',e=>{
         // OWNS all input — even RESUME_BTN is inert until it's resolved, so
         // a tap meant for "cancel"/"confirm" can never fall through onto
         // whatever was underneath.
-        if(inRect(p.x,p.y,CONFIRM_CANCEL_BTN))pauseConfirm=null;
-        else if(inRect(p.x,p.y,CONFIRM_ACTION_BTN)){
+        // E43: CANCEL/ACTION sit side by side, not stacked -- hitRectH()
+        // only pads HEIGHT, never width, so padding both independently
+        // cannot make them overlap each other horizontally.
+        if(inRect(p.x,p.y,hitRectH(CONFIRM_CANCEL_BTN)))pauseConfirm=null;
+        else if(inRect(p.x,p.y,hitRectH(CONFIRM_ACTION_BTN))){
           if(pauseConfirm==='restart'){ pauseConfirm=null; resumeGame(); reset(); }
           else if(pauseConfirm==='gohome')goHome();
         }
-      } else if(dist(p.x,p.y,RESUME_BTN.x,RESUME_BTN.y)<=RESUME_BTN.r)resumeGame();
-      else if(inRect(p.x,p.y,RESTART_BTN))pauseConfirm='restart'; // always confirms — see drawConfirmModal()'s Restart copy
-      else if(inRect(p.x,p.y,GOHOME_BTN)){
+        // E43: RESUME_BTN sits far below (112 virtual px), never checked
+        // in this branch anyway (pauseConfirm modal owns input here) -- no
+        // wrap needed on this path.
+      } else if(dist(p.x,p.y,RESUME_BTN.x,RESUME_BTN.y)<=hitR(RESUME_BTN))resumeGame(); // E43: RESUME_BTN sits 112 virtual px clear of RESTART_BTN below it -- plenty of room, no cap needed
+      // E43: RESTART_BTN and GOHOME_BTN are stacked only 56 virtual px
+      // apart -- hitRectH()'s own uncapped worst-case padding (up to ~122
+      // virtual px at the smallest supported viewport) would swallow taps
+      // meant for the other. RESTART_BTN is checked FIRST, so only ITS
+      // growth toward GOHOME_BTN risks stealing a tap -- capped via
+      // hitRectHCapped(); GOHOME_BTN (checked second, and nothing sits
+      // below it) can pad normally.
+      else if(inRect(p.x,p.y,hitRectHCapped(RESTART_BTN,56)))pauseConfirm='restart'; // always confirms — see drawConfirmModal()'s Restart copy
+      else if(inRect(p.x,p.y,hitRectH(GOHOME_BTN))){
         if(S.carried.length>0)pauseConfirm='gohome'; // mid-carry: confirm before discarding held fireflies
         else goHome(); // empty jar, nothing to lose — leave immediately
       }
@@ -6246,7 +6283,11 @@ cv.addEventListener('pointerdown',e=>{
   // pause/welcome-back above -- only its own Got It/Skip actions respond
   // (item 11: "only the tutorial interaction should be active").
   if(tutorialPanelOpen){
-    if(inRect(p.x,p.y,TUTORIAL_GOT_IT_BTN))tutorialAdvance();
+    // E43: TUTORIAL_GOT_IT_BTN and TUTORIAL_SKIP_BTN are stacked only 46
+    // virtual px apart -- GOT_IT is checked first, so only its own growth
+    // toward SKIP risks stealing a tap; capped the same way RESTART_BTN is
+    // above. SKIP_BTN's own existing hitRectH() wrap is untouched.
+    if(inRect(p.x,p.y,hitRectHCapped(TUTORIAL_GOT_IT_BTN,46)))tutorialAdvance();
     else if(inRect(p.x,p.y,hitRectH(TUTORIAL_SKIP_BTN)))completeTutorial();
     return;
   }
@@ -6256,7 +6297,15 @@ cv.addEventListener('pointerdown',e=>{
   // offer is shown instead of finalizing the night, so S.over is still
   // false while it's open.
   if(S.extraLifeOfferOpen){
-    if(inRect(p.x,p.y,EXTRA_LIFE_AD_BTN))requestExtraLife();
+    // E43: EXTRA_LIFE_AD_BTN was a raw inRect() (h:52 virtual px,
+    // undershoots 48dp at typical mobile scale) -- AD_BTN is checked
+    // first and sits only 60 virtual px above END_BTN, so its own padding
+    // is capped the same way RESTART_BTN/TUTORIAL_GOT_IT_BTN are above,
+    // rather than a plain hitRectH() that could grow into (and start
+    // intercepting taps meant for) End Night. This is an ad-adjacent
+    // reward control -- only its hit target changed, never
+    // ytgame.ads.requestRewardedAd()/the reward itself/eligibility.
+    if(inRect(p.x,p.y,hitRectHCapped(EXTRA_LIFE_AD_BTN,60)))requestExtraLife();
     // Deep-check finding: End Night must also be inert while the ad request
     // is in flight -- otherwise tapping it mid-request finalizes the night
     // (S.over=true) while requestExtraLife()'s roundS===S check is still
@@ -6269,7 +6318,11 @@ cv.addEventListener('pointerdown',e=>{
   // Phase 8: Lucky Firefly offer -- same input-swallowing priority as One
   // More Chance immediately above.
   if(S.luckyOfferOpen){
-    if(inRect(p.x,p.y,LUCKY_TAKE_BTN))takeLuckyReward();
+    // E43: same reasoning as EXTRA_LIFE_AD_BTN above -- TAKE_BTN is
+    // checked first and sits 60 virtual px above DOUBLE_BTN, capped so it
+    // can't grow into (and intercept) the ad button below it. Hit target
+    // only -- the guaranteed-vs-ad-doubled reward values are untouched.
+    if(inRect(p.x,p.y,hitRectHCapped(LUCKY_TAKE_BTN,60)))takeLuckyReward();
     else if(inRect(p.x,p.y,hitRectH(LUCKY_DOUBLE_BTN)))requestLuckyFireflyDouble();
     return;
   }
@@ -6303,7 +6356,12 @@ cv.addEventListener('pointerdown',e=>{
       const cx=CONTRACT_GRID_X[i%2], cy=CONTRACT_GRID_Y[i>>1];
       if(p.x>=cx&&p.x<=cx+CONTRACT_CARD_W&&p.y>=cy&&p.y<=cy+CONTRACT_CARD_H){ selectContract(i); return; }
     }
-    if(contractSel>=0&&inRect(p.x,p.y,CONTRACT_ACCEPT_HIT))acceptContract();
+    // E43: CONTRACT_ACCEPT_HIT was already deliberately widened once
+    // (w:220,h:62, "wider tap target... per direct spec") but 62 virtual
+    // px still undershoots 48dp at typical mobile scale -- same "48-
+    // looking isn't 48-real" gap as everywhere else in this pass. Isolated
+    // (nothing else sits below it on this screen), safe to pad uncapped.
+    if(contractSel>=0&&inRect(p.x,p.y,hitRectH(CONTRACT_ACCEPT_HIT)))acceptContract();
     return;
   }
   if(screen==='village'){
@@ -6319,13 +6377,17 @@ cv.addEventListener('pointerdown',e=>{
     // (not just the chapter list) -- the architecture already supports it
     // cleanly via journalReading, so no reason to settle for "just open
     // the Journal" per the spec's own fallback clause.
-    if(inRect(p.x,p.y,villageReadJournalRect())){ journalFrom='village'; journalTab='story'; journalReading=latestUnlockedChapterKey(); screen='journal'; return; }
+    // E43: both links are h:26 virtual px, well under 48dp, and sit only
+    // 40 virtual px apart (see villageThemesLinkRect()'s own comment) --
+    // the Journal link is checked first, capped so it can't grow into
+    // (and intercept) the Themes link right below it.
+    if(inRect(p.x,p.y,hitRectHCapped(villageReadJournalRect(),40))){ journalFrom='village'; journalTab='story'; journalReading=latestUnlockedChapterKey(); screen='journal'; return; }
     // Phase 7: a second quiet text link, same pattern/style as the Journal
     // link right above it -- Village Themes are about the village's
     // APPEARANCE, so this is the natural existing home for it (per direct
     // instruction to reuse an existing area rather than add new top-level
     // navigation).
-    if(inRect(p.x,p.y,villageThemesLinkRect())){ screen='themes'; return; }
+    if(inRect(p.x,p.y,hitRectH(villageThemesLinkRect()))){ screen='themes'; return; }
     return;
   }
   // IMPORTANT IMPLEMENTATION CHANGE pass: the Village Selection screen --
@@ -6344,7 +6406,12 @@ cv.addEventListener('pointerdown',e=>{
       // state there rather than being unreachable) -- checked BEFORE the
       // whole-row select tap, same "small link inside a larger tap target"
       // priority every other screen in this file already uses.
-      if(inRect(p.x,p.y,journeyViewDetailsRect(rect))){ villageDetailsFor=rect.key; villageDetailsScroll=0; villageDetailsFrom='journey'; screen='villageDetails'; return; }
+      // E43: was h:44 raw, undershoots 48dp at typical mobile scale. Safe
+      // to pad uncapped -- this check only ever runs nested inside the
+      // outer `if(!inRect(p.x,p.y,rect))continue;` above, so it can never
+      // be reached for a tap outside THIS row's own bounds in the first
+      // place, regardless of how large the padding grows.
+      if(inRect(p.x,p.y,hitRectH(journeyViewDetailsRect(rect)))){ villageDetailsFor=rect.key; villageDetailsScroll=0; villageDetailsFrom='journey'; screen='villageDetails'; return; }
       // enterVillage() itself already refuses a locked village and no-ops
       // -- this one call covers "select Lumora", "select Moonfall", and
       // "tap an already-locked Moonfall does nothing" without a single
@@ -6367,20 +6434,36 @@ cv.addEventListener('pointerdown',e=>{
     if(layout.legacyLink){
       const {viewTop}=villageDetailsViewport(villageDetailsFor);
       const linkScreenY=viewTop+(layout.legacyLink.y-layout.top-villageDetailsScroll);
-      if(p.y>=linkScreenY&&p.y<=linkScreenY+layout.legacyLink.h){ villageFrom='villageDetails'; screen='village'; return; }
+      // E43: was a raw manual Y-range check against legacyLink.h (36
+      // virtual px, undershoots 48dp) -- padded via hitRectH() same as
+      // every other short control in this pass, just applied to a plain
+      // Y-range here (this link spans the full screen width by design, no
+      // X-check). Nothing else in this scrollable list is itself a tap
+      // target, and VILLAGE_DETAILS_CLOSE_BTN sits far above -- safe
+      // uncapped.
+      const padded=hitRectH({x:0,y:linkScreenY+layout.legacyLink.h/2,w:W,h:layout.legacyLink.h});
+      if(p.y>=padded.y-padded.h/2&&p.y<=padded.y+padded.h/2){ villageFrom='villageDetails'; screen='village'; return; }
     }
     villageDetailsDragActive=true; villageDetailsDragStartY=p.y; villageDetailsDragStartScroll=villageDetailsScroll;
     return;
   }
   if(screen==='themes'){
     if(dist(p.x,p.y,THEMES_CLOSE_BTN.x,THEMES_CLOSE_BTN.y)<=hitR(THEMES_CLOSE_BTN)){ clearThemePreview(); screen='village'; return; }
+    // E43: themeRowRects() rows are spaced 88 virtual px apart (h:78 +
+    // gap:10); the whole-row check below isn't nested inside any bigger
+    // containing rect the way journeyViewDetailsRect() is, so both this
+    // row's own padding AND the "Try it" link's padding are capped against
+    // that 88px row spacing -- with only one real theme today there's no
+    // second row to actually collide with yet, but the row shape is
+    // documented to scale to more without changing anything here, so this
+    // stays correct once it does.
     for(const rect of themeRowRects()){
       // Phase 8: Theme Trial's own small "Try it" link, checked BEFORE the
       // whole-row equip tap below -- same priority pattern as every other
       // small-link-inside-a-larger-tap-target in this file (e.g. the
       // Aurora comparison link on the Jars tab).
-      if(!isThemeOwned(rect.key)&&rewardedAdsAvailable()&&inRect(p.x,p.y,hitRectH(themeTryItRect(rect)))){ requestCosmeticTrial('theme',rect.key); return; }
-      if(inRect(p.x,p.y,rect)){
+      if(!isThemeOwned(rect.key)&&rewardedAdsAvailable()&&inRect(p.x,p.y,hitRectHCapped(themeTryItRect(rect),88))){ requestCosmeticTrial('theme',rect.key); return; }
+      if(inRect(p.x,p.y,hitRectHCapped(rect,88))){
         if(isThemeOwned(rect.key))equipTheme(rect.key);
         return;
       }
@@ -6394,9 +6477,10 @@ cv.addEventListener('pointerdown',e=>{
     // elsewhere in this file. Checked first, before anything else in this
     // screen, so it genuinely can't leak a tap through to the tab row or
     // close button behind it.
+    // E43: CANCEL/ACTION sit side by side (same as the pause-screen pair) -- height-only padding can't make them collide.
     if(prestigeConfirmOpen){
-      if(inRect(p.x,p.y,CONFIRM_CANCEL_BTN))prestigeConfirmOpen=false; // Cancel -- nothing changes, per Test 4
-      else if(inRect(p.x,p.y,CONFIRM_ACTION_BTN)){ prestigeConfirmOpen=false; activatePrestige(); }
+      if(inRect(p.x,p.y,hitRectH(CONFIRM_CANCEL_BTN)))prestigeConfirmOpen=false; // Cancel -- nothing changes, per Test 4
+      else if(inRect(p.x,p.y,hitRectH(CONFIRM_ACTION_BTN))){ prestigeConfirmOpen=false; activatePrestige(); }
       return;
     }
     if(dist(p.x,p.y,JOURNAL_CLOSE_BTN.x,JOURNAL_CLOSE_BTN.y)<=hitR(JOURNAL_CLOSE_BTN)){
@@ -6404,19 +6488,25 @@ cv.addEventListener('pointerdown',e=>{
       screen=journalFrom; return;
     }
     if(journalReading)return; // reading view has no other tap targets
-    for(const t of journalTabRects()){ if(inRect(p.x,p.y,t)){ journalTab=t.key; return; } }
+    // E43: tabs sit side by side, not stacked -- hitRectH() only pads
+    // height, so padding can't make one tab intrude on its horizontal
+    // neighbor.
+    for(const t of journalTabRects()){ if(inRect(p.x,p.y,hitRectH(t))){ journalTab=t.key; return; } }
     if(journalTab==='fireflies'){
-      if(dist(p.x,p.y,TRACKER_TOGGLE.x,TRACKER_TOGGLE.y)<=TRACKER_TOGGLE.r){ toggleTracker(); return; }
+      if(dist(p.x,p.y,TRACKER_TOGGLE.x,TRACKER_TOGGLE.y)<=hitR(TRACKER_TOGGLE)){ toggleTracker(); return; } // E43: isolated toggle, no adjacent control to cap against
       return;
     }
     if(journalTab==='prestige'){
       // Eligibility is re-checked here too (not just visually) -- tapping a
       // locked/disabled-looking button is always inert, never opens the
       // confirmation modal, per "no accidental activation".
-      if(prestigeEligible()&&inRect(p.x,p.y,PRESTIGE_BTN))prestigeConfirmOpen=true;
+      if(prestigeEligible()&&inRect(p.x,p.y,hitRectH(PRESTIGE_BTN)))prestigeConfirmOpen=true; // E43: isolated button, nothing else nearby
       return;
     }
-    for(const rect of storyRowRects()){ if(inRect(p.x,p.y,rect)&&storyKeyUnlocked(rect.key)){ journalReading=rect.key; return; } }
+    // E43: story rows are stacked only 66 virtual px apart (h:58+gap:8) --
+    // capped so accidentally opening the wrong chapter is never possible
+    // even at the smallest supported viewport.
+    for(const rect of storyRowRects()){ if(inRect(p.x,p.y,hitRectHCapped(rect,66))&&storyKeyUnlocked(rect.key)){ journalReading=rect.key; return; } }
     return;
   }
   if(screen==='shop'){
@@ -6426,11 +6516,13 @@ cv.addEventListener('pointerdown',e=>{
     // (see pauseConfirm above). Checked first, before anything else in this
     // screen, so it genuinely can't leak a tap through to a card/tab behind it.
     if(jarCompareOpen){
-      if(dist(p.x,p.y,JAR_COMPARE_CLOSE_BTN.x,JAR_COMPARE_CLOSE_BTN.y)<=JAR_COMPARE_CLOSE_BTN.r)jarCompareOpen=false;
+      if(dist(p.x,p.y,JAR_COMPARE_CLOSE_BTN.x,JAR_COMPARE_CLOSE_BTN.y)<=hitR(JAR_COMPARE_CLOSE_BTN))jarCompareOpen=false; // E43: was raw r:16, isolated (only button in this modal)
       return;
     }
     if(dist(p.x,p.y,SHOP_CLOSE_BTN.x,SHOP_CLOSE_BTN.y)<=hitR(SHOP_CLOSE_BTN)){ screen=shopFrom; jarCompareOpen=false; return; }
-    for(const tab of shopTabRects()){ if(inRect(p.x,p.y,tab)){ shopTab=tab.key; return; } }
+    // E43: 7 tabs side by side, not stacked -- height-only padding can't
+    // make one tab intrude on its horizontal neighbor.
+    for(const tab of shopTabRects()){ if(inRect(p.x,p.y,hitRectH(tab))){ shopTab=tab.key; return; } }
     // Workshop "Glowkeeper's Favor" -- checked before any per-tab content
     // below, same priority as SHOP_CLOSE_BTN/the tab row above; the rect
     // itself is null (no hit-test possible) on tabs where the card doesn't
@@ -6464,7 +6556,9 @@ cv.addEventListener('pointerdown',e=>{
       // modal (no second entry point on Aurora's own grid card, no
       // persistent bar, no new tab) -- checked before the jar-card taps
       // below, though its rect sits well clear of the grid regardless.
-      if(!currentJar().aurora&&inRect(p.x,p.y,AURORA_COMPARE_LINK)){ jarCompareOpen=true; return; }
+      // E43: w:150,h:22 raw -- comment above already confirms it "sits
+      // well clear of the grid", so safe to pad uncapped.
+      if(!currentJar().aurora&&inRect(p.x,p.y,hitRectH(AURORA_COMPARE_LINK))){ jarCompareOpen=true; return; }
       // Lumora UI port: whole-card tap target, same as JarCard.tsx's own
       // single <button> wrapping the whole card -- no separate small buy/
       // equip button to hit-test
@@ -6475,21 +6569,25 @@ cv.addEventListener('pointerdown',e=>{
       // showing "Watch Ad" (almostAffordableEligible()), requests the ad
       // instead. Every upgrade-button hit-test below follows the same
       // pattern, never a duplicated buy-vs-ad decision.
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarCap',jarKey:currentJar().key},()=>tryUpgradeJarCap(currentJar().key)); // always the EQUIPPED jar's own progression, see drawJarCapacityCard()
+      // E43: cardButtonRect() is w:150,h:36 raw across every tab below --
+      // each card is its own upgradeCardRect() slot, spaced 230 virtual px
+      // apart (h:212+gap:18), so padding one card's own button can never
+      // reach a neighboring card's button; safe uncapped throughout.
+      if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(0)))))handleUpgradeButtonTap({kind:'jarCap',jarKey:currentJar().key},()=>tryUpgradeJarCap(currentJar().key)); // always the EQUIPPED jar's own progression, see drawJarCapacityCard()
     } else if(shopTab==='range'){
       // Phase 1 economy architecture: always the EQUIPPED jar's own
       // progression now, same principle as Capacity's tab
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarStat',statKey:'reach',jarKey:currentJar().key},()=>tryUpgradeJarStat('reach',currentJar().key));
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(1))))handleUpgradeButtonTap({kind:'jarStat',statKey:'magnetReach',jarKey:currentJar().key},()=>tryUpgradeJarStat('magnetReach',currentJar().key));
+      if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(0)))))handleUpgradeButtonTap({kind:'jarStat',statKey:'reach',jarKey:currentJar().key},()=>tryUpgradeJarStat('reach',currentJar().key));
+      if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(1)))))handleUpgradeButtonTap({kind:'jarStat',statKey:'magnetReach',jarKey:currentJar().key},()=>tryUpgradeJarStat('magnetReach',currentJar().key));
     } else if(shopTab==='light-value'){
       // Phase 1 economy pass: TWO distinct cards now, per direct
       // instruction -- card 0 is the EQUIPPED JAR's own Light Value
       // (per-jar earning efficiency), card 1 is the shared, global,
       // LOCKED-ceiling Coin Value line. Never call these the same thing.
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarStat',statKey:'lightValue',jarKey:currentJar().key},()=>tryUpgradeJarStat('lightValue',currentJar().key));
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(1))))handleUpgradeButtonTap({kind:'light'},()=>tryPurchaseTier('light'));
+      if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(0)))))handleUpgradeButtonTap({kind:'jarStat',statKey:'lightValue',jarKey:currentJar().key},()=>tryUpgradeJarStat('lightValue',currentJar().key));
+      if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(1)))))handleUpgradeButtonTap({kind:'light'},()=>tryPurchaseTier('light'));
     } else if(shopTab==='magnet'){
-      if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(0))))handleUpgradeButtonTap({kind:'jarStat',statKey:'duration',jarKey:currentJar().key},()=>tryUpgradeJarStat('duration',currentJar().key));
+      if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(0)))))handleUpgradeButtonTap({kind:'jarStat',statKey:'duration',jarKey:currentJar().key},()=>tryUpgradeJarStat('duration',currentJar().key));
     } else if(shopTab==='decor'){
       // Master Glowkeeper Statue: the one decor item with a real equip step.
       // wasStatueOwned is snapshotted BEFORE the generic buy loop runs --
@@ -6501,7 +6599,7 @@ cv.addEventListener('pointerdown',e=>{
       // separate, deliberate taps -- this keeps that true on the FIRST
       // purchase, not just on subsequent ones.
       const wasStatueOwned=upgrades.statueOwned;
-      itemsForVendor('decor').forEach((item,i)=>{ if(inRect(p.x,p.y,cardButtonRect(upgradeCardRect(i))))tryPurchase(item.key); });
+      itemsForVendor('decor').forEach((item,i)=>{ if(inRect(p.x,p.y,hitRectH(cardButtonRect(upgradeCardRect(i)))))tryPurchase(item.key); });
       // Same rects drawStatueCard() itself draws from, single source of
       // truth as usual -- the "Equip" button uses the standard
       // cardButtonRect() (index 2 = the statue's own itemsForVendor('decor')
@@ -6509,7 +6607,9 @@ cv.addEventListener('pointerdown',e=>{
       // statueEquippedRect() its own label needs (see that function's
       // comment). Only fires on a tap where the statue was ALREADY owned
       // before this tap happened (see wasStatueOwned above).
-      const statueActionRect=upgrades.statueEquipped?statueEquippedRect(upgradeCardRect(2)):cardButtonRect(upgradeCardRect(2));
+      // E43: both are w:150/230,h:36 raw -- same 230-virtual-px card
+      // spacing as every other decor item, safe uncapped.
+      const statueActionRect=hitRectH(upgrades.statueEquipped?statueEquippedRect(upgradeCardRect(2)):cardButtonRect(upgradeCardRect(2)));
       if(wasStatueOwned&&inRect(p.x,p.y,statueActionRect))tryEquipStatue();
     } else { // trails
       // whole-card tap target, same discipline as jarCardRects() above --
@@ -6525,8 +6625,11 @@ cv.addEventListener('pointerdown',e=>{
       beginPlay();
       return;
     }
+    // E43: 3 nav buttons side by side (Shop/Village/Journal), not stacked
+    // -- height-only padding can't make one intrude on a horizontal
+    // neighbor. Was raw h:64, still undershoots 48dp at small mobile scale.
     for(const btn of titleNavRects()){
-      if(inRect(p.x,p.y,btn)){
+      if(inRect(p.x,p.y,hitRectH(btn))){
         if(btn.key==='shop'){ shopFrom='title'; screen='shop'; jarCompareOpen=false; }
         // Glowkeeper Story pass: from title, the Journal always opens
         // fresh at the chapter list (not mid-chapter from a previous
@@ -6564,17 +6667,26 @@ cv.addEventListener('pointerdown',e=>{
       // goHome() itself already discards nothing permanent -- same
       // abandon-without-reset() semantics the pause screen's own
       // GOHOME_BTN uses.
-      if(inRect(p.x,p.y,HOME_BTN_OVER)){ goHome(); return; }
+      // E43: HOME_BTN_OVER sits 56 virtual px BELOW SHOP_BTN_OVER but is
+      // checked FIRST -- capped so its own padding can't grow upward past
+      // SHOP_BTN_OVER's territory and intercept a tap meant for it.
+      if(inRect(p.x,p.y,hitRectHCapped(HOME_BTN_OVER,56))){ goHome(); return; }
       // shop button is a specific carve-out; every other click on this screen
       // still replays immediately, exactly as before this session — Part B
       // must not make an existing screen's input any less forgiving
-      if(inRect(p.x,p.y,SHOP_BTN_OVER)){ shopFrom='play'; screen='shop'; jarCompareOpen=false; return; }
+      // E43: checked second, nothing closer than the already-capped
+      // HOME_BTN_OVER above it -- safe to pad uncapped.
+      if(inRect(p.x,p.y,hitRectH(SHOP_BTN_OVER))){ shopFrom='play'; screen='shop'; jarCompareOpen=false; return; }
       // "Double the Glow" -- same carve-out pattern as SHOP_BTN_OVER above --
       // only drawn/tappable once the tutorial is done, the SDK actually
       // offers rewarded ads (see drawOver()), and this night earned
       // something worth doubling, but the hit-test itself stays defensive
       // about all three regardless.
-      if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardedDoubleCoinsClaimed&&S.coinsEarnedThisNight>0&&inRect(p.x,p.y,DOUBLE_COINS_BTN)){ requestDoubleNightCoins(); return; }
+      // E43: DOUBLE_COINS_BTN sits well clear of both buttons above it
+      // (its own y is clamped to at least HOME_BTN_OVER.y+66, or floored
+      // at 910) -- safe to pad uncapped. Ad-adjacent reward control -- only
+      // its hit target changed, never the reward/eligibility itself.
+      if(upgrades.tutorialDone&&rewardedAdsAvailable()&&!S.rewardedDoubleCoinsClaimed&&S.coinsEarnedThisNight>0&&inRect(p.x,p.y,hitRectH(DOUBLE_COINS_BTN))){ requestDoubleNightCoins(); return; }
       continueFromOver(); pointer.down=false;
     }
     return;
@@ -6586,7 +6698,12 @@ cv.addEventListener('pointerdown',e=>{
   // HUD can never also begin dragging. Not tappable once all objectives
   // are complete -- the settled chip (or its one-time celebrate sequence)
   // is display-only, per spec's own "chip is not tappable."
-  if(S.objectiveActive.length&&!S.hudAllComplete&&inRect(p.x,p.y,{x:98,y:99,w:168,h:48})){
+  // E43: the "comfortable 48" here was always a virtual-px count (matching
+  // this file's own established convention), never a guaranteed real-px
+  // one -- wrapped in hitRectH() like everywhere else in this pass.
+  // Nowhere near PAUSE_BTN (over 300 virtual px away horizontally), safe
+  // uncapped.
+  if(S.objectiveActive.length&&!S.hudAllComplete&&inRect(p.x,p.y,hitRectH({x:98,y:99,w:168,h:48}))){
     S.hudCollapsed=!S.hudCollapsed;
     if(!S.hudCollapsed)S.hudSticky=true; // manual expand is sticky -- no auto-collapse for the rest of the night
     return;
@@ -13235,12 +13352,20 @@ function villageReadJournalRect(){
   const q=currentQuest(), reqH=q?(q.done?100:210):88;
   return {x:W/2,y:reqY+reqH+28,w:220,h:26};
 }
-// Phase 7: a second quiet text link, 30px below the Journal one -- same
+// Phase 7: a second quiet text link, below the Journal one -- same
 // "single source of truth shared by draw and hit-test" discipline as
 // villageReadJournalRect() right above it.
+// E43 (Touch-Target Compliance Pass): the vertical offset was 30 -- both
+// links are only h:26 virtual px tall (well under 48dp at typical mobile
+// scale) and a 30px gap leaves no room to pad either one's hit-test
+// without the two overlapping. Nudged to 40 (a barely-visible 10px shift,
+// last-resort per direct instruction -- "only enlarge visible UI if the
+// existing layout makes an invisible hitbox unsafe") specifically to open
+// enough clearance for hitRectHCapped() below to give both a real,
+// non-overlapping improvement instead of a no-op.
 function villageThemesLinkRect(){
   const rj=villageReadJournalRect();
-  return {x:rj.x,y:rj.y+30,w:220,h:26};
+  return {x:rj.x,y:rj.y+40,w:220,h:26};
 }
 function drawVillageScreen(){
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
@@ -13698,13 +13823,32 @@ function drawVillageDetailsScreen(){
 // design. With exactly one real theme, this list is honestly short; the
 // row shape already scales to more without changing anything here once
 // real themes exist.
+// E43 (Touch-Target Compliance Pass): x used to be a literal left edge
+// (20), while EVERY other row-rect function in this file (journeyRowRects,
+// storyRowRects, journalTabRects, etc.) returns a CENTRE x/y -- the one
+// convention inRect() itself actually implements
+// (px>=r.x-r.w/2&&px<=r.x+r.w/2...). That mismatch was a real, live bug:
+// the row's own whole-row equip tap (screen==='themes' in the pointerdown
+// handler) computed its hit region as roughly the LEFT HALF of the canvas
+// (x from -230 to 270) while the panel was actually drawn spanning the
+// full row (20 to 520) -- tapping the right half of a visually-correct-
+// looking row silently did nothing. Found only by the exhaustive
+// measure-the-real-hitbox audit this pass calls for, not a size issue by
+// itself. Fixed by switching to the same centre convention as everywhere
+// else; drawThemesScreen() below now converts back to a left/top corner
+// for its own drawing the exact same way drawJourneyScreen() already does
+// for journeyRowRects() -- the rendered row is byte-for-byte identical,
+// only the hit-test region moved to actually match it.
 function themeRowRects(){
   const top=230, h=78, gap=10;
-  return VILLAGE_THEMES.map((t,i)=>({key:t.id,x:20,y:top+i*(h+gap),w:W-40,h}));
+  return VILLAGE_THEMES.map((t,i)=>({key:t.id,x:W/2,y:top+h/2+i*(h+gap),w:W-40,h}));
 }
 // Phase 8: Theme Trial's own small "Try it" link, bottom-right of a locked
 // theme's row -- below the LOCKED/TAP TO EQUIP status line above it.
-function themeTryItRect(rect){ return {x:rect.x+rect.w-56,y:rect.y+50,w:90,h:20}; }
+// E43: rect is now centre-based (see themeRowRects() above) -- derives the
+// same absolute on-screen position as before via the row's own left/top
+// corner (rect.x-rect.w/2, rect.y-rect.h/2), not rect.x/rect.y directly.
+function themeTryItRect(rect){ const left=rect.x-rect.w/2, top=rect.y-rect.h/2; return {x:left+rect.w-56,y:top+50,w:90,h:20}; }
 function drawThemesScreen(){
   const cx=W/2, cy=H/2, rad=Math.hypot(W,H)/2;
   const scrim=ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
@@ -13729,28 +13873,36 @@ function drawThemesScreen(){
     // what is actually saved, never a transient preview state.
     const owned=isThemeOwned(t.id), equipped=equippedTheme===t.id;
     const trialActive=cosmeticTrialActive('theme')&&cosmeticTrial.id===t.id;
-    lumPanel(rect.x,rect.y,rect.w,rect.h,16);
-    const moteX=rect.x+40, moteY=rect.y+rect.h/2;
+    // E43: rect.x/rect.y are now centre-based (see themeRowRects()'s own
+    // comment) -- converted to a left/top corner here, the exact same
+    // "lumPanel()/roundRect() both want a top-left corner" pattern
+    // drawJourneyScreen() already uses for journeyRowRects(). Every
+    // position below is now left/top-relative, reproducing the identical
+    // rendered row this always drew -- only the hit-test convention (in
+    // the pointerdown handler) actually changed.
+    const left=rect.x-rect.w/2, top=rect.y-rect.h/2;
+    lumPanel(left,top,rect.w,rect.h,16);
+    const moteX=left+40, moteY=top+rect.h/2;
     ctx.save();
     ctx.shadowColor=(owned||trialActive)?LUM_GOLD:'transparent'; ctx.shadowBlur=(owned||trialActive)?18:0;
     ctx.fillStyle=(owned||trialActive)?LUM_GOLD:'rgba(90,98,136,0.5)';
     ctx.beginPath(); ctx.arc(moteX,moteY,13,0,6.28); ctx.fill();
     ctx.restore();
-    const tx=rect.x+76;
+    const tx=left+76;
     ctx.textAlign='left'; ctx.textBaseline='alphabetic';
     ctx.fillStyle=LUM_CREAM; ctx.font='500 16px Georgia,serif';
-    ctx.fillText(t.name,tx,rect.y+28);
+    ctx.fillText(t.name,tx,top+28);
     ctx.fillStyle='rgba(174,184,203,0.8)'; ctx.font='italic 12px Georgia,serif'; ctx.textBaseline='top';
-    ctx.fillText(t.desc,tx,rect.y+38);
+    ctx.fillText(t.desc,tx,top+38);
     ctx.fillStyle=equipped?LUM_GOLD:'rgba(174,184,203,0.7)'; ctx.font='600 10px Georgia,serif'; ctx.textAlign='right'; ctx.textBaseline='alphabetic';
-    ctx.fillText(equipped?'EQUIPPED':(owned?'TAP TO EQUIP':'LOCKED'),rect.x+rect.w-16,rect.y+28);
+    ctx.fillText(equipped?'EQUIPPED':(owned?'TAP TO EQUIP':'LOCKED'),left+rect.w-16,top+28);
     // Phase 8: Theme Trial -- a small secondary link for a locked,
     // trial-eligible theme, same "quiet secondary action" language as
     // every other ads-adjacent control in this file. Never shown for an
     // already-owned theme -- per direct instruction, it's never offered.
     if(!owned&&rewardedAdsAvailable()){
       ctx.fillStyle=trialActive?'rgba(212,235,200,0.85)':'rgba(199,175,245,0.85)'; ctx.font='italic 10.5px Georgia,serif'; ctx.textAlign='right'; ctx.textBaseline='alphabetic';
-      ctx.fillText(trialActive?('Trying it · '+Math.ceil(cosmeticTrialT)+'s'):'Try it →',rect.x+rect.w-16,rect.y+50);
+      ctx.fillText(trialActive?('Trying it · '+Math.ceil(cosmeticTrialT)+'s'):'Try it →',left+rect.w-16,top+50);
     }
   });
   ctx.textAlign='center'; ctx.textBaseline='top';

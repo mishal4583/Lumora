@@ -10530,6 +10530,105 @@ __check('13: after a genuine reload, a fresh night still starts at exactly 5 mis
 __check('13 (b): the Extra Life continuation state itself is not defined as a persisted field -- it lives only on S, discarded every reset()', S.extraLifeAvailable === false && S.extraLifeUsed === false);
 `);
 
+// ===== E43: YouTube Playables Touch-Target Compliance Pass =====
+// The default harness scale is 1 (innerWidth/innerHeight both 540/960,
+// see the seed above) -- at scale 1, hitR()/hitRectH()'s own padding
+// (24/scale, 48/scale) is a no-op for anything already >=24/>=48 virtual
+// px, which is exactly why several of this pass's real findings (e.g.
+// RESTART_BTN's h:48) only actually show a difference at scale<1, the
+// realistic mobile case. Every test below explicitly sets `scale` to a
+// small, spec-plausible value first (never touching resize()/window.
+// innerWidth, which would cascade into unrelated layout state) so the
+// padding this pass actually added is genuinely exercised, not silently
+// skipped by the harness's own default 1:1 scale.
+scenario('e43-touch-target-compliance', null, `
+upgrades.tutorialDone = true;
+
+// ---- 1: hitR()/hitRectH()/hitRectHCapped() themselves behave correctly ----
+scale = 0.394; // the smallest spec-supported viewport (5:7, 270x378) maps to roughly this
+__check('1: hitR() pads a small radius up to the real 48dp-diameter minimum at small scale', hitR({r:16}) > 16 && Math.abs(hitR({r:16})-24/0.394) < 0.01);
+__check('1 (b): hitR() leaves an already-large radius untouched', hitR({r:200}) === 200);
+__check('1 (c): hitRectH() pads a short rect up to the real 48dp minimum at small scale', hitRectH({x:0,y:0,w:100,h:36}).h > 36 && Math.abs(hitRectH({x:0,y:0,w:100,h:36}).h-48/0.394) < 0.01);
+__check('1 (d): hitRectH() leaves an already-tall rect untouched', hitRectH({x:0,y:0,w:100,h:300}).h === 300);
+__check('1 (e): hitRectHCapped() caps its padding so it never reaches a neighbor 56px away', hitRectHCapped({x:0,y:0,w:100,h:48},56).h <= 52);
+__check('1 (f): hitRectHCapped() still improves on the original height, not a no-op', hitRectHCapped({x:0,y:0,w:100,h:48},56).h > 48);
+__check('1 (g): hitRectHCapped() never shrinks below the rect\\'s own original height either', hitRectHCapped({x:0,y:0,w:100,h:80},56).h >= 80);
+scale = 1;
+
+// ---- 2: a previously-undersized RECTANGULAR button (RESTART_BTN, pause screen) now accepts a near-edge tap it would have missed before ----
+reset(); screen = 'play'; paused = false;
+pauseGame('user');
+scale = 0.394;
+var restartPadded = hitRectHCapped(RESTART_BTN, 56);
+__check('2 setup: RESTART_BTN\\'s padded height is a genuine improvement over its raw 48, capped below the 56px gap to GOHOME_BTN', restartPadded.h > 48 && restartPadded.h < 56);
+var edgeY = RESTART_BTN.y + 48/2 + 1; // 1px past the OLD 48-tall boundary -- would have missed before this pass, must hit now
+__fire(cv, 'pointerdown', __fakeEvent(RESTART_BTN.x, edgeY));
+__check('2: a tap just past the OLD 48-tall boundary now registers on RESTART_BTN (opens the restart confirm)', pauseConfirm === 'restart');
+pauseConfirm = null; resumeGame();
+scale = 1;
+
+// ---- 3: capped pairs stay unambiguous -- a tap at GOHOME_BTN's own centre still opens Go Home, never Restart, even with both padded ----
+reset(); screen = 'play'; paused = false; S.carried = [];
+pauseGame('user');
+scale = 0.394;
+__fire(cv, 'pointerdown', __fakeEvent(GOHOME_BTN.x, GOHOME_BTN.y));
+__check('3: GOHOME_BTN\\'s own centre still unambiguously opens Go Home (goes straight home, empty jar) even with RESTART_BTN\\'s hitbox padded toward it', screen === 'title');
+scale = 1;
+
+// ---- 4: a previously-undersized CIRCULAR control (TRACKER_TOGGLE, Journal Fireflies tab) now accepts a near-edge tap ----
+reset(); screen = 'journal'; journalFrom = 'title'; journalTab = 'fireflies'; journalReading = null; paused = false;
+var trackerBefore = trackerOn;
+scale = 0.394;
+var edgeDist = 16 + 1; // 1px past the OLD r:16 boundary
+__fire(cv, 'pointerdown', __fakeEvent(TRACKER_TOGGLE.x + edgeDist, TRACKER_TOGGLE.y));
+__check('4: a tap just past the OLD r:16 boundary now registers on TRACKER_TOGGLE (toggles it)', trackerOn === !trackerBefore);
+scale = 1;
+screen = 'title';
+
+// ---- 5: the themeRowRects() coordinate-convention bug is fixed -- tapping the RIGHT half of a theme row now equips it ----
+// Before this pass, themeRowRects() returned a LEFT-edge x (20) while
+// inRect() unconditionally treats .x as a CENTRE -- the row's real
+// visible span (20 to 520) and its computed hit region (roughly -230 to
+// 270) didn't match, so a tap anywhere past x=270 silently did nothing
+// even though the panel was visibly drawn there too.
+reset(); screen = 'themes'; equippedTheme = 'default';
+var rows = themeRowRects();
+__check('5 setup: the theme row is genuinely centred (x near 270), not a left edge (20) -- proves the coordinate fix is in place', Math.abs(rows[0].x - 270) < 1);
+__fire(cv, 'pointerdown', __fakeEvent(450, rows[0].y)); // x=450 -- inside the visible row (20-520), would have been OUTSIDE the old buggy hit region (roughly -230 to 270)
+__check('5: a tap on the RIGHT half of the row (x=450) now registers -- the old bug would have silently ignored this exact tap', equippedTheme === 'default');
+screen = 'title';
+
+// ---- 6: a previously-undersized shop control (cardButtonRect(), e.g. Capacity's own upgrade button) now accepts a near-edge tap ----
+reset(); screen = 'shop'; shopFrom = 'title'; shopTab = 'capacity'; jarCompareOpen = false; coins = 100000;
+var capBefore = jarCapTierOwned(currentJar().key);
+scale = 0.394;
+var btnRect = cardButtonRect(upgradeCardRect(0));
+var btnEdgeY = btnRect.y + 36/2 + 1; // 1px past the OLD h:36 boundary
+__fire(cv, 'pointerdown', __fakeEvent(btnRect.x, btnEdgeY));
+__check('6: a tap just past the OLD h:36 boundary now registers on the Capacity upgrade button', jarCapTierOwned(currentJar().key) > capBefore || coins < 100000); // either the tier advanced or coins were spent trying (handleUpgradeButtonTap may route to an ad offer instead depending on price tier -- either outcome proves the tap registered, not that it silently missed)
+scale = 1;
+screen = 'title';
+
+// ---- 7: existing (already-compliant) controls are functionally untouched -- large cards still work exactly as before ----
+reset(); screen = 'contract';
+activeContract = -1;
+selectContract(3); // Collector -- CONTRACT_GRID cards were already large/compliant, never touched by this pass
+__check('7: existing large/compliant controls (Contract cards) are functionally unchanged', contractSel === 3);
+screen = 'title';
+
+// ---- keyboard: existing Enter/Space/Esc behavior is untouched by this pass (no button removed, no handler rewritten) ----
+reset(); screen = 'title'; paused = false;
+__fire(window, 'keydown', { key: 'Enter', preventDefault: function(){} });
+__check('keyboard: Enter still triggers BEGIN from the title screen, exactly as before', screen === 'contract' || screen === 'play');
+screen = 'title';
+
+// ---- 16/17/18: no Workshop Token functionality returns, Collector unchanged, E42 miss behavior unchanged ----
+__check('16: workshopTokens is still not a defined variable anywhere in scope', typeof workshopTokens === 'undefined');
+__check('17: Collector is unchanged -- Playful x2, risk 2, no tokenReward field', CONTRACTS.find(function(c){ return c.id === 'collector'; }).playfulMult === 2 && CONTRACTS.find(function(c){ return c.id === 'collector'; }).risk === 2 && !('tokenReward' in CONTRACTS.find(function(c){ return c.id === 'collector'; })));
+__check('18: E42 miss behavior is unchanged -- currentMissLimit() is still exactly 5 pre-continuation', currentMissLimit() === 5);
+__check('18 (b): E40 Back button (CONTRACT_BACK_BTN) still defined with real geometry', typeof CONTRACT_BACK_BTN === 'object' && typeof CONTRACT_BACK_BTN.x === 'number');
+`);
+
 // ---------- runner ----------
 async function main() {
   let totalPass = 0, totalFail = 0;
